@@ -69,13 +69,13 @@ export const createTriforceBuffer = (
 } => {
   const positions = new Float32Array([
     // Top triangle
-    0.0, 1.0, 0.0, -0.5, 0.0, 0.0, 0.5, 0.0, 0.0,
+    0.0, 0.5, 0.0, -0.25, 0.0, 0.0, 0.25, 0.0, 0.0,
 
     // Bottom-left triangle
-    -0.5, 0.0, 0.0, -1.0, -1.0, 0.0, 0.0, -1.0, 0.0,
+    -0.25, 0.0, 0.0, -0.5, -0.5, 0.0, 0.0, -0.5, 0.0,
 
     // Bottom-right triangle
-    0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, -1.0, 0.0,
+    0.25, 0.0, 0.0, 0.0, -0.5, 0.0, 0.5, -0.5, 0.0,
   ]);
 
   const positionBufferDesc: GPUBufferDescriptor = {
