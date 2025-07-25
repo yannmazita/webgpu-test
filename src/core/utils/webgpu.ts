@@ -54,6 +54,38 @@ export const createShaderModule = (
   return device.createShaderModule({ code });
 };
 
+export const createBuffer = (
+  device: GPUDevice,
+): { buffer: GPUBuffer; layout: GPUVertexBufferLayout } => {
+  const positions = new Float32Array([
+    1.0, -1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 1.0, 0.0,
+  ]);
+
+  const positionBufferDesc: GPUBufferDescriptor = {
+    size: positions.byteLength,
+    usage: GPUBufferUsage.VERTEX,
+    mappedAtCreation: true,
+  };
+
+  const positionBuffer = device.createBuffer(positionBufferDesc);
+  new Float32Array(positionBuffer.getMappedRange()).set(positions);
+  positionBuffer.unmap();
+
+  const layout: GPUVertexBufferLayout = {
+    arrayStride: 4 * 3,
+    stepMode: "vertex",
+    attributes: [
+      {
+        shaderLocation: 0,
+        offset: 0,
+        format: "float32x3",
+      },
+    ],
+  };
+
+  return { buffer: positionBuffer, layout };
+};
+
 /**
  * Creates a basic render pipeline with a given shader module.
  *
@@ -64,12 +96,14 @@ export const createShaderModule = (
 export const createRenderPipeline = (
   device: GPUDevice,
   shaderModule: GPUShaderModule,
+  vertexBufferLayout: GPUVertexBufferLayout,
 ): GPURenderPipeline => {
   return device.createRenderPipeline({
     layout: "auto",
     vertex: {
       module: shaderModule,
       entryPoint: "vs_main",
+      buffers: [vertexBufferLayout],
     },
     fragment: {
       module: shaderModule,
@@ -92,16 +126,17 @@ export const createRenderPipeline = (
  * @param pipeline - The render pipeline used for drawing.
  * @param canvas - The HTML canvas element where rendering occurs.
  */
-export const drawTriangle = (
+export const renderFrame = (
   device: GPUDevice,
   ctx: GPUCanvasContext,
   pipeline: GPURenderPipeline,
   canvas: HTMLCanvasElement,
+  setupPass?: (encoder: GPURenderPassEncoder) => void,
 ): void => {
   const textureView = ctx.getCurrentTexture().createView();
   const commandEncoder = device.createCommandEncoder();
 
-  const renderPassDescription: GPURenderPassDescriptor = {
+  const passEncoder = commandEncoder.beginRenderPass({
     colorAttachments: [
       {
         view: textureView,
@@ -110,12 +145,12 @@ export const drawTriangle = (
         storeOp: "store",
       },
     ],
-  };
+  });
 
-  const passEncoder = commandEncoder.beginRenderPass(renderPassDescription);
-
-  passEncoder.setPipeline(pipeline);
   passEncoder.setViewport(0, 0, canvas.width, canvas.height, 0, 1);
+  passEncoder.setPipeline(pipeline);
+
+  setupPass?.(passEncoder); // Callback to bind buffers or uniforms
   passEncoder.draw(3, 1, 0, 0);
   passEncoder.end();
 

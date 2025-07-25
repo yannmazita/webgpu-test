@@ -1,15 +1,14 @@
+// src/main.ts
 import {
   checkWebGPU,
   configureContext,
   createShaderModule,
   createRenderPipeline,
-  drawTriangle,
+  renderFrame,
+  createBuffer,
 } from "@/core/utils/webgpu.ts";
 import shaderCode from "@/core/shaders/shaders.wgsl";
-
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-  <canvas id="canvas" width="640" height="480"></canvas>
-`;
+import "@/style.css";
 
 const adapter = await checkWebGPU();
 if (!adapter) throw new Error("No GPU adapter found.");
@@ -22,6 +21,9 @@ if (ctx && canvas) {
   configureContext(ctx, device);
 
   const shaderModule = createShaderModule(device, shaderCode);
-  const pipeline = createRenderPipeline(device, shaderModule);
-  drawTriangle(device, ctx, pipeline, canvas);
+  const { buffer, layout } = createBuffer(device);
+  const pipeline = createRenderPipeline(device, shaderModule, layout);
+  renderFrame(device, ctx, pipeline, canvas, (passEncoder) => {
+    passEncoder.setVertexBuffer(0, buffer);
+  });
 }
