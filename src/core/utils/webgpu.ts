@@ -112,7 +112,7 @@ export const createRenderPipeline = (
     },
     primitive: {
       topology: "triangle-list",
-      frontFace: "ccw",
+      frontFace: "cw",
       cullMode: "back",
     },
   });
