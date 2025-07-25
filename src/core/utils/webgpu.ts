@@ -78,6 +78,8 @@ export const createTriangleBuffer = (
   positionBuffer.unmap();
 
   const layout: GPUVertexBufferLayout = {
+    // arrayStride: sizeof(float) * 3 - size of the advancing step for the buffer pointer of each vertex
+    // Vertex 0 starts at offset zero in the buffer, vertex 1 startes at the 3*4=12 th byte.
     arrayStride: 4 * 3,
     stepMode: "vertex",
     attributes: [
