@@ -5,7 +5,7 @@ import {
   createShaderModule,
   createRenderPipeline,
   renderFrame,
-  createBuffer,
+  createTriangleBuffer,
 } from "@/core/utils/webgpu.ts";
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import "@/style.css";
@@ -21,8 +21,9 @@ if (ctx && canvas) {
   configureContext(ctx, device);
 
   const shaderModule = createShaderModule(device, shaderCode);
-  const { buffer, layout } = createBuffer(device);
+  const { buffer, layout } = createTriangleBuffer(device);
   const pipeline = createRenderPipeline(device, shaderModule, layout);
+
   renderFrame(device, ctx, pipeline, canvas, (passEncoder) => {
     passEncoder.setVertexBuffer(0, buffer);
   });

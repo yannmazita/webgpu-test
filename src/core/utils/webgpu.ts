@@ -21,7 +21,7 @@ export const checkWebGPU = async (): Promise<GPUAdapter | null> => {
 };
 
 /**
- * Configures the WebGPU canvas context for rendering.
+ * Configures a WebGPU canvas context with a basic rendering setup.
  *
  * @param ctx - The GPU canvas context to configure.
  * @param device - The GPU device used for rendering.
@@ -54,7 +54,13 @@ export const createShaderModule = (
   return device.createShaderModule({ code });
 };
 
-export const createBuffer = (
+/**
+ * Creates a vertex buffer for a static triangle and its associated layout.
+ *
+ * @param device - The GPU device used to allocate the buffer.
+ * @returns An object containing the `GPUBuffer` and `GPUVertexBufferLayout`.
+ */
+export const createTriangleBuffer = (
   device: GPUDevice,
 ): { buffer: GPUBuffer; layout: GPUVertexBufferLayout } => {
   const positions = new Float32Array([
@@ -87,11 +93,12 @@ export const createBuffer = (
 };
 
 /**
- * Creates a basic render pipeline with a given shader module.
+ * Creates a basic render pipeline for drawing triangles using a given shader.
  *
  * @param device - The GPU device used to create the pipeline.
- * @param shaderModule - The compiled shader module containing vertex and fragment entry points.
- * @returns A GPURenderPipeline configured for drawing triangles.
+ * @param shaderModule - A compiled GPUShaderModule with vertex and fragment entry points.
+ * @param vertexBufferLayout - The layout of the vertex buffer.
+ * @returns A configured GPURenderPipeline ready for rendering.
  */
 export const createRenderPipeline = (
   device: GPUDevice,
@@ -119,12 +126,13 @@ export const createRenderPipeline = (
 };
 
 /**
- * Draws a green triangle to the given canvas using the specified render pipeline.
+ * Renders a frame using the given render pipeline and canvas context.
  *
- * @param device - The GPU device used for drawing commands.
- * @param ctx - The GPU canvas context to render to.
- * @param pipeline - The render pipeline used for drawing.
- * @param canvas - The HTML canvas element where rendering occurs.
+ * @param device - The GPU device used to encode rendering commands.
+ * @param ctx - The GPUCanvasContext to render to.
+ * @param pipeline - The GPURenderPipeline used for rendering.
+ * @param canvas - The target HTML canvas element.
+ * @param setupPass - Optional callback to bind additional resources (buffers, uniforms...) to the render pass encoder.
  */
 export const renderFrame = (
   device: GPUDevice,
@@ -150,7 +158,7 @@ export const renderFrame = (
   passEncoder.setViewport(0, 0, canvas.width, canvas.height, 0, 1);
   passEncoder.setPipeline(pipeline);
 
-  setupPass?.(passEncoder); // Callback to bind buffers or uniforms
+  setupPass?.(passEncoder); // Allow external setup logic to bind resources
   passEncoder.draw(3, 1, 0, 0);
   passEncoder.end();
 
