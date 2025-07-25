@@ -5,7 +5,7 @@ import {
   createShaderModule,
   createRenderPipeline,
   renderFrame,
-  createTriangleBuffer,
+  createTriforceBuffer,
 } from "@/core/utils/webgpu.ts";
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import "@/style.css";
@@ -21,10 +21,10 @@ if (ctx && canvas) {
   configureContext(ctx, device);
 
   const shaderModule = createShaderModule(device, shaderCode);
-  const { buffer, layout } = createTriangleBuffer(device);
+  const { buffer, layout, vertexCount } = createTriforceBuffer(device);
   const pipeline = createRenderPipeline(device, shaderModule, layout);
 
-  renderFrame(device, ctx, pipeline, canvas, (passEncoder) => {
+  renderFrame(device, ctx, pipeline, canvas, vertexCount, (passEncoder) => {
     passEncoder.setVertexBuffer(0, buffer);
   });
 }

@@ -55,16 +55,27 @@ export const createShaderModule = (
 };
 
 /**
- * Creates a vertex buffer for a static triangle and its associated layout.
+ * Creates a vertex buffer for a triforce and its associated layout.
  *
  * @param device - The GPU device used to allocate the buffer.
- * @returns An object containing the `GPUBuffer` and `GPUVertexBufferLayout`.
+ * @returns An object containing the GPUBuffer, GPUVertexBufferLayout, and vertex count.
  */
-export const createTriangleBuffer = (
+export const createTriforceBuffer = (
   device: GPUDevice,
-): { buffer: GPUBuffer; layout: GPUVertexBufferLayout } => {
+): {
+  buffer: GPUBuffer;
+  layout: GPUVertexBufferLayout;
+  vertexCount: number;
+} => {
   const positions = new Float32Array([
-    1.0, -1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 1.0, 0.0,
+    // Top triangle
+    0.0, 1.0, 0.0, -0.5, 0.0, 0.0, 0.5, 0.0, 0.0,
+
+    // Bottom-left triangle
+    -0.5, 0.0, 0.0, -1.0, -1.0, 0.0, 0.0, -1.0, 0.0,
+
+    // Bottom-right triangle
+    0.5, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, -1.0, 0.0,
   ]);
 
   const positionBufferDesc: GPUBufferDescriptor = {
@@ -78,7 +89,8 @@ export const createTriangleBuffer = (
   positionBuffer.unmap();
 
   const layout: GPUVertexBufferLayout = {
-    // arrayStride: sizeof(float) * 3 - size of the advancing step for the buffer pointer of each vertex
+    // arrayStride: sizeof(float) * 3 -> 12 bytes, size of the advancing step
+    // for the buffer pointer of each vertex.
     // Vertex 0 starts at offset zero in the buffer, vertex 1 startes at the 3*4=12 th byte.
     arrayStride: 4 * 3,
     stepMode: "vertex",
@@ -91,7 +103,7 @@ export const createTriangleBuffer = (
     ],
   };
 
-  return { buffer: positionBuffer, layout };
+  return { buffer: positionBuffer, layout, vertexCount: 9 };
 };
 
 /**
@@ -121,7 +133,7 @@ export const createRenderPipeline = (
     },
     primitive: {
       topology: "triangle-list",
-      frontFace: "cw",
+      frontFace: "ccw",
       cullMode: "back",
     },
   });
@@ -134,6 +146,7 @@ export const createRenderPipeline = (
  * @param ctx - The GPUCanvasContext to render to.
  * @param pipeline - The GPURenderPipeline used for rendering.
  * @param canvas - The target HTML canvas element.
+ * @param vertexCount - The number of vertices to draw.
  * @param setupPass - Optional callback to bind additional resources (buffers, uniforms...) to the render pass encoder.
  */
 export const renderFrame = (
@@ -141,6 +154,7 @@ export const renderFrame = (
   ctx: GPUCanvasContext,
   pipeline: GPURenderPipeline,
   canvas: HTMLCanvasElement,
+  vertexCount: number,
   setupPass?: (encoder: GPURenderPassEncoder) => void,
 ): void => {
   const textureView = ctx.getCurrentTexture().createView();
@@ -161,7 +175,7 @@ export const renderFrame = (
   passEncoder.setPipeline(pipeline);
 
   setupPass?.(passEncoder); // Allow external setup logic to bind resources
-  passEncoder.draw(3, 1, 0, 0);
+  passEncoder.draw(vertexCount, 1, 0, 0);
   passEncoder.end();
 
   device.queue.submit([commandEncoder.finish()]);
