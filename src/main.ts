@@ -5,10 +5,10 @@ import {
   createShaderModule,
   createRenderPipeline,
   renderFrame,
-  createTriforceBuffer,
 } from "@/core/utils/webgpu.ts";
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import "@/style.css";
+import { createTriforceBuffer } from "./features/triforce/utils/buffer";
 
 const adapter = await checkWebGPU();
 if (!adapter) throw new Error("No GPU adapter found.");

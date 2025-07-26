@@ -1,5 +1,7 @@
 // src/core/utils/webgpu.ts
 
+import { TypedArray } from "../types/gpu";
+
 /**
  * Checks if WebGPU is available and requests a GPU adapter.
  *
@@ -55,70 +57,42 @@ export const createShaderModule = (
 };
 
 /**
- * Creates a vertex buffer for a triforce and its associated layout.
+ * Creates and populates a GPUBuffer from a TypedArray.
  *
- * @param device - The GPU device used to allocate the buffer.
- * @returns An object containing the GPUBuffer, GPUVertexBufferLayout, and vertex count.
+ * This utility simplifies the common pattern of creating a buffer, mapping it,
+ * copying data, and unmapping it.
+ *
+ * @param device - The GPU device used to create the buffer.
+ * @param data - The typed array of data to be copied into the buffer.
+ * @param usage - The intended usage for the buffer, specified
+ *   using GPUBufferUsage flags (GPUBufferUsage.VERTEX, GPUBufferUsage.COPY_DST etc).
+ * @returns The created and populated GPU buffer, now owned by the GPU.
  */
-export const createTriforceBuffer = (
+export const createGPUBuffer = (
   device: GPUDevice,
-): {
-  buffer: GPUBuffer;
-  layout: GPUVertexBufferLayout;
-  vertexCount: number;
-} => {
-  // prettier-ignore
-  const vertices = new Float32Array([
-    // Top triangle (red, green, blue vertices)
-    // Position         Color
-    0.0,  0.5, 0.0,   1.0, 0.0, 0.0,
-   -0.25, 0.0, 0.0,   0.0, 1.0, 0.0,
-    0.25, 0.0, 0.0,   0.0, 0.0, 1.0,
-
-    // Bottom-left triangle (green, red, blue vertices)
-    // Position         Color
-   -0.25,  0.0, 0.0,   0.0, 1.0, 0.0,
-   -0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
-    0.0, -0.5, 0.0,   0.0, 0.0, 1.0,
-
-    // Bottom-right triangle (blue, green, red vertices)
-    // Position         Color
-    0.25,  0.0, 0.0,   0.0, 0.0, 1.0,
-    0.0, -0.5, 0.0,   0.0, 1.0, 0.0,
-    0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
-  ]);
-
-  const positionBufferDesc: GPUBufferDescriptor = {
-    size: vertices.byteLength,
-    usage: GPUBufferUsage.VERTEX,
+  data: TypedArray,
+  usage: GPUBufferUsageFlags,
+): GPUBuffer => {
+  const bufferDescriptor: GPUBufferDescriptor = {
+    size: data.byteLength,
+    usage: usage,
     mappedAtCreation: true,
   };
 
-  const positionBuffer = device.createBuffer(positionBufferDesc);
-  new Float32Array(positionBuffer.getMappedRange()).set(vertices);
-  positionBuffer.unmap();
+  const gpuBuffer = device.createBuffer(bufferDescriptor);
 
-  const layout: GPUVertexBufferLayout = {
-    // arrayStride: sizeof(float) * (3 pos + 3 color) = 24 bytes
-    arrayStride: 4 * 6,
-    stepMode: "vertex",
-    attributes: [
-      {
-        // Position
-        shaderLocation: 0,
-        offset: 0,
-        format: "float32x3",
-      },
-      {
-        // Color
-        shaderLocation: 1,
-        offset: 4 * 3, // 12 bytes
-        format: "float32x3",
-      },
-    ],
-  };
+  // Get the constructor of the typed array (ie Float32Array, Uint16Array etc).
+  // allowing to create a new view of the same type on the mapped range.
+  const TypedArrayConstructor = data.constructor as new (
+    buffer: ArrayBuffer,
+  ) => TypedArray;
 
-  return { buffer: positionBuffer, layout, vertexCount: 9 };
+  // Create a new typed array view of the GPU buffer's mapped range.
+  const writeArray = new TypedArrayConstructor(gpuBuffer.getMappedRange());
+  writeArray.set(data); // copy the data into the GPU buffer.
+  gpuBuffer.unmap(); // unmap buffer, transferring ownership of the memory to the GPU.
+
+  return gpuBuffer;
 };
 
 /**
@@ -179,7 +153,7 @@ export const renderFrame = (
     colorAttachments: [
       {
         view: textureView,
-        clearValue: { r: 0, g: 1, b: 0, a: 1 },
+        clearValue: { r: 1, g: 1, b: 0, a: 1 },
         loadOp: "clear",
         storeOp: "store",
       },
