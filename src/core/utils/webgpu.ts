@@ -67,37 +67,52 @@ export const createTriforceBuffer = (
   layout: GPUVertexBufferLayout;
   vertexCount: number;
 } => {
-  const positions = new Float32Array([
-    // Top triangle
-    0.0, 0.5, 0.0, -0.25, 0.0, 0.0, 0.25, 0.0, 0.0,
+  // prettier-ignore
+  const vertices = new Float32Array([
+    // Top triangle (red, green, blue vertices)
+    // Position         Color
+    0.0,  0.5, 0.0,   1.0, 0.0, 0.0,
+   -0.25, 0.0, 0.0,   0.0, 1.0, 0.0,
+    0.25, 0.0, 0.0,   0.0, 0.0, 1.0,
 
-    // Bottom-left triangle
-    -0.25, 0.0, 0.0, -0.5, -0.5, 0.0, 0.0, -0.5, 0.0,
+    // Bottom-left triangle (green, red, blue vertices)
+    // Position         Color
+   -0.25,  0.0, 0.0,   0.0, 1.0, 0.0,
+   -0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
+    0.0, -0.5, 0.0,   0.0, 0.0, 1.0,
 
-    // Bottom-right triangle
-    0.25, 0.0, 0.0, 0.0, -0.5, 0.0, 0.5, -0.5, 0.0,
+    // Bottom-right triangle (blue, green, red vertices)
+    // Position         Color
+    0.25,  0.0, 0.0,   0.0, 0.0, 1.0,
+    0.0, -0.5, 0.0,   0.0, 1.0, 0.0,
+    0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
   ]);
 
   const positionBufferDesc: GPUBufferDescriptor = {
-    size: positions.byteLength,
+    size: vertices.byteLength,
     usage: GPUBufferUsage.VERTEX,
     mappedAtCreation: true,
   };
 
   const positionBuffer = device.createBuffer(positionBufferDesc);
-  new Float32Array(positionBuffer.getMappedRange()).set(positions);
+  new Float32Array(positionBuffer.getMappedRange()).set(vertices);
   positionBuffer.unmap();
 
   const layout: GPUVertexBufferLayout = {
-    // arrayStride: sizeof(float) * 3 -> 12 bytes, size of the advancing step
-    // for the buffer pointer of each vertex.
-    // Vertex 0 starts at offset zero in the buffer, vertex 1 startes at the 3*4=12 th byte.
-    arrayStride: 4 * 3,
+    // arrayStride: sizeof(float) * (3 pos + 3 color) = 24 bytes
+    arrayStride: 4 * 6,
     stepMode: "vertex",
     attributes: [
       {
+        // Position
         shaderLocation: 0,
         offset: 0,
+        format: "float32x3",
+      },
+      {
+        // Color
+        shaderLocation: 1,
+        offset: 4 * 3, // 12 bytes
         format: "float32x3",
       },
     ],
