@@ -1,6 +1,5 @@
 // src/core/utils/webgpu.ts
-
-import { TypedArray } from "../types/gpu";
+import { TypedArray } from "@/core/types/gpu";
 
 /**
  * Checks if WebGPU is available and requests a GPU adapter.
@@ -20,26 +19,6 @@ export const checkWebGPU = async (): Promise<GPUAdapter | null> => {
   }
 
   return adapter;
-};
-
-/**
- * Configures a WebGPU canvas context with a basic rendering setup.
- *
- * @param ctx - The GPU canvas context to configure.
- * @param device - The GPU device used for rendering.
- */
-export const configureContext = (
-  ctx: GPUCanvasContext,
-  device: GPUDevice,
-): void => {
-  const canvasConfig: GPUCanvasConfiguration = {
-    device: device,
-    format: navigator.gpu.getPreferredCanvasFormat(),
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    alphaMode: "opaque",
-  };
-
-  ctx.configure(canvasConfig);
 };
 
 /**
@@ -93,79 +72,4 @@ export const createGPUBuffer = (
   gpuBuffer.unmap(); // unmap buffer, transferring ownership of the memory to the GPU.
 
   return gpuBuffer;
-};
-
-/**
- * Creates a basic render pipeline for drawing triangles using a given shader.
- *
- * @param device - The GPU device used to create the pipeline.
- * @param shaderModule - A compiled GPUShaderModule with vertex and fragment entry points.
- * @param vertexBufferLayout - The layout of the vertex buffer.
- * @returns A configured GPURenderPipeline ready for rendering.
- */
-export const createRenderPipeline = (
-  device: GPUDevice,
-  shaderModule: GPUShaderModule,
-  vertexBufferLayout: GPUVertexBufferLayout,
-): GPURenderPipeline => {
-  return device.createRenderPipeline({
-    layout: "auto",
-    vertex: {
-      module: shaderModule,
-      entryPoint: "vs_main",
-      buffers: [vertexBufferLayout],
-    },
-    fragment: {
-      module: shaderModule,
-      entryPoint: "fs_main",
-      targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
-    },
-    primitive: {
-      topology: "triangle-list",
-      frontFace: "ccw",
-      cullMode: "back",
-    },
-  });
-};
-
-/**
- * Renders a frame using the given render pipeline and canvas context.
- *
- * @param device - The GPU device used to encode rendering commands.
- * @param ctx - The GPUCanvasContext to render to.
- * @param pipeline - The GPURenderPipeline used for rendering.
- * @param canvas - The target HTML canvas element.
- * @param vertexCount - The number of vertices to draw.
- * @param setupPass - Optional callback to bind additional resources (buffers, uniforms...) to the render pass encoder.
- */
-export const renderFrame = (
-  device: GPUDevice,
-  ctx: GPUCanvasContext,
-  pipeline: GPURenderPipeline,
-  canvas: HTMLCanvasElement,
-  vertexCount: number,
-  setupPass?: (encoder: GPURenderPassEncoder) => void,
-): void => {
-  const textureView = ctx.getCurrentTexture().createView();
-  const commandEncoder = device.createCommandEncoder();
-
-  const passEncoder = commandEncoder.beginRenderPass({
-    colorAttachments: [
-      {
-        view: textureView,
-        clearValue: { r: 1, g: 1, b: 0, a: 1 },
-        loadOp: "clear",
-        storeOp: "store",
-      },
-    ],
-  });
-
-  passEncoder.setViewport(0, 0, canvas.width, canvas.height, 0, 1);
-  passEncoder.setPipeline(pipeline);
-
-  setupPass?.(passEncoder); // Allow external setup logic to bind resources
-  passEncoder.draw(vertexCount, 1, 0, 0);
-  passEncoder.end();
-
-  device.queue.submit([commandEncoder.finish()]);
 };
