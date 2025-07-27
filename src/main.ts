@@ -2,6 +2,7 @@
 import { Renderer } from "@/core/renderer";
 import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 import "@/style.css";
+import { Mesh } from "./core/types/gpu";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -12,9 +13,16 @@ try {
   const renderer = new Renderer(canvas);
   await renderer.init();
 
-  const triforce = createTriforceMesh(renderer.device);
+  const scene: Mesh[] = [
+    // Center triforce
+    createTriforceMesh(renderer.device, 0, 0.5),
+    // Left triforce
+    createTriforceMesh(renderer.device, -0.5, -0.5),
+    // Right triforce
+    createTriforceMesh(renderer.device, 0.5, -0.5),
+  ];
 
-  renderer.render(triforce);
+  renderer.render(scene);
 } catch (error) {
   console.error(error);
 

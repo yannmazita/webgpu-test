@@ -98,11 +98,20 @@ export class Renderer {
   }
 
   /**
-   * Renders a single frame with the provided mesh.
-   * @param mesh - The mesh to be rendered.
+   * Renders a scene composed of multiple meshes. It optimizes rendering by
+   * grouping meshes that share the same pipeline.
+   * @param scene - An array of Mesh objects to be rendered.
    */
-  public render(mesh: Mesh): void {
-    const pipeline = this.getOrCreatePipeline(mesh.layout);
+  public render(scene: Mesh[]): void {
+    // Group meshes by their vertex buffer layout. This allows us to set the
+    // pipeline once for all meshes that use it.
+    const meshesByLayout = new Map<GPUVertexBufferLayout, Mesh[]>();
+    for (const mesh of scene) {
+      if (!meshesByLayout.has(mesh.layout)) {
+        meshesByLayout.set(mesh.layout, []);
+      }
+      meshesByLayout.get(mesh.layout)?.push(mesh);
+    }
 
     const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
@@ -111,7 +120,7 @@ export class Renderer {
       colorAttachments: [
         {
           view: textureView,
-          clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
           loadOp: "clear",
           storeOp: "store",
         },
@@ -119,9 +128,18 @@ export class Renderer {
     });
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
-    passEncoder.setPipeline(pipeline);
-    passEncoder.setVertexBuffer(0, mesh.buffer);
-    passEncoder.draw(mesh.vertexCount, 1, 0, 0);
+
+    // Iterate over the grouped meshes and render them.
+    for (const [layout, meshes] of meshesByLayout.entries()) {
+      const pipeline = this.getOrCreatePipeline(layout);
+      passEncoder.setPipeline(pipeline);
+
+      for (const mesh of meshes) {
+        passEncoder.setVertexBuffer(0, mesh.buffer);
+        passEncoder.draw(mesh.vertexCount, 1, 0, 0);
+      }
+    }
+
     passEncoder.end();
 
     this.device.queue.submit([commandEncoder.finish()]);
