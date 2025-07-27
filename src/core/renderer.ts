@@ -1,7 +1,7 @@
-// src/core/Renderer.ts
+// src/core/renderer.ts
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import { createShaderModule } from "@/core/utils/webgpu";
-import { Mesh } from "./types/gpu";
+import { Renderable } from "./types/gpu";
 import { getLayoutKey } from "./utils/layout";
 
 export class Renderer {
@@ -13,6 +13,10 @@ export class Renderer {
   private adapter!: GPUAdapter;
   private pipelines = new Map<string, GPURenderPipeline>();
   private shaderModule!: GPUShaderModule;
+  private uniformBuffer!: GPUBuffer;
+  private uniformBindGroup!: GPUBindGroup;
+  private pipelineLayout!: GPUPipelineLayout;
+  private uniformBufferAlignment!: number;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -27,6 +31,55 @@ export class Renderer {
     await this.setupDevice();
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
+
+    // Get the minimum buffer offset alignment. This is 256 on most devices.
+    this.uniformBufferAlignment =
+      this.device.limits.minUniformBufferOffsetAlignment;
+
+    // A mat4 is 4x4 matrix of f32s. 4*4*4 = 64 bytes.
+    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
+    const ALIGNED_MATRIX_SIZE = Math.max(
+      MATRIX_SIZE,
+      this.uniformBufferAlignment,
+    );
+
+    // Create a buffer large enough to hold multiple matrices, each aligned.
+    const MAX_OBJECTS = 100;
+    this.uniformBuffer = this.device.createBuffer({
+      size: MAX_OBJECTS * ALIGNED_MATRIX_SIZE,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const bindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX,
+          buffer: {
+            type: "uniform",
+            hasDynamicOffset: true,
+          },
+        },
+      ],
+    });
+
+    this.uniformBindGroup = this.device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: {
+            buffer: this.uniformBuffer,
+            // bind entire buffer, offsets will be specified at draw time.
+            size: ALIGNED_MATRIX_SIZE,
+          },
+        },
+      ],
+    });
+
+    this.pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [bindGroupLayout],
+    });
   }
 
   /**
@@ -76,7 +129,7 @@ export class Renderer {
 
     // If not, create a new pipeline.
     const newPipeline = this.device.createRenderPipeline({
-      layout: "auto",
+      layout: this.pipelineLayout, // Use the shared pipeline layout
       vertex: {
         module: this.shaderModule,
         entryPoint: "vs_main",
@@ -100,25 +153,10 @@ export class Renderer {
   }
 
   /**
-   * Renders a scene composed of multiple meshes. It optimizes rendering by
-   * grouping meshes that share the same pipeline.
-   * @param scene - An array of Mesh objects to be rendered.
+   * Renders a scene composed of multiple Renderable objects.
+   * @param scene - An array of Renderable objects to be rendered.
    */
-  public render(scene: Mesh[]): void {
-    // Group meshes by their vertex buffer layout. This allows us to set the
-    // pipeline once for all meshes that use it.
-    const meshesByKey = new Map<
-      string,
-      { layout: GPUVertexBufferLayout; meshes: Mesh[] }
-    >();
-    for (const mesh of scene) {
-      const key = getLayoutKey(mesh.layout);
-      if (!meshesByKey.has(key)) {
-        meshesByKey.set(key, { layout: mesh.layout, meshes: [] });
-      }
-      meshesByKey.get(key)!.meshes.push(mesh);
-    }
-
+  public render(scene: Renderable[]): void {
     const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
 
@@ -135,16 +173,38 @@ export class Renderer {
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
 
-    // Iterate over the grouped meshes and render them.
-    for (const { layout, meshes } of meshesByKey.values()) {
-      const pipeline = this.getOrCreatePipeline(layout);
-      passEncoder.setPipeline(pipeline);
+    let lastPipeline: GPURenderPipeline | undefined;
 
-      for (const mesh of meshes) {
-        passEncoder.setVertexBuffer(0, mesh.buffer);
-        passEncoder.draw(mesh.vertexCount, 1, 0, 0);
+    const ALIGNED_MATRIX_SIZE = Math.max(
+      4 * 4 * Float32Array.BYTES_PER_ELEMENT,
+      this.uniformBufferAlignment,
+    );
+
+    // Iterate over the renderable objects and draw them.
+    scene.forEach((renderable, i) => {
+      const { mesh, modelMatrix } = renderable;
+      const pipeline = this.getOrCreatePipeline(mesh.layout);
+
+      if (pipeline !== lastPipeline) {
+        passEncoder.setPipeline(pipeline);
+        lastPipeline = pipeline;
       }
-    }
+
+      // Calculate the offset for the current object's matrix.
+      const bufferOffset = i * ALIGNED_MATRIX_SIZE;
+
+      // Write the matrix data to the uniform buffer at the calculated offset.
+      this.device.queue.writeBuffer(
+        this.uniformBuffer,
+        bufferOffset,
+        modelMatrix as Float32Array,
+      );
+
+      // Set the bind group with the dynamic offset for this specific draw call.
+      passEncoder.setBindGroup(0, this.uniformBindGroup, [bufferOffset]);
+      passEncoder.setVertexBuffer(0, mesh.buffer);
+      passEncoder.draw(mesh.vertexCount, 1, 0, 0);
+    });
 
     passEncoder.end();
 
