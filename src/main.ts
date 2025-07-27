@@ -2,7 +2,8 @@
 import { Renderer } from "@/core/renderer";
 import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 import "@/style.css";
-import { Mesh } from "./core/types/gpu";
+import { Renderable } from "./core/types/gpu";
+import { mat4 } from "wgpu-matrix";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -13,13 +14,23 @@ try {
   const renderer = new Renderer(canvas);
   await renderer.init();
 
-  const scene: Mesh[] = [
-    // Center triforce
-    createTriforceMesh(renderer.device, 0, 0.5),
-    // Left triforce
-    createTriforceMesh(renderer.device, -0.5, -0.5),
-    // Right triforce
-    createTriforceMesh(renderer.device, 0.5, -0.5),
+  // Create one mesh, which will be shared by all renderable objects.
+  const triforceMesh = createTriforceMesh(renderer.device);
+
+  // Create three renderable objects, each with a unique model matrix.
+  const scene: Renderable[] = [
+    {
+      mesh: triforceMesh,
+      modelMatrix: mat4.translation([0, 0.5, 0]),
+    },
+    {
+      mesh: triforceMesh,
+      modelMatrix: mat4.translation([-0.5, -0.5, 0]),
+    },
+    {
+      mesh: triforceMesh,
+      modelMatrix: mat4.translation([0.5, -0.5, 0]),
+    },
   ];
 
   renderer.render(scene);
