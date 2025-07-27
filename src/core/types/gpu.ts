@@ -1,4 +1,5 @@
 // src/core/types/gpu.ts
+import { Mat4 } from "wgpu-matrix";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -20,4 +21,13 @@ export interface Mesh {
   buffer: GPUBuffer;
   vertexCount: number;
   layout: GPUVertexBufferLayout;
+}
+
+/**
+ * Represents an object in the scene, combining static mesh data with a
+ * dynamic transformation matrix.
+ */
+export interface Renderable {
+  mesh: Mesh;
+  modelMatrix: Mat4;
 }
