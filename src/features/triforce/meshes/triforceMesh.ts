@@ -19,19 +19,19 @@ export const createTriforceMesh = (
   // prettier-ignore
   const vertices = new Float32Array([
     // Top triangle (red, green, blue vertices)
-    // Position         Color
+    // Position                                 Color
      0.00 + xOffset,  0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
     -0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 1.0, 0.0,
      0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 0.0, 1.0,
 
     // Bottom-left triangle (green, red, blue vertices)
-    // Position         Color
+    // Position                                 Color
     -0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 1.0, 0.0,
     -0.50 + xOffset, -0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
      0.00 + xOffset, -0.50 + yOffset, 0.0,   0.0, 0.0, 1.0,
 
     // Bottom-right triangle (blue, green, red vertices)
-    // Position         Color
+    // Position                                 Color
      0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 0.0, 1.0,
      0.00 + xOffset, -0.50 + yOffset, 0.0,   0.0, 1.0, 0.0,
      0.50 + xOffset, -0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
