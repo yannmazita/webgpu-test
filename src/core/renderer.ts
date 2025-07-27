@@ -2,6 +2,7 @@
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import { createShaderModule } from "@/core/utils/webgpu";
 import { Mesh } from "./types/gpu";
+import { getLayoutKey } from "./utils/layout";
 
 export class Renderer {
   public device!: GPUDevice;
@@ -10,7 +11,7 @@ export class Renderer {
   private canvas: HTMLCanvasElement;
   private context!: GPUCanvasContext;
   private adapter!: GPUAdapter;
-  private pipelines = new Map<GPUVertexBufferLayout, GPURenderPipeline>();
+  private pipelines = new Map<string, GPURenderPipeline>();
   private shaderModule!: GPUShaderModule;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -67,9 +68,10 @@ export class Renderer {
   private getOrCreatePipeline(
     layout: GPUVertexBufferLayout,
   ): GPURenderPipeline {
+    const layoutKey = getLayoutKey(layout);
     // Check if a pipeline for this specific layout already exists.
-    if (this.pipelines.has(layout)) {
-      return this.pipelines.get(layout)!;
+    if (this.pipelines.has(layoutKey)) {
+      return this.pipelines.get(layoutKey)!;
     }
 
     // If not, create a new pipeline.
@@ -93,7 +95,7 @@ export class Renderer {
     });
 
     // Cache the new pipeline for future use.
-    this.pipelines.set(layout, newPipeline);
+    this.pipelines.set(layoutKey, newPipeline);
     return newPipeline;
   }
 
@@ -105,12 +107,16 @@ export class Renderer {
   public render(scene: Mesh[]): void {
     // Group meshes by their vertex buffer layout. This allows us to set the
     // pipeline once for all meshes that use it.
-    const meshesByLayout = new Map<GPUVertexBufferLayout, Mesh[]>();
+    const meshesByKey = new Map<
+      string,
+      { layout: GPUVertexBufferLayout; meshes: Mesh[] }
+    >();
     for (const mesh of scene) {
-      if (!meshesByLayout.has(mesh.layout)) {
-        meshesByLayout.set(mesh.layout, []);
+      const key = getLayoutKey(mesh.layout);
+      if (!meshesByKey.has(key)) {
+        meshesByKey.set(key, { layout: mesh.layout, meshes: [] });
       }
-      meshesByLayout.get(mesh.layout)?.push(mesh);
+      meshesByKey.get(key)!.meshes.push(mesh);
     }
 
     const textureView = this.context.getCurrentTexture().createView();
@@ -130,7 +136,7 @@ export class Renderer {
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
 
     // Iterate over the grouped meshes and render them.
-    for (const [layout, meshes] of meshesByLayout.entries()) {
+    for (const { layout, meshes } of meshesByKey.values()) {
       const pipeline = this.getOrCreatePipeline(layout);
       passEncoder.setPipeline(pipeline);
 
