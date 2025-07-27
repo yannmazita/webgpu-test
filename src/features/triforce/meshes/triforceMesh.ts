@@ -6,29 +6,35 @@ import { Mesh } from "@/core/types/gpu";
  * Creates a vertex buffer for a triforce.
  *
  * @param device - The GPU device used to allocate the buffer.
+ * @param xOffset - The horizontal offset for the mesh. Defaults to 0.
+ * @param yOffset - The vertical offset for the mesh. Defaults to 0.
  * @returns An object conforming to the Mesh interface, containing the
  *          GPUBuffer and vertex count for the triforce.
  */
-export const createTriforceMesh = (device: GPUDevice): Mesh => {
+export const createTriforceMesh = (
+  device: GPUDevice,
+  xOffset = 0,
+  yOffset = 0,
+): Mesh => {
   // prettier-ignore
   const vertices = new Float32Array([
     // Top triangle (red, green, blue vertices)
     // Position         Color
-    0.0,  0.5, 0.0,   1.0, 0.0, 0.0,
-   -0.25, 0.0, 0.0,   0.0, 1.0, 0.0,
-    0.25, 0.0, 0.0,   0.0, 0.0, 1.0,
+     0.00 + xOffset,  0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
+    -0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 1.0, 0.0,
+     0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 0.0, 1.0,
 
     // Bottom-left triangle (green, red, blue vertices)
     // Position         Color
-   -0.25,  0.0, 0.0,   0.0, 1.0, 0.0,
-   -0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
-    0.0, -0.5, 0.0,   0.0, 0.0, 1.0,
+    -0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 1.0, 0.0,
+    -0.50 + xOffset, -0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
+     0.00 + xOffset, -0.50 + yOffset, 0.0,   0.0, 0.0, 1.0,
 
     // Bottom-right triangle (blue, green, red vertices)
     // Position         Color
-    0.25,  0.0, 0.0,   0.0, 0.0, 1.0,
-    0.0, -0.5, 0.0,   0.0, 1.0, 0.0,
-    0.5, -0.5, 0.0,   1.0, 0.0, 0.0,
+     0.25 + xOffset,  0.00 + yOffset, 0.0,   0.0, 0.0, 1.0,
+     0.00 + xOffset, -0.50 + yOffset, 0.0,   0.0, 1.0, 0.0,
+     0.50 + xOffset, -0.50 + yOffset, 0.0,   1.0, 0.0, 0.0,
   ]);
 
   const buffer = createGPUBuffer(device, vertices, GPUBufferUsage.VERTEX);
