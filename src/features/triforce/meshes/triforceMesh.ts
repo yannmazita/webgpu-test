@@ -6,8 +6,6 @@ import { Mesh } from "@/core/types/gpu";
  * Creates a vertex buffer for a triforce.
  *
  * @param device - The GPU device used to allocate the buffer.
- * @param xOffset - The horizontal offset for the mesh. Defaults to 0.
- * @param yOffset - The vertical offset for the mesh. Defaults to 0.
  * @returns An object conforming to the Mesh interface, containing the
  *          GPUBuffer and vertex count for the triforce.
  */
