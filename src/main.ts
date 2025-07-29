@@ -14,6 +14,9 @@ try {
   const renderer = new Renderer(canvas);
   await renderer.init();
 
+  // Load texture and create the bind group using the renderer
+  await renderer.createTextureBindGroup("/assets/rms.jpg");
+
   // Create one mesh, which will be shared by all renderable objects.
   const triforceMesh = createTriforceMesh(renderer.device);
 

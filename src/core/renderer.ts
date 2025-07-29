@@ -3,6 +3,7 @@ import shaderCode from "@/core/shaders/shaders.wgsl";
 import { createShaderModule } from "@/core/utils/webgpu";
 import { Renderable } from "./types/gpu";
 import { getLayoutKey } from "./utils/layout";
+import { createTextureFromImage } from "./utils/texture";
 
 export class Renderer {
   public device!: GPUDevice;
@@ -16,69 +17,100 @@ export class Renderer {
   private uniformBuffer!: GPUBuffer;
   private uniformBindGroup!: GPUBindGroup;
   private pipelineLayout!: GPUPipelineLayout;
+  private bindGroupLayout!: GPUBindGroupLayout;
   private uniformBufferAlignment!: number;
+  private sampler!: GPUSampler;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
   }
 
   /**
-   * Initializes the WebGPU device, context, and pre-compiles the shader module.
-   * This must be called before any rendering operations.
-   * @throws If WebGPU is not supported or a device cannot be acquired.
+   * Initializes the WebGPU device, context, shaders, and buffers.
+   * This must be called before loading textures or rendering.
    */
   public async init(): Promise<void> {
     await this.setupDevice();
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
-    // Get the minimum buffer offset alignment. This is 256 on most devices.
+    // This is sampler is static and doesn't depend on the texture.
+    this.sampler = this.device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "repeat",
+    });
+
     this.uniformBufferAlignment =
       this.device.limits.minUniformBufferOffsetAlignment;
 
-    // A mat4 is 4x4 matrix of f32s. 4*4*4 = 64 bytes.
     const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
     const ALIGNED_MATRIX_SIZE = Math.max(
       MATRIX_SIZE,
       this.uniformBufferAlignment,
     );
 
-    // Create a buffer large enough to hold multiple matrices, each aligned.
     const MAX_OBJECTS = 100;
     this.uniformBuffer = this.device.createBuffer({
       size: MAX_OBJECTS * ALIGNED_MATRIX_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    const bindGroupLayout = this.device.createBindGroupLayout({
+    this.bindGroupLayout = this.device.createBindGroupLayout({
       entries: [
         {
-          binding: 0,
+          binding: 0, // Uniform Buffer
           visibility: GPUShaderStage.VERTEX,
-          buffer: {
-            type: "uniform",
-            hasDynamicOffset: true,
-          },
+          buffer: { type: "uniform", hasDynamicOffset: true },
         },
-      ],
-    });
-
-    this.uniformBindGroup = this.device.createBindGroup({
-      layout: bindGroupLayout,
-      entries: [
         {
-          binding: 0,
-          resource: {
-            buffer: this.uniformBuffer,
-            // bind entire buffer, offsets will be specified at draw time.
-            size: ALIGNED_MATRIX_SIZE,
-          },
+          binding: 1, // Texture View
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {},
+        },
+        {
+          binding: 2, // Sampler
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {},
         },
       ],
     });
 
     this.pipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [bindGroupLayout],
+      bindGroupLayouts: [this.bindGroupLayout],
+    });
+  }
+
+  /**
+   * Loads a texture and creates the primary bind group for rendering.
+   * @param imageUrl The URL of the texture to load.
+   */
+  public async createTextureBindGroup(imageUrl: string): Promise<void> {
+    const texture = await createTextureFromImage(this.device, imageUrl);
+
+    this.uniformBindGroup = this.device.createBindGroup({
+      layout: this.bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: {
+            buffer: this.uniformBuffer,
+            size: Math.max(
+              4 * 4 * Float32Array.BYTES_PER_ELEMENT,
+              this.uniformBufferAlignment,
+            ),
+          },
+        },
+        {
+          binding: 1,
+          resource: texture.createView(),
+        },
+        {
+          binding: 2,
+          resource: this.sampler,
+        },
+      ],
     });
   }
 
@@ -157,6 +189,12 @@ export class Renderer {
    * @param scene - An array of Renderable objects to be rendered.
    */
   public render(scene: Renderable[]): void {
+    if (!this.uniformBindGroup) {
+      console.error(
+        "Render called before createTextureBindGroup. No bind group available.",
+      );
+      return;
+    }
     const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
 
