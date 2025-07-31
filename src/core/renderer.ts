@@ -34,7 +34,7 @@ export class Renderer {
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
-    // This is sampler is static and doesn't depend on the texture.
+    // This sampler is static and doesn't depend on the texture.
     this.sampler = this.device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
