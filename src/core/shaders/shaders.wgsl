@@ -1,5 +1,24 @@
 // src/core/shaders/shaders.wgsl
 
+/*
+ * The shader organizes bindings into groups based on update frequency
+ * for performance.
+ *
+ * @group(0) - Per-Frame Data
+ *   - Updated once per frame.
+ *   - Contains scene-level information like the camera.
+ *   - Bindings:
+ *     @binding(0): Camera (View/Projection Matrix)
+ *
+ * @group(1) - Per-Material / Per-Object Data
+ *   - Updated for each distinct material or object.
+ *   - Contains resources specific to the thing being drawn.
+ *   - Bindings:
+ *     @binding(0): Model Uniforms (Model Matrix, etc.)
+ *     @binding(1): Diffuse Texture
+ *     @binding(2): Texture Sampler
+ */
+
 // Uniforms that are constant for the entire frame (like camera matrices).
 struct Camera {
     viewProjectionMatrix: mat4x4<f32>,

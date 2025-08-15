@@ -60,6 +60,10 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
+    /**
+     * Layout for @group(0), containing per-frame scene data like the camera.
+     * Corresponds to the Camera struct in shaders.wgsl.
+     */
     this.cameraBindGroupLayout = this.device.createBindGroupLayout({
       label: "CAMERA_BIND_GROUP_LAYOUT",
       entries: [
@@ -71,6 +75,10 @@ export class Renderer {
       ],
     });
 
+    /**
+     * Layout for @group(1), containing per-material or per-object data.
+     * Corresponds to the Model struct and material textures in shaders.wgsl.
+     */
     this.materialBindGroupLayout = this.device.createBindGroupLayout({
       label: "MATERIAL_BIND_GROUP_LAYOUT",
       entries: [
