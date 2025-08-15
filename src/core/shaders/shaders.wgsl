@@ -1,10 +1,20 @@
 // src/core/shaders/shaders.wgsl
-struct Uniforms {
-    modelViewProjectionMatrix: mat4x4<f32>,
+
+// Uniforms that are constant for the entire frame (like camera matrices).
+struct Camera {
+    viewProjectionMatrix: mat4x4<f32>,
 }
 
 @group(0) @binding(0)
-var<uniform> uniforms: Uniforms;
+var<uniform> camera: Camera;
+
+// Uniforms that change for each object being drawn.
+struct Model {
+    modelMatrix: mat4x4<f32>,
+}
+@group(1) @binding(0)
+var<uniform> model: Model;
+
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -19,15 +29,16 @@ fn vs_main(
     @location(2) inTexCoords: vec2<f32>
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = uniforms.modelViewProjectionMatrix * vec4<f32>(inPos, 1.0);
+    out.clip_position = camera.viewProjectionMatrix * model.modelMatrix * vec4<f32>(inPos, 1.0);
     out.color = inColor;
     out.tex_coords = inTexCoords;
     return out;
 }
 
-@group(0) @binding(1)
+// Bindings for material properties like textures and samplers.
+@group(1) @binding(1)
 var t_diffuse: texture_2d<f32>;
-@group(0) @binding(2)
+@group(1) @binding(2)
 var s_diffuse: sampler;
 
 @fragment

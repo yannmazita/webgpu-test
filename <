@@ -22,7 +22,7 @@ try {
   // Configure camera projection
   const aspectRatio = canvas.width / canvas.height;
   camera.setPerspective(
-    (90 * Math.PI) / 180, // 90 degrees field of view
+    (60 * Math.PI) / 180, // 60 degrees field of view
     aspectRatio,
     0.1,
     100.0,
@@ -30,7 +30,7 @@ try {
 
   // Position the camera to look at the scene
   camera.lookAt(
-    vec3.fromValues(0, 0, 1.5),
+    vec3.fromValues(0, 0, 3),
     vec3.fromValues(0, 0, 0),
     vec3.fromValues(0, 1, 0),
   );

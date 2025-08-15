@@ -4,6 +4,7 @@ import { createShaderModule } from "@/core/utils/webgpu";
 import { Renderable } from "./types/gpu";
 import { getLayoutKey } from "./utils/layout";
 import { createTextureFromImage } from "./utils/texture";
+import { Camera } from "./camera";
 
 export class Renderer {
   public device!: GPUDevice;
@@ -14,10 +15,11 @@ export class Renderer {
   private adapter!: GPUAdapter;
   private pipelines = new Map<string, GPURenderPipeline>();
   private shaderModule!: GPUShaderModule;
-  private uniformBuffer!: GPUBuffer;
-  private uniformBindGroup!: GPUBindGroup;
+  private modelUniformBuffer!: GPUBuffer;
+  private materialBindGroup!: GPUBindGroup;
   private pipelineLayout!: GPUPipelineLayout;
-  private bindGroupLayout!: GPUBindGroupLayout;
+  private cameraBindGroupLayout!: GPUBindGroupLayout;
+  private materialBindGroupLayout!: GPUBindGroupLayout;
   private uniformBufferAlignment!: number;
   private sampler!: GPUSampler;
 
@@ -52,15 +54,28 @@ export class Renderer {
     );
 
     const MAX_OBJECTS = 100;
-    this.uniformBuffer = this.device.createBuffer({
+    this.modelUniformBuffer = this.device.createBuffer({
+      label: "MODEL_UNIFORM_BUFFER",
       size: MAX_OBJECTS * ALIGNED_MATRIX_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    this.bindGroupLayout = this.device.createBindGroupLayout({
+    this.cameraBindGroupLayout = this.device.createBindGroupLayout({
+      label: "CAMERA_BIND_GROUP_LAYOUT",
       entries: [
         {
-          binding: 0, // Uniform Buffer
+          binding: 0, // Camera Uniform Buffer
+          visibility: GPUShaderStage.VERTEX,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+
+    this.materialBindGroupLayout = this.device.createBindGroupLayout({
+      label: "MATERIAL_BIND_GROUP_LAYOUT",
+      entries: [
+        {
+          binding: 0, // Model Uniform Buffer
           visibility: GPUShaderStage.VERTEX,
           buffer: { type: "uniform", hasDynamicOffset: true },
         },
@@ -78,24 +93,29 @@ export class Renderer {
     });
 
     this.pipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.bindGroupLayout],
+      bindGroupLayouts: [
+        this.cameraBindGroupLayout,
+        this.materialBindGroupLayout,
+      ],
     });
   }
 
   /**
-   * Loads a texture and creates the primary bind group for rendering.
+   * Creates a bind group for a material (texture, sampler) and the shared model matrix buffer.
    * @param imageUrl The URL of the texture to load.
+   * @returns A promise that resolves when the bind group is created.
    */
-  public async createTextureBindGroup(imageUrl: string): Promise<void> {
+  public async createMaterialBindGroup(imageUrl: string): Promise<void> {
     const texture = await createTextureFromImage(this.device, imageUrl);
 
-    this.uniformBindGroup = this.device.createBindGroup({
-      layout: this.bindGroupLayout,
+    this.materialBindGroup = this.device.createBindGroup({
+      label: "MATERIAL_BIND_GROUP",
+      layout: this.materialBindGroupLayout,
       entries: [
         {
           binding: 0,
           resource: {
-            buffer: this.uniformBuffer,
+            buffer: this.modelUniformBuffer,
             size: Math.max(
               4 * 4 * Float32Array.BYTES_PER_ELEMENT,
               this.uniformBufferAlignment,
@@ -185,16 +205,21 @@ export class Renderer {
   }
 
   /**
-   * Renders a scene composed of multiple Renderable objects.
+   * Renders a scene composed of multiple Renderable objects from a camera's perspective.
+   * @param camera - The camera providing the view and projection matrices.
    * @param scene - An array of Renderable objects to be rendered.
    */
-  public render(scene: Renderable[]): void {
-    if (!this.uniformBindGroup) {
+  public render(camera: Camera, scene: Renderable[]): void {
+    if (!this.materialBindGroup) {
       console.error(
-        "Render called before createTextureBindGroup. No bind group available.",
+        "Render called before createMaterialBindGroup. No bind group available.",
       );
       return;
     }
+
+    // Update the GPU buffer of the camera once per frame.
+    camera.writeToGpu(this.device.queue);
+
     const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
 
@@ -210,6 +235,9 @@ export class Renderer {
     });
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
+
+    // Set the camera bind group once for the entire render pass.
+    passEncoder.setBindGroup(0, camera.bindGroup);
 
     let lastPipeline: GPURenderPipeline | undefined;
 
@@ -233,13 +261,14 @@ export class Renderer {
 
       // Write the matrix data to the uniform buffer at the calculated offset.
       this.device.queue.writeBuffer(
-        this.uniformBuffer,
+        // Use the model uniform buffer
+        this.modelUniformBuffer,
         bufferOffset,
         modelMatrix as Float32Array,
       );
 
-      // Set the bind group with the dynamic offset for this specific draw call.
-      passEncoder.setBindGroup(0, this.uniformBindGroup, [bufferOffset]);
+      // Set the material bind group (@group(1)) with the dynamic offset.
+      passEncoder.setBindGroup(1, this.materialBindGroup, [bufferOffset]);
       passEncoder.setVertexBuffer(0, mesh.buffer);
       passEncoder.draw(mesh.vertexCount, 1, 0, 0);
     });
@@ -247,5 +276,18 @@ export class Renderer {
     passEncoder.end();
 
     this.device.queue.submit([commandEncoder.finish()]);
+  }
+
+  /**
+   * A helper method to get the camera bind group layout.
+   * This is needed to initialize the camera object from outside the renderer.
+   */
+  public getCameraBindGroupLayout(): GPUBindGroupLayout {
+    if (!this.cameraBindGroupLayout) {
+      throw new Error(
+        "Camera bind group layout is not initialized. Call init() first.",
+      );
+    }
+    return this.cameraBindGroupLayout;
   }
 }
