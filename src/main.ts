@@ -2,9 +2,10 @@
 import { Renderer } from "@/core/renderer";
 import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 import "@/style.css";
-import { Renderable } from "./core/types/gpu";
+import { Renderable } from "@/core/types/gpu";
 import { mat4, vec3 } from "wgpu-matrix";
-import { Camera } from "./core/camera";
+import { Camera } from "@/core/camera";
+import { Material } from "./core/material";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -35,8 +36,24 @@ try {
     vec3.fromValues(0, 1, 0),
   );
 
-  // Load texture and create the material bind group
-  await renderer.createMaterialBindGroup("/assets/rms.jpg");
+  // Create two materials
+  const material1 = new Material();
+  await material1.init(
+    renderer.device,
+    "/assets/rms.jpg",
+    renderer.getMaterialBindGroupLayout(),
+    renderer.getModelUniformBuffer(),
+    renderer.getAlignedMatrixSize(),
+  );
+
+  const material2 = new Material();
+  await material2.init(
+    renderer.device,
+    "/assets/rms2.jpg",
+    renderer.getMaterialBindGroupLayout(),
+    renderer.getModelUniformBuffer(),
+    renderer.getAlignedMatrixSize(),
+  );
 
   // Create one mesh, which will be shared by all renderable objects.
   const triforceMesh = createTriforceMesh(renderer.device);
@@ -46,14 +63,17 @@ try {
     {
       mesh: triforceMesh,
       modelMatrix: mat4.translation([0, 0.5, 0]),
+      material: material2,
     },
     {
       mesh: triforceMesh,
       modelMatrix: mat4.translation([-0.5, -0.5, 0]),
+      material: material1,
     },
     {
       mesh: triforceMesh,
       modelMatrix: mat4.translation([0.5, -0.5, 0]),
+      material: material1,
     },
   ];
 

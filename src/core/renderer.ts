@@ -3,7 +3,6 @@ import shaderCode from "@/core/shaders/shaders.wgsl";
 import { createShaderModule } from "@/core/utils/webgpu";
 import { Renderable } from "./types/gpu";
 import { getLayoutKey } from "./utils/layout";
-import { createTextureFromImage } from "./utils/texture";
 import { Camera } from "./camera";
 
 export class Renderer {
@@ -16,12 +15,11 @@ export class Renderer {
   private pipelines = new Map<string, GPURenderPipeline>();
   private shaderModule!: GPUShaderModule;
   private modelUniformBuffer!: GPUBuffer;
-  private materialBindGroup!: GPUBindGroup;
   private pipelineLayout!: GPUPipelineLayout;
   private cameraBindGroupLayout!: GPUBindGroupLayout;
   private materialBindGroupLayout!: GPUBindGroupLayout;
   private uniformBufferAlignment!: number;
-  private sampler!: GPUSampler;
+  private alignedMatrixSize!: number;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -36,27 +34,16 @@ export class Renderer {
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
-    // This sampler is static and doesn't depend on the texture.
-    this.sampler = this.device.createSampler({
-      magFilter: "linear",
-      minFilter: "linear",
-      addressModeU: "repeat",
-      addressModeV: "repeat",
-    });
-
     this.uniformBufferAlignment =
       this.device.limits.minUniformBufferOffsetAlignment;
 
     const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
-    const ALIGNED_MATRIX_SIZE = Math.max(
-      MATRIX_SIZE,
-      this.uniformBufferAlignment,
-    );
+    this.alignedMatrixSize = Math.max(MATRIX_SIZE, this.uniformBufferAlignment);
 
     const MAX_OBJECTS = 100;
     this.modelUniformBuffer = this.device.createBuffer({
       label: "MODEL_UNIFORM_BUFFER",
-      size: MAX_OBJECTS * ALIGNED_MATRIX_SIZE,
+      size: MAX_OBJECTS * this.alignedMatrixSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -104,40 +91,6 @@ export class Renderer {
       bindGroupLayouts: [
         this.cameraBindGroupLayout,
         this.materialBindGroupLayout,
-      ],
-    });
-  }
-
-  /**
-   * Creates a bind group for a material (texture, sampler) and the shared model matrix buffer.
-   * @param imageUrl The URL of the texture to load.
-   * @returns A promise that resolves when the bind group is created.
-   */
-  public async createMaterialBindGroup(imageUrl: string): Promise<void> {
-    const texture = await createTextureFromImage(this.device, imageUrl);
-
-    this.materialBindGroup = this.device.createBindGroup({
-      label: "MATERIAL_BIND_GROUP",
-      layout: this.materialBindGroupLayout,
-      entries: [
-        {
-          binding: 0,
-          resource: {
-            buffer: this.modelUniformBuffer,
-            size: Math.max(
-              4 * 4 * Float32Array.BYTES_PER_ELEMENT,
-              this.uniformBufferAlignment,
-            ),
-          },
-        },
-        {
-          binding: 1,
-          resource: texture.createView(),
-        },
-        {
-          binding: 2,
-          resource: this.sampler,
-        },
       ],
     });
   }
@@ -218,13 +171,6 @@ export class Renderer {
    * @param scene - An array of Renderable objects to be rendered.
    */
   public render(camera: Camera, scene: Renderable[]): void {
-    if (!this.materialBindGroup) {
-      console.error(
-        "Render called before createMaterialBindGroup. No bind group available.",
-      );
-      return;
-    }
-
     // Update the GPU buffer of the camera once per frame.
     camera.writeToGpu(this.device.queue);
 
@@ -249,14 +195,9 @@ export class Renderer {
 
     let lastPipeline: GPURenderPipeline | undefined;
 
-    const ALIGNED_MATRIX_SIZE = Math.max(
-      4 * 4 * Float32Array.BYTES_PER_ELEMENT,
-      this.uniformBufferAlignment,
-    );
-
     // Iterate over the renderable objects and draw them.
     scene.forEach((renderable, i) => {
-      const { mesh, modelMatrix } = renderable;
+      const { mesh, modelMatrix, material } = renderable;
       const pipeline = this.getOrCreatePipeline(mesh.layout);
 
       if (pipeline !== lastPipeline) {
@@ -265,7 +206,7 @@ export class Renderer {
       }
 
       // Calculate the offset for the current object's matrix.
-      const bufferOffset = i * ALIGNED_MATRIX_SIZE;
+      const bufferOffset = i * this.alignedMatrixSize;
 
       // Write the matrix data to the uniform buffer at the calculated offset.
       this.device.queue.writeBuffer(
@@ -276,7 +217,8 @@ export class Renderer {
       );
 
       // Set the material bind group (@group(1)) with the dynamic offset.
-      passEncoder.setBindGroup(1, this.materialBindGroup, [bufferOffset]);
+      // This must be called for each object to update its dynamic offset.
+      passEncoder.setBindGroup(1, material.bindGroup, [bufferOffset]);
       passEncoder.setVertexBuffer(0, mesh.buffer);
       passEncoder.draw(mesh.vertexCount, 1, 0, 0);
     });
@@ -287,7 +229,7 @@ export class Renderer {
   }
 
   /**
-   * A helper method to get the camera bind group layout.
+   * Gets the camera bind group layout.
    * This is needed to initialize the camera object from outside the renderer.
    */
   public getCameraBindGroupLayout(): GPUBindGroupLayout {
@@ -297,5 +239,44 @@ export class Renderer {
       );
     }
     return this.cameraBindGroupLayout;
+  }
+
+  /**
+   * Gets the bind group layout for materials.
+   * Required by the Material class to create a compatible bind group.
+   */
+  public getMaterialBindGroupLayout(): GPUBindGroupLayout {
+    if (!this.materialBindGroupLayout) {
+      throw new Error(
+        "Material bind group layout is not initialized. Call init() first.",
+      );
+    }
+    return this.materialBindGroupLayout;
+  }
+
+  /**
+   * Gets the shared uniform buffer for model matrices.
+   * Required by the Material class to bind to its bind group.
+   */
+  public getModelUniformBuffer(): GPUBuffer {
+    if (!this.modelUniformBuffer) {
+      throw new Error(
+        "Model uniform buffer is not initialized. Call init() first.",
+      );
+    }
+    return this.modelUniformBuffer;
+  }
+
+  /**
+   * Gets the required aligned size for a single model matrix.
+   * Required by the Material class to specify the binding size.
+   */
+  public getAlignedMatrixSize(): number {
+    if (!this.alignedMatrixSize) {
+      throw new Error(
+        "Aligned matrix size is not calculated. Call init() first.",
+      );
+    }
+    return this.alignedMatrixSize;
   }
 }

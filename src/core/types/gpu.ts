@@ -1,5 +1,6 @@
 // src/core/types/gpu.ts
 import { Mat4 } from "wgpu-matrix";
+import { Material } from "../material";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -30,4 +31,5 @@ export interface Mesh {
 export interface Renderable {
   mesh: Mesh;
   modelMatrix: Mat4;
+  material: Material;
 }
