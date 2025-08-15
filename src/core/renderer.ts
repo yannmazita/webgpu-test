@@ -1,9 +1,9 @@
 // src/core/renderer.ts
 import shaderCode from "@/core/shaders/shaders.wgsl";
 import { createShaderModule } from "@/core/utils/webgpu";
-import { Renderable } from "./types/gpu";
-import { getLayoutKey } from "./utils/layout";
-import { Camera } from "./camera";
+import { getLayoutKey } from "@/core/utils/layout";
+import { Camera } from "@/core/camera";
+import { Scene } from "@/core/scene";
 
 export class Renderer {
   public device!: GPUDevice;
@@ -170,7 +170,7 @@ export class Renderer {
    * @param camera - The camera providing the view and projection matrices.
    * @param scene - An array of Renderable objects to be rendered.
    */
-  public render(camera: Camera, scene: Renderable[]): void {
+  public render(camera: Camera, scene: Scene): void {
     // Update the GPU buffer of the camera once per frame.
     camera.writeToGpu(this.device.queue);
 
@@ -196,7 +196,7 @@ export class Renderer {
     let lastPipeline: GPURenderPipeline | undefined;
 
     // Iterate over the renderable objects and draw them.
-    scene.forEach((renderable, i) => {
+    scene.objects.forEach((renderable, i) => {
       const { mesh, modelMatrix, material } = renderable;
       const pipeline = this.getOrCreatePipeline(mesh.layout);
 

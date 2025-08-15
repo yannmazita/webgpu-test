@@ -1,11 +1,10 @@
 // src/main.ts
 import { Renderer } from "@/core/renderer";
-import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 import "@/style.css";
-import { Renderable } from "@/core/types/gpu";
 import { mat4, vec3 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
-import { Material } from "./core/material";
+import { ResourceManager } from "./core/resourceManager";
+import { Scene } from "./core/scene";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -16,6 +15,8 @@ try {
   const renderer = new Renderer(canvas);
   await renderer.init();
 
+  const resourceManager = new ResourceManager(renderer);
+  const scene = new Scene();
   const camera = new Camera();
   // Initialize the GPU resources of the camera using the layout from the renderer
   camera.init(renderer.device, renderer.getCameraBindGroupLayout());
@@ -36,46 +37,31 @@ try {
     vec3.fromValues(0, 1, 0),
   );
 
-  // Create two materials
-  const material1 = new Material();
-  await material1.init(
-    renderer.device,
-    "/assets/rms.jpg",
-    renderer.getMaterialBindGroupLayout(),
-    renderer.getModelUniformBuffer(),
-    renderer.getAlignedMatrixSize(),
-  );
+  // Create materials and meshes
+  const [material1, material2, triforceMesh] = await Promise.all([
+    resourceManager.createMaterial("/assets/rms.jpg"),
+    resourceManager.createMaterial("/assets/rms2.jpg"),
+    Promise.resolve(resourceManager.createTriforceMesh()),
+  ]);
 
-  const material2 = new Material();
-  await material2.init(
-    renderer.device,
-    "/assets/rms2.jpg",
-    renderer.getMaterialBindGroupLayout(),
-    renderer.getModelUniformBuffer(),
-    renderer.getAlignedMatrixSize(),
-  );
+  // Create three renderable objects and add them to the scene.
+  scene.add({
+    mesh: triforceMesh,
+    modelMatrix: mat4.translation([0, 0.5, 0]),
+    material: material2,
+  });
 
-  // Create one mesh, which will be shared by all renderable objects.
-  const triforceMesh = createTriforceMesh(renderer.device);
+  scene.add({
+    mesh: triforceMesh,
+    modelMatrix: mat4.translation([-0.5, -0.5, 0]),
+    material: material1,
+  });
 
-  // Create three renderable objects, each with a unique model matrix.
-  const scene: Renderable[] = [
-    {
-      mesh: triforceMesh,
-      modelMatrix: mat4.translation([0, 0.5, 0]),
-      material: material2,
-    },
-    {
-      mesh: triforceMesh,
-      modelMatrix: mat4.translation([-0.5, -0.5, 0]),
-      material: material1,
-    },
-    {
-      mesh: triforceMesh,
-      modelMatrix: mat4.translation([0.5, -0.5, 0]),
-      material: material1,
-    },
-  ];
+  scene.add({
+    mesh: triforceMesh,
+    modelMatrix: mat4.translation([0.5, -0.5, 0]),
+    material: material1,
+  });
 
   renderer.render(camera, scene);
 } catch (error) {

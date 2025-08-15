@@ -1,6 +1,5 @@
 // src/core/types/gpu.ts
 import { Mat4 } from "wgpu-matrix";
-import { Material } from "../material";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -32,4 +31,14 @@ export interface Renderable {
   mesh: Mesh;
   modelMatrix: Mat4;
   material: Material;
+}
+
+/**
+ * Represents the material properties of a renderable object, encapsulating
+ * GPU resources like textures, samplers, and their corresponding bind group.
+ */
+export interface Material {
+  texture: GPUTexture;
+  sampler: GPUSampler;
+  bindGroup: GPUBindGroup;
 }
