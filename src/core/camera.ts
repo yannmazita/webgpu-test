@@ -3,15 +3,21 @@ import { Mat4, mat4, vec3, Vec3 } from "wgpu-matrix";
 
 /**
  * Represents a camera in the 3D scene, managing view and projection matrices.
+ * The camera determines the viewer's position and orientation (View) and
+ * the lens properties like field-of-view (Projection).
  */
 export class Camera {
-  // Properties for camera matrices
+  /** View matrix transforming from world space to view (camera) space. */
   public viewMatrix: Mat4;
+  /** Projection transforming from view space to clip space. */
   public projectionMatrix: Mat4;
+  /** Pre-calculated view-projection matrix (P * V) sent to the GPU. */
   public viewProjectionMatrix: Mat4;
 
-  // GPU-related resources
+  // GPU-related resources for the camera's uniform data.
+  /** GPU buffer storing the view-projection matrix. */
   private buffer!: GPUBuffer;
+  /** Bind group making the camera's buffer available to shaders. */
   public bindGroup!: GPUBindGroup;
 
   constructor() {
@@ -22,6 +28,10 @@ export class Camera {
 
   /**
    * Initializes GPU resources for the camera.
+   *
+   * This creates the uniform buffer and the bind group needed to link the
+   * matrix data of the camera to the shader pipeline.
+   *
    * @param device The GPUDevice.
    * @param layout The GPUBindGroupLayout for the camera's uniforms (@group(0)).
    */
@@ -46,11 +56,12 @@ export class Camera {
   }
 
   /**
-   * Sets a perspective projection matrix for the camera.
-   * @param fovYRadians Field of view in the Y direction, in radians.
-   * @param aspectRatio The aspect ratio of the canvas.
-   * @param near The near clipping plane.
-   * @param far The far clipping plane.
+   * Configures the camera with a perspective projection matrix.
+   *
+   * @param fovYRadians The vertical field of view in radians.
+   * @param aspectRatio The aspect ratio of the viewport (width / height).
+   * @param near The distance to the near clipping plane.
+   * @param far The distance to the far clipping plane.
    */
   public setPerspective(
     fovYRadians: number,
@@ -68,10 +79,12 @@ export class Camera {
   }
 
   /**
-   * Updates the camera's view matrix based on its position and target.
-   * @param position The position of the camera.
-   * @param target The point the camera is looking at.
-   * @param up The up vector for the camera (usually [0, 1, 0]).
+   * Updates the camera's view matrix to look at a specific target.
+   *
+   * @param position The position of the camera in world space.
+   * @param target The point in world space the camera should look at.
+   * @param up The vector defining the "up" direction for the camera,
+   *   typically `(0, 1, 0)`.
    */
   public lookAt(
     position: Vec3,
@@ -84,7 +97,7 @@ export class Camera {
 
   /**
    * Recalculates the combined view-projection matrix.
-   * This should be called whenever the view or projection matrix changes.
+   * This is called internally whenever the view or projection matrix changes.
    */
   private updateViewProjectionMatrix(): void {
     // The order of multiplication is crucial: projection * view
@@ -96,7 +109,7 @@ export class Camera {
   }
 
   /**
-   * Writes the current view-projection matrix to the GPU buffer.
+   * Writes the current view-projection matrix to the associated GPU buffer.
    * This should be called once per frame before rendering.
    * @param queue The GPUQueue to use for the write operation.
    */
