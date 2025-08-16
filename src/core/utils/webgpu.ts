@@ -1,5 +1,9 @@
 // src/core/utils/webgpu.ts
 import { TypedArray } from "@/core/types/gpu";
+import { Renderer } from "../renderer";
+import { Scene } from "../scene";
+import { Camera } from "../camera";
+import { vec3 } from "wgpu-matrix";
 
 /**
  * Checks if WebGPU is available and requests a GPU adapter.
