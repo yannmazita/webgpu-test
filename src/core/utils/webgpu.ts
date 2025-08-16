@@ -1,5 +1,9 @@
 // src/core/utils/webgpu.ts
 import { TypedArray } from "@/core/types/gpu";
+import { Renderer } from "../renderer";
+import { Scene } from "../scene";
+import { Camera } from "../camera";
+import { vec3 } from "wgpu-matrix";
 
 /**
  * Checks if WebGPU is available and requests a GPU adapter.
@@ -72,4 +76,16 @@ export const createGPUBuffer = (
   gpuBuffer.unmap(); // unmap buffer, transferring ownership of the memory to the GPU.
 
   return gpuBuffer;
+};
+
+export const frame = (renderer: Renderer, camera: Camera, scene: Scene) => {
+  camera.lookAt(
+    vec3.fromValues(0, 0, 1.5),
+    vec3.fromValues(0, 0, 0),
+    vec3.fromValues(0, 1, 0),
+  );
+
+  renderer.render(camera, scene);
+
+  requestAnimationFrame(frame);
 };

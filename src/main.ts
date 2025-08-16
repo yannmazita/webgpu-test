@@ -45,25 +45,51 @@ try {
   ]);
 
   // Create three renderable objects and add them to the scene.
+  const baseMatrices = [
+    mat4.translation([0, 0.5, 0]), // Top
+    mat4.translation([-0.5, -0.5, 0]), // Bottom-left
+    mat4.translation([0.5, -0.5, 0]), // Bottom-right
+  ];
+
   scene.add({
     mesh: triforceMesh,
-    modelMatrix: mat4.translation([0, 0.5, 0]),
+    modelMatrix: mat4.clone(baseMatrices[0]),
     material: material2,
   });
 
   scene.add({
     mesh: triforceMesh,
-    modelMatrix: mat4.translation([-0.5, -0.5, 0]),
+    modelMatrix: mat4.clone(baseMatrices[1]),
     material: material1,
   });
 
   scene.add({
     mesh: triforceMesh,
-    modelMatrix: mat4.translation([0.5, -0.5, 0]),
+    modelMatrix: mat4.clone(baseMatrices[2]),
     material: material1,
   });
 
   renderer.render(camera, scene);
+
+  let time = 0;
+  const animate = () => {
+    time += 0.01;
+
+    // Rotate in place (top triforce)
+    // modelMatrix = translation * rotation
+    const rotationY = mat4.rotationY(time);
+    mat4.multiply(baseMatrices[0], rotationY, scene.objects[0].modelMatrix);
+
+    // Orbit around the scene center (bottom-left triforce)
+    // modelMatrix = rotation * translation
+    const orbitRotation = mat4.rotationY(time * 0.7);
+    mat4.multiply(orbitRotation, baseMatrices[1], scene.objects[1].modelMatrix);
+
+    renderer.render(camera, scene);
+    requestAnimationFrame(animate);
+  };
+
+  animate();
 } catch (error) {
   console.error(error);
 
