@@ -5,20 +5,40 @@ import { getLayoutKey } from "@/core/utils/layout";
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
 
+/**
+ * The central rendering engine.
+ *
+ * This class manages the `GPUDevice`, canvas context, shader modules,
+ * render pipelines, and uniform buffers. It orchestrates the entire rendering
+ * process each frame, from setting up resources to submitting commands to the
+ * GPU.
+ */
 export class Renderer {
+  /** The primary WebGPU device used for all GPU operations. */
   public device!: GPUDevice;
 
   // Internal state management
+  /** The HTML canvas element to which the renderer will draw. */
   private canvas: HTMLCanvasElement;
+  /** The GPU-enabled context of the canvas. */
   private context!: GPUCanvasContext;
+  /** The GPU adapter, representing a physical GPU. */
   private adapter!: GPUAdapter;
+  /** A cache for render pipelines, keyed by vertex buffer layout. */
   private pipelines = new Map<string, GPURenderPipeline>();
+  /** The compiled WGSL shader module. */
   private shaderModule!: GPUShaderModule;
+  /** A shared uniform buffer for all object model matrices. */
   private modelUniformBuffer!: GPUBuffer;
+  /** The layout for the entire pipeline, defining all bind groups. */
   private pipelineLayout!: GPUPipelineLayout;
+  /** The layout for bind group 0, used for per-frame data like the camera. */
   private cameraBindGroupLayout!: GPUBindGroupLayout;
+  /** The layout for bind group 1, used for per-object/material data. */
   private materialBindGroupLayout!: GPUBindGroupLayout;
+  /** The required byte alignment for uniform buffer offsets. */
   private uniformBufferAlignment!: number;
+  /** The size of a model matrix, padded to meet uniform buffer alignment. */
   private alignedMatrixSize!: number;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -26,21 +46,24 @@ export class Renderer {
   }
 
   /**
-   * Initializes the WebGPU device, context, shaders, and buffers.
-   * This must be called before loading textures or rendering.
+   * Initializes the WebGPU device, context, shaders, and essential buffers.
+   * This method must be called before any rendering or resource creation.
    */
   public async init(): Promise<void> {
     await this.setupDevice();
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
+    // hardware-specific value
     this.uniformBufferAlignment =
       this.device.limits.minUniformBufferOffsetAlignment;
 
-    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
+    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
+    // Calculate the aligned size for a single matrix. Each matrix in the
+    // buffer must start at an offset that is a multiple of this alignment.
     this.alignedMatrixSize = Math.max(MATRIX_SIZE, this.uniformBufferAlignment);
 
-    const MAX_OBJECTS = 100;
+    const MAX_OBJECTS = 100; // max number of objects we can draw
     this.modelUniformBuffer = this.device.createBuffer({
       label: "MODEL_UNIFORM_BUFFER",
       size: MAX_OBJECTS * this.alignedMatrixSize,
@@ -87,10 +110,11 @@ export class Renderer {
       ],
     });
 
+    // The pipeline layout defines the full set of bind groups used by a pipeline.
     this.pipelineLayout = this.device.createPipelineLayout({
       bindGroupLayouts: [
-        this.cameraBindGroupLayout,
-        this.materialBindGroupLayout,
+        this.cameraBindGroupLayout, // @group(0)
+        this.materialBindGroupLayout, // @group(1)
       ],
     });
   }
@@ -128,7 +152,8 @@ export class Renderer {
 
   /**
    * Retrieves a cached pipeline for the given layout or creates a new one.
-   * @param layout - The vertex buffer layout for the mesh.
+   * Caching pipelines is a critical optimization as pipeline creation is expensive.
+   * @param layout - The vertex buffer layout for the mesh to be rendered.
    * @returns A GPURenderPipeline configured for the given layout.
    */
   private getOrCreatePipeline(
@@ -166,9 +191,9 @@ export class Renderer {
   }
 
   /**
-   * Renders a scene composed of multiple Renderable objects from a camera's perspective.
-   * @param camera - The camera providing the view and projection matrices.
-   * @param scene - An array of Renderable objects to be rendered.
+   * Renders a given `Scene` from the perspective of a `Camera`.
+   * @param camera The camera providing the view and projection matrices.
+   * @param scene The scene containing the list of objects to render.
    */
   public render(camera: Camera, scene: Scene): void {
     // Update the GPU buffer of the camera once per frame.
@@ -216,8 +241,7 @@ export class Renderer {
         modelMatrix as Float32Array,
       );
 
-      // Set the material bind group (@group(1)) with the dynamic offset.
-      // This must be called for each object to update its dynamic offset.
+      // Set the material bind group with a dynamic offset for the model matrix.
       passEncoder.setBindGroup(1, material.bindGroup, [bufferOffset]);
       passEncoder.setVertexBuffer(0, mesh.buffer);
       passEncoder.draw(mesh.vertexCount, 1, 0, 0);
@@ -243,7 +267,8 @@ export class Renderer {
 
   /**
    * Gets the bind group layout for materials.
-   * Required by the Material class to create a compatible bind group.
+   * Needed by the `ResourceManager` to create compatible material bind groups.
+   * @returns The material's `GPUBindGroupLayout`.
    */
   public getMaterialBindGroupLayout(): GPUBindGroupLayout {
     if (!this.materialBindGroupLayout) {
@@ -256,7 +281,8 @@ export class Renderer {
 
   /**
    * Gets the shared uniform buffer for model matrices.
-   * Required by the Material class to bind to its bind group.
+   * Needed by the `ResourceManager` to create material bind groups.
+   * @returns The model matrix `GPUBuffer`.
    */
   public getModelUniformBuffer(): GPUBuffer {
     if (!this.modelUniformBuffer) {
@@ -269,7 +295,7 @@ export class Renderer {
 
   /**
    * Gets the required aligned size for a single model matrix.
-   * Required by the Material class to specify the binding size.
+   * Needed by the `ResourceManager` to specify the binding size in the bind group.
    */
   public getAlignedMatrixSize(): number {
     if (!this.alignedMatrixSize) {
