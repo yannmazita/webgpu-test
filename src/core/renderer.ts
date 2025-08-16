@@ -4,12 +4,14 @@ import { createShaderModule } from "@/core/utils/webgpu";
 import { getLayoutKey } from "@/core/utils/layout";
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
+import { Mat4 } from "wgpu-matrix";
+import { Mesh } from "./types/gpu";
 
 /**
  * The central rendering engine.
  *
  * This class manages the `GPUDevice`, canvas context, shader modules,
- * render pipelines, and uniform buffers. It orchestrates the entire rendering
+ * render pipelines, and buffers. It orchestrates the entire rendering
  * process each frame, from setting up resources to submitting commands to the
  * GPU.
  */
@@ -28,18 +30,14 @@ export class Renderer {
   private pipelines = new Map<string, GPURenderPipeline>();
   /** The compiled WGSL shader module. */
   private shaderModule!: GPUShaderModule;
-  /** A shared uniform buffer for all object model matrices. */
-  private modelUniformBuffer!: GPUBuffer;
+  /** A shared buffer for per-instance data, primarily model matrices. */
+  private instanceBuffer!: GPUBuffer;
   /** The layout for the entire pipeline, defining all bind groups. */
   private pipelineLayout!: GPUPipelineLayout;
   /** The layout for bind group 0, used for per-frame data like the camera. */
   private cameraBindGroupLayout!: GPUBindGroupLayout;
   /** The layout for bind group 1, used for per-object/material data. */
   private materialBindGroupLayout!: GPUBindGroupLayout;
-  /** The required byte alignment for uniform buffer offsets. */
-  private uniformBufferAlignment!: number;
-  /** The size of a model matrix, padded to meet uniform buffer alignment. */
-  private alignedMatrixSize!: number;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -54,20 +52,12 @@ export class Renderer {
     this.setupContext();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
-    // hardware-specific value
-    this.uniformBufferAlignment =
-      this.device.limits.minUniformBufferOffsetAlignment;
-
+    const MAX_OBJECTS = 100; // max number of objects we can draw in one batch
     const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
-    // Calculate the aligned size for a single matrix. Each matrix in the
-    // buffer must start at an offset that is a multiple of this alignment.
-    this.alignedMatrixSize = Math.max(MATRIX_SIZE, this.uniformBufferAlignment);
-
-    const MAX_OBJECTS = 100; // max number of objects we can draw
-    this.modelUniformBuffer = this.device.createBuffer({
-      label: "MODEL_UNIFORM_BUFFER",
-      size: MAX_OBJECTS * this.alignedMatrixSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    this.instanceBuffer = this.device.createBuffer({
+      label: "INSTANCE_MODEL_MATRIX_BUFFER",
+      size: MAX_OBJECTS * MATRIX_SIZE,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
 
     /**
@@ -86,24 +76,19 @@ export class Renderer {
     });
 
     /**
-     * Layout for @group(1), containing per-material or per-object data.
-     * Corresponds to the Model struct and material textures in shaders.wgsl.
+     * Layout for @group(1), containing per-material data.
+     * Corresponds to the material textures/samplers in shaders.wgsl.
      */
     this.materialBindGroupLayout = this.device.createBindGroupLayout({
       label: "MATERIAL_BIND_GROUP_LAYOUT",
       entries: [
         {
-          binding: 0, // Model Uniform Buffer
-          visibility: GPUShaderStage.VERTEX,
-          buffer: { type: "uniform", hasDynamicOffset: true },
-        },
-        {
-          binding: 1, // Texture View
+          binding: 0, // Texture View
           visibility: GPUShaderStage.FRAGMENT,
           texture: {},
         },
         {
-          binding: 2, // Sampler
+          binding: 1, // Sampler
           visibility: GPUShaderStage.FRAGMENT,
           sampler: {},
         },
@@ -165,13 +150,31 @@ export class Renderer {
       return this.pipelines.get(layoutKey)!;
     }
 
+    // Define the layout for the per-instance model matrix buffer.
+    const instanceMatrixLayout: GPUVertexBufferLayout = {
+      arrayStride: 4 * 4 * Float32Array.BYTES_PER_ELEMENT, // 4x4 matrix of 32-bit floats
+      stepMode: "instance",
+      // The model matrix is passed as four vec4 attributes.
+      // (it's too big to pass through a single location)
+      attributes: [
+        // col 1
+        { shaderLocation: 3, offset: 0, format: "float32x4" },
+        // col 2
+        { shaderLocation: 4, offset: 16, format: "float32x4" },
+        // col 3
+        { shaderLocation: 5, offset: 32, format: "float32x4" },
+        // col 4
+        { shaderLocation: 6, offset: 48, format: "float32x4" },
+      ],
+    };
+
     // If not, create a new pipeline.
     const newPipeline = this.device.createRenderPipeline({
       layout: this.pipelineLayout, // Use the shared pipeline layout
       vertex: {
         module: this.shaderModule,
         entryPoint: "vs_main",
-        buffers: [layout], // Use the provided layout
+        buffers: [layout, instanceMatrixLayout], // Pass both layouts
       },
       fragment: {
         module: this.shaderModule,
@@ -199,6 +202,26 @@ export class Renderer {
     // Update the GPU buffer of the camera once per frame.
     camera.writeToGpu(this.device.queue);
 
+    // Group renderable objects by mesh and material to enable instancing.
+    // We use a Map where the key is the material's bind group, and the value
+    // is another Map where the key is the mesh and value is the list of matrices.
+    const batches = new Map<GPUBindGroup, Map<Mesh, Mat4[]>>();
+
+    for (const renderable of scene.objects) {
+      const { mesh, material, modelMatrix } = renderable;
+
+      if (!batches.has(material.bindGroup)) {
+        batches.set(material.bindGroup, new Map<Mesh, Mat4[]>());
+      }
+      const materialBatch = batches.get(material.bindGroup)!;
+
+      if (!materialBatch.has(mesh)) {
+        materialBatch.set(mesh, []);
+      }
+      const meshBatch = materialBatch.get(mesh)!;
+      meshBatch.push(modelMatrix);
+    }
+
     const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
 
@@ -218,37 +241,53 @@ export class Renderer {
     // Set the camera bind group once for the entire render pass.
     passEncoder.setBindGroup(0, camera.bindGroup);
 
-    let lastPipeline: GPURenderPipeline | undefined;
+    // Keep track of the current offset into the instance buffer.
+    let instanceDataOffset = 0;
 
-    // Iterate over the renderable objects and draw them.
-    scene.objects.forEach((renderable, i) => {
-      const { mesh, modelMatrix, material } = renderable;
-      const pipeline = this.getOrCreatePipeline(mesh.layout);
+    // Iterate over the batched objects and draw them using instancing.
+    for (const [materialBindGroup, meshMap] of batches.entries()) {
+      passEncoder.setBindGroup(1, materialBindGroup);
 
-      if (pipeline !== lastPipeline) {
+      for (const [mesh, modelMatrices] of meshMap.entries()) {
+        const pipeline = this.getOrCreatePipeline(mesh.layout);
         passEncoder.setPipeline(pipeline);
-        lastPipeline = pipeline;
+
+        // Prepare instance data
+        const instanceCount = modelMatrices.length;
+        const matrixSize = 16 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
+        const batchByteLength = instanceCount * matrixSize;
+        const matrixData = new Float32Array(instanceCount * 16);
+
+        for (let i = 0; i < instanceCount; i++) {
+          matrixData.set(modelMatrices[i], i * 16);
+        }
+
+        // Write all matrix data for this batch to the instance buffer
+        // at the correct offset.
+        this.device.queue.writeBuffer(
+          this.instanceBuffer,
+          instanceDataOffset,
+          matrixData,
+        );
+
+        // Set the vertex and instance buffers
+        passEncoder.setVertexBuffer(0, mesh.buffer);
+        passEncoder.setVertexBuffer(
+          1,
+          this.instanceBuffer,
+          instanceDataOffset, // Use the offset for this batch
+          batchByteLength, // Specify the size of the data to use
+        );
+
+        // Draw all instances in a single call.
+        passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+
+        // Increment the offset for the next batch.
+        instanceDataOffset += batchByteLength;
       }
-
-      // Calculate the offset for the current object's matrix.
-      const bufferOffset = i * this.alignedMatrixSize;
-
-      // Write the matrix data to the uniform buffer at the calculated offset.
-      this.device.queue.writeBuffer(
-        // Use the model uniform buffer
-        this.modelUniformBuffer,
-        bufferOffset,
-        modelMatrix as Float32Array,
-      );
-
-      // Set the material bind group with a dynamic offset for the model matrix.
-      passEncoder.setBindGroup(1, material.bindGroup, [bufferOffset]);
-      passEncoder.setVertexBuffer(0, mesh.buffer);
-      passEncoder.draw(mesh.vertexCount, 1, 0, 0);
-    });
+    }
 
     passEncoder.end();
-
     this.device.queue.submit([commandEncoder.finish()]);
   }
 
@@ -277,32 +316,5 @@ export class Renderer {
       );
     }
     return this.materialBindGroupLayout;
-  }
-
-  /**
-   * Gets the shared uniform buffer for model matrices.
-   * Needed by the `ResourceManager` to create material bind groups.
-   * @returns The model matrix `GPUBuffer`.
-   */
-  public getModelUniformBuffer(): GPUBuffer {
-    if (!this.modelUniformBuffer) {
-      throw new Error(
-        "Model uniform buffer is not initialized. Call init() first.",
-      );
-    }
-    return this.modelUniformBuffer;
-  }
-
-  /**
-   * Gets the required aligned size for a single model matrix.
-   * Needed by the `ResourceManager` to specify the binding size in the bind group.
-   */
-  public getAlignedMatrixSize(): number {
-    if (!this.alignedMatrixSize) {
-      throw new Error(
-        "Aligned matrix size is not calculated. Call init() first.",
-      );
-    }
-    return this.alignedMatrixSize;
   }
 }

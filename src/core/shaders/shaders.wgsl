@@ -10,13 +10,12 @@
  *   - Bindings:
  *     @binding(0): Camera (View/Projection Matrix)
  *
- * @group(1) - Per-Material / Per-Object Data
- *   - Updated for each distinct material or object.
- *   - Contains resources specific to the thing being drawn.
+ * @group(1) - Per-Material
+ *   - Updated for each distinct material.
+ *   - Contains resources specific to the material being drawn.
  *   - Bindings:
- *     @binding(0): Model Uniforms (Model Matrix, etc.)
- *     @binding(1): Diffuse Texture
- *     @binding(2): Texture Sampler
+ *     @binding(0): Diffuse Texture
+ *     @binding(1): Texture Sampler
  */
 
 // Uniforms that are constant for the entire frame (like camera matrices).
@@ -27,15 +26,6 @@ struct Camera {
 // @group(0) is for per-frame data.
 @group(0) @binding(0)
 var<uniform> camera: Camera;
-
-// Uniforms that change for each object being drawn.
-struct Model {
-    modelMatrix: mat4x4<f32>,
-}
-
-// @group(1) is for per-object/material data.
-@group(1) @binding(0)
-var<uniform> model: Model;
 
 // This struct defines the data that is passed from the vertex shader
 // to the fragment shader. The GPU interpolates these values for each pixel.
@@ -59,11 +49,25 @@ fn vs_main(
     // @location(1) maps to shaderLocation: 1 (vertex color).
     @location(1) inColor: vec3<f32>,
     // @location(2) maps to shaderLocation: 2 (texture coordinates).
-    @location(2) inTexCoords: vec2<f32>
+    @location(2) inTexCoords: vec2<f32>,
+
+    // Per-instance attributes for the model matrix
+    @location(3) model_mat_col_0: vec4<f32>,
+    @location(4) model_mat_col_1: vec4<f32>,
+    @location(5) model_mat_col_2: vec4<f32>,
+    @location(6) model_mat_col_3: vec4<f32>,
 ) -> VertexOutput {
     var out: VertexOutput;
+    // Reconstruct the model matrix from the instance attributes.
+    let modelMatrix = mat4x4<f32>(
+      model_mat_col_0,
+      model_mat_col_1,
+      model_mat_col_2,
+      model_mat_col_3
+    );
+
     // Transform the vertex position from model space -> world space -> clip space.
-    out.clip_position = camera.viewProjectionMatrix * model.modelMatrix * vec4<f32>(inPos, 1.0);
+    out.clip_position = camera.viewProjectionMatrix * modelMatrix * vec4<f32>(inPos, 1.0);
     // Pass the color and texture coordinates through to the fragment shader.
     out.color = inColor;
     out.tex_coords = inTexCoords;
@@ -71,9 +75,9 @@ fn vs_main(
 }
 
 // Bindings for material properties like textures and samplers.
-@group(1) @binding(1)
+@group(1) @binding(0)
 var t_diffuse: texture_2d<f32>; // The object's diffuse texture.
-@group(1) @binding(2)
+@group(1) @binding(1)
 var s_diffuse: sampler; // The sampler used to read from the texture.
 
 @fragment

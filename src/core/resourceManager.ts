@@ -60,18 +60,11 @@ export class ResourceManager {
       layout: this.renderer.getMaterialBindGroupLayout(),
       entries: [
         {
-          binding: 0, // Model Uniform Buffer
-          resource: {
-            buffer: this.renderer.getModelUniformBuffer(),
-            size: this.renderer.getAlignedMatrixSize(),
-          },
-        },
-        {
-          binding: 1, // Texture View
+          binding: 0, // Texture View
           resource: texture.createView(),
         },
         {
-          binding: 2, // Sampler
+          binding: 1, // Sampler
           resource: sampler,
         },
       ],

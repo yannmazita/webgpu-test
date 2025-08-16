@@ -72,7 +72,7 @@ try {
   renderer.render(camera, scene);
 
   let time = 0;
-  const animate = () => {
+  const animate = (camera: Camera) => {
     time += 0.01;
 
     // Rotate in place (top triforce)
@@ -86,10 +86,10 @@ try {
     mat4.multiply(orbitRotation, baseMatrices[1], scene.objects[1].modelMatrix);
 
     renderer.render(camera, scene);
-    requestAnimationFrame(animate);
+    requestAnimationFrame(() => animate(camera));
   };
 
-  animate();
+  animate(camera);
 } catch (error) {
   console.error(error);
 
