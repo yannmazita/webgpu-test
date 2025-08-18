@@ -84,11 +84,19 @@ var s_diffuse: sampler; // The sampler used to read from the texture.
 fn fs_main(
     // The 'in' parameter receives the interpolated values from the
     // VertexOutput struct for the current fragment (pixel).
-    in: VertexOutput) -> @location(0) vec4<f32> {
+    in: VertexOutput,
+    @builtin(front_facing) face: bool
+    ) -> @location(0) vec4<f32> {
     // Sample the texture at the interpolated texture coordinates.
     let texture_color = textureSample(t_diffuse, s_diffuse, in.tex_coords);
 
     // Combine the texture color with the interpolated vertex color.
     // we use .rgb to ignore the texture's alpha channel to have a solid object.
-    return vec4<f32>(texture_color.rgb * in.color, 1.0);
+    // we're also coloring back-facing faces green
+    if (face) {
+      return vec4<f32>(texture_color.rgb * in.color, 1.0);
+    }
+    else {
+      return vec4<f32>(0.0, 1.0, 0.0 ,1.0);
+    }
 }

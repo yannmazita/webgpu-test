@@ -184,7 +184,9 @@ export class Renderer {
       primitive: {
         topology: "triangle-list",
         frontFace: "ccw",
-        cullMode: "back",
+        // using none to disable culling of back-facing faces and color them
+        // in the shader
+        cullMode: "none",
       },
     });
 
