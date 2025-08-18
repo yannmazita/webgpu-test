@@ -1,11 +1,11 @@
-// src/main.ts
+// src/app/main.ts
 import { Renderer } from "@/core/renderer";
 import "@/style.css";
 import { mat4, vec3 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
-import { ResourceManager } from "./core/resourceManager";
-import { Scene } from "./core/scene";
-import { createTriforceMesh } from "./features/triforce/meshes/triforceMesh";
+import { ResourceManager } from "@/core/resourceManager";
+import { Scene } from "@/core/scene";
+import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -39,8 +39,8 @@ try {
 
   // Create materials and meshes
   const [material1, material2, triforceMesh] = await Promise.all([
-    resourceManager.createMaterial("/assets/rms.jpg"),
-    resourceManager.createMaterial("/assets/rms2.jpg"),
+    resourceManager.createMaterial("/assets/textures/rms.jpg"),
+    resourceManager.createMaterial("/assets/textures/rms2.jpg"),
     Promise.resolve(createTriforceMesh(resourceManager)),
   ]);
 
