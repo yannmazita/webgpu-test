@@ -1,9 +1,5 @@
 // src/core/utils/webgpu.ts
 import { TypedArray } from "@/core/types/gpu";
-import { Renderer } from "../renderer";
-import { Scene } from "../scene";
-import { Camera } from "../camera";
-import { vec3 } from "wgpu-matrix";
 
 /**
  * Checks if WebGPU is available and requests a GPU adapter.
@@ -43,7 +39,8 @@ export const createShaderModule = (
  * Creates and populates a GPUBuffer from a TypedArray.
  *
  * This utility simplifies the common pattern of creating a buffer, mapping it,
- * copying data, and unmapping it.
+ * copying data, and unmapping it. It also handles the WebGPU requirement to
+ * have buffers size be a multiple of 4 when using mappedAtCreation.
  *
  * @param device - The GPU device used to create the buffer.
  * @param data - The typed array of data to be copied into the buffer.
@@ -56,8 +53,12 @@ export const createGPUBuffer = (
   data: TypedArray,
   usage: GPUBufferUsageFlags,
 ): GPUBuffer => {
+  // Pad the buffer size to a multiple of 4 bytes.
+  // This is required for buffers created with mappedAtCreation set to true.
+  const paddedSize = Math.ceil(data.byteLength / 4) * 4;
+
   const bufferDescriptor: GPUBufferDescriptor = {
-    size: data.byteLength,
+    size: paddedSize,
     usage: usage,
     mappedAtCreation: true,
   };
