@@ -32,6 +32,8 @@ export class Renderer {
   private shaderModule!: GPUShaderModule;
   /** A shared buffer for per-instance data, primarily model matrices. */
   private instanceBuffer!: GPUBuffer;
+  /** A depth texture to store depth information of fragments. */
+  private depthTexture!: GPUTexture;
   /** The layout for the entire pipeline, defining all bind groups. */
   private pipelineLayout!: GPUPipelineLayout;
   /** The layout for bind group 0, used for per-frame data like the camera. */
@@ -50,6 +52,7 @@ export class Renderer {
   public async init(): Promise<void> {
     await this.setupDevice();
     this.setupContext();
+    this.createDepthTexture();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
     const MAX_OBJECTS = 100; // max number of objects we can draw in one batch
@@ -136,6 +139,21 @@ export class Renderer {
   }
 
   /**
+   * Creates the depth texture for the renderer.
+   * This texture is used for depth testing to ensure objects are drawn in the
+   * correct order. It must be recreated if the canvas is resized.
+   */
+  private createDepthTexture(): void {
+    this.depthTexture = this.device.createTexture({
+      size: [this.canvas.width, this.canvas.height],
+      //size: [this.canvas.width, this.canvas.height, 1],
+      dimension: "2d",
+      format: "depth24plus-stencil8", // same as the depthStencil in the pipeline
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
+
+  /**
    * Retrieves a cached pipeline for the given layout or creates a new one.
    * Caching pipelines is a critical optimization as pipeline creation is expensive.
    * @param layout - The vertex buffer layout for the mesh to be rendered.
@@ -188,6 +206,11 @@ export class Renderer {
         // in the shader
         cullMode: "none",
       },
+      depthStencil: {
+        depthWriteEnabled: true,
+        depthCompare: "less",
+        format: "depth24plus-stencil8",
+      },
     });
 
     // Cache the new pipeline for future use.
@@ -236,6 +259,15 @@ export class Renderer {
           storeOp: "store",
         },
       ],
+      depthStencilAttachment: {
+        view: this.depthTexture.createView(),
+        depthClearValue: 1,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+        stencilClearValue: 0,
+        stencilLoadOp: "clear",
+        stencilStoreOp: "store",
+      },
     });
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
