@@ -21,6 +21,9 @@ export interface Mesh {
   buffer: GPUBuffer;
   vertexCount: number;
   layout: GPUVertexBufferLayout;
+  indexBuffer?: GPUBuffer;
+  indexFormat?: GPUIndexFormat;
+  indexCount?: number;
 }
 
 /**

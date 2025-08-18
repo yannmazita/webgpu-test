@@ -94,6 +94,7 @@ export class ResourceManager {
     key: string,
     vertexData: Float32Array,
     layout: GPUVertexBufferLayout,
+    indexData?: Uint16Array | Uint32Array,
   ): Mesh {
     if (this.meshes.has(key)) {
       return this.meshes.get(key)!;
@@ -107,6 +108,16 @@ export class ResourceManager {
     const vertexCount =
       vertexData.length / (layout.arrayStride / Float32Array.BYTES_PER_ELEMENT);
     const mesh: Mesh = { buffer, vertexCount, layout };
+
+    if (indexData) {
+      mesh.indexBuffer = createGPUBuffer(
+        this.renderer.device,
+        indexData,
+        GPUBufferUsage.INDEX,
+      );
+      mesh.indexCount = indexData.length;
+      mesh.indexFormat = indexData instanceof Uint16Array ? "uint16" : "uint32";
+    }
 
     this.meshes.set(key, mesh);
     return mesh;

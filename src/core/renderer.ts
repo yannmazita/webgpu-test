@@ -314,7 +314,13 @@ export class Renderer {
         );
 
         // Draw all instances in a single call.
-        passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+        // Use drawIndexed if an index buffer is available, otherwise use draw.
+        if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
+          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+          passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
+        } else {
+          passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+        }
 
         // Increment the offset for the next batch.
         instanceDataOffset += batchByteLength;

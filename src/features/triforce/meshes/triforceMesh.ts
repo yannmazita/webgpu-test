@@ -3,7 +3,7 @@ import { Mesh } from "@/core/types/gpu";
 import { ResourceManager } from "@/core/resourceManager";
 
 /**
- * Creates a triforce mesh.
+ * Creates a triforce mesh using an index buffer.
  *
  * @param resourceManager - The resource manager instance.
  * @returns The triforce mesh.
@@ -11,26 +11,27 @@ import { ResourceManager } from "@/core/resourceManager";
 export const createTriforceMesh = (resourceManager: ResourceManager): Mesh => {
   // prettier-ignore
   const vertices = new Float32Array([
-    // Each vertex: Position (x,y,z), Color (r,g,b), Tex Coords (u,v)
-
-    // Top triangle
+    // Each vertex: Position(x,y,z), Color(r,g,b), Tex Coords(u,v)
+    //                                                           // Index
     // Position          Color             Tex Coords
-     0.00,  0.50, 0.0,   1.0, 1.0, 1.0,    0.5, 0.0,
-    -0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.25, 0.5,
-     0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.75, 0.5,
-
-    // Bottom-left triangle
-    // Position          Color             Tex Coords
-    -0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.25, 0.5,
-    -0.50, -0.50, 0.0,   1.0, 1.0, 1.0,    0.0, 1.0,
-     0.00, -0.50, 0.0,   1.0, 1.0, 1.0,    0.5, 1.0,
-
-    // Bottom-right triangle
-    // Position          Color             Tex Coords
-     0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.75, 0.5,
-     0.00, -0.50, 0.0,   1.0, 1.0, 1.0,    0.5, 1.0,
-     0.50, -0.50, 0.0,   1.0, 1.0, 1.0,    1.0, 1.0,
+     0.00,  0.50, 0.0,   1.0, 1.0, 1.0,    0.5,  0.0,   // 0
+    -0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.25, 0.5,   // 1
+     0.25,  0.00, 0.0,   1.0, 1.0, 1.0,    0.75, 0.5,   // 2
+    -0.50, -0.50, 0.0,   1.0, 1.0, 1.0,    0.0,  1.0,   // 3
+     0.00, -0.50, 0.0,   1.0, 1.0, 1.0,    0.5,  1.0,   // 4
+     0.50, -0.50, 0.0,   1.0, 1.0, 1.0,    1.0,  1.0,   // 5
   ]);
+
+  // Define the order in which to draw the vertices to form three triangles.
+  const indices = new Uint16Array([
+    // Top triangle
+    0, 1, 2,
+    // Bottom-left triangle
+    1, 3, 4,
+    // Bottom-right triangle
+    2, 4, 5,
+  ]);
+
   const MESH_KEY = "TRIFORCE_MESH";
 
   const layout: GPUVertexBufferLayout = {
@@ -59,5 +60,5 @@ export const createTriforceMesh = (resourceManager: ResourceManager): Mesh => {
     ],
   };
 
-  return resourceManager.createMesh(MESH_KEY, vertices, layout);
+  return resourceManager.createMesh(MESH_KEY, vertices, layout, indices);
 };
