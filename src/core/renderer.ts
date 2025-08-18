@@ -41,6 +41,10 @@ export class Renderer {
   /** The layout for bind group 1, used for per-object/material data. */
   private materialBindGroupLayout!: GPUBindGroupLayout;
 
+  // Constants
+  private static readonly MATRIX_BYTE_SIZE =
+    4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
   }
@@ -54,14 +58,6 @@ export class Renderer {
     this.setupContext();
     this.createDepthTexture();
     this.shaderModule = createShaderModule(this.device, shaderCode);
-
-    const MAX_OBJECTS = 100; // max number of objects we can draw in one batch
-    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
-    this.instanceBuffer = this.device.createBuffer({
-      label: "INSTANCE_MODEL_MATRIX_BUFFER",
-      size: MAX_OBJECTS * MATRIX_SIZE,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    });
 
     /**
      * Layout for @group(0), containing per-frame scene data like the camera.
@@ -245,6 +241,29 @@ export class Renderer {
       }
       const meshBatch = materialBatch.get(mesh)!;
       meshBatch.push(modelMatrix);
+    }
+
+    let totalInstanceCount = 0;
+    for (const meshMap of batches.values()) {
+      for (const matrices of meshMap.values()) {
+        totalInstanceCount += matrices.length;
+      }
+    }
+
+    const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
+
+    if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
+      if (this.instanceBuffer) {
+        this.instanceBuffer.destroy();
+      }
+      // Allocate 50% more space to avoid reallocating every frame
+      // on minor object count changes.
+      const newSize = Math.ceil(requiredBufferSize * 1.5);
+      this.instanceBuffer = this.device.createBuffer({
+        label: "INSTANCE_MODEL_MATRIX_BUFFER",
+        size: newSize,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
     }
 
     const textureView = this.context.getCurrentTexture().createView();
