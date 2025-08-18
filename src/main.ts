@@ -72,25 +72,27 @@ try {
 
   renderer.render(camera, scene);
 
-  let time = 0;
-  const animate = (camera: Camera) => {
-    time += 0.01;
+  const startTime = performance.now(); // in milliseconds.
+
+  const animate = (now: number) => {
+    const time = (now - startTime) / 1000;
 
     // Rotate in place (top triforce)
     // modelMatrix = translation * rotation
-    const rotationY = mat4.rotationY(time);
+    const rotationY = mat4.rotationY(time * 3);
     mat4.multiply(baseMatrices[0], rotationY, scene.objects[0].modelMatrix);
 
     // Orbit around the scene center (bottom-left triforce)
     // modelMatrix = rotation * translation
-    const orbitRotation = mat4.rotationY(time * 0.7);
+    const orbitRotation = mat4.rotationY(time * 2);
     mat4.multiply(orbitRotation, baseMatrices[1], scene.objects[1].modelMatrix);
 
     renderer.render(camera, scene);
-    requestAnimationFrame(() => animate(camera));
+    requestAnimationFrame(animate);
   };
 
-  animate(camera);
+  // Start the animation loop.
+  requestAnimationFrame(animate);
 } catch (error) {
   console.error(error);
 
