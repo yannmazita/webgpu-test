@@ -22,11 +22,10 @@ try {
   // Initialize the GPU resources of the camera using the layout from the renderer
   camera.init(renderer.device, renderer.getCameraBindGroupLayout());
 
-  // Configure camera projection
-  const aspectRatio = canvas.width / canvas.height;
+  // Configure camera projection (this will be set properly by the resize handler)
   camera.setPerspective(
     (90 * Math.PI) / 180, // 90 degrees field of view
-    aspectRatio,
+    1, // dummy aspect ratio
     0.1,
     100.0,
   );
@@ -70,19 +69,33 @@ try {
     material: material1,
   });
 
-  const canvasResizeObserver = new ResizeObserver((entries) => {
-    // only need the last entry
-    const lastEntry = entries[entries.length - 1];
-    if (!lastEntry) {
+  const handleResize = () => {
+    const newWidth = canvas.clientWidth;
+    const newHeight = canvas.clientHeight;
+
+    // Prevent unnecessary updates if the size hasn't changed
+    if (canvas.width === newWidth && canvas.height === newHeight) {
       return;
     }
+
+    // Update the canvas drawing buffer size
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+
+    // Update renderer resources
     renderer.resizeCanvas();
+
+    // Update camera projection
     camera.setPerspective(
       (90 * Math.PI) / 180, // 90 degrees field of view
-      lastEntry.contentRect.width / lastEntry.contentRect.height,
+      newWidth / newHeight,
       0.1,
       100.0,
     );
+  };
+
+  const canvasResizeObserver = new ResizeObserver(() => {
+    handleResize();
   });
   canvasResizeObserver.observe(canvas);
 
