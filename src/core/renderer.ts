@@ -43,7 +43,7 @@ export class Renderer {
 
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
-    4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
+    4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
