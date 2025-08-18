@@ -1,17 +1,14 @@
 // src/features/triforce/meshes/triforceMesh.ts
-import { createGPUBuffer } from "@/core/utils/webgpu";
 import { Mesh } from "@/core/types/gpu";
+import { ResourceManager } from "@/core/resourceManager";
 
 /**
- * Creates a vertex buffer for a triforce.
+ * Creates a triforce mesh.
  *
- * @param device - The GPU device used to allocate the buffer.
- * @param xOffset - The horizontal offset for the mesh. Defaults to 0.
- * @param yOffset - The vertical offset for the mesh. Defaults to 0.
- * @returns An object conforming to the Mesh interface, containing the
- *          GPUBuffer and vertex count for the triforce.
+ * @param resourceManager - The resource manager instance.
+ * @returns The triforce mesh.
  */
-export const createTriforceMesh = (device: GPUDevice): Mesh => {
+export const createTriforceMesh = (resourceManager: ResourceManager): Mesh => {
   // prettier-ignore
   const vertices = new Float32Array([
     // Each vertex: Position (x,y,z), Color (r,g,b), Tex Coords (u,v)
@@ -34,8 +31,7 @@ export const createTriforceMesh = (device: GPUDevice): Mesh => {
      0.00, -0.50, 0.0,   1.0, 1.0, 1.0,    0.5, 1.0,
      0.50, -0.50, 0.0,   1.0, 1.0, 1.0,    1.0, 1.0,
   ]);
-
-  const buffer = createGPUBuffer(device, vertices, GPUBufferUsage.VERTEX);
+  const MESH_KEY = "TRIFORCE_MESH";
 
   const layout: GPUVertexBufferLayout = {
     // arrayStride: (3 pos + 3 color + 2 uv) * 4 bytes/float = 32 bytes
@@ -63,5 +59,5 @@ export const createTriforceMesh = (device: GPUDevice): Mesh => {
     ],
   };
 
-  return { buffer, vertexCount: 9, layout };
+  return resourceManager.createMesh(MESH_KEY, vertices, layout);
 };

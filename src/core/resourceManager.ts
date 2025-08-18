@@ -3,6 +3,7 @@ import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 import { Renderer } from "./renderer";
 import { Material, Mesh } from "./types/gpu";
 import { createTextureFromImage } from "./utils/texture";
+import { createGPUBuffer } from "./utils/webgpu";
 
 /**
  * Manages the creation, loading, and caching of GPU resources.
@@ -81,22 +82,33 @@ export class ResourceManager {
   }
 
   /**
-   * Creates the triforce mesh or retrieves it from the cache.
+   * Creates a mesh or retrieves it from the cache.
    *
    * A `Mesh` encapsulates a `GPUBuffer` containing vertex data and the
    * `GPUVertexBufferLayout` describing that data. This method ensures that the
-   * triforce mesh is only created once.
+   * mesh is only created once.
    *
-   * @returns The `Mesh` object for the triforce.
+   * @returns The mesh object.
    */
-  public createTriforceMesh(): Mesh {
-    const MESH_KEY = "TRIFORCE_MESH";
-    if (this.meshes.has(MESH_KEY)) {
-      return this.meshes.get(MESH_KEY)!;
+  public createMesh(
+    key: string,
+    vertexData: Float32Array,
+    layout: GPUVertexBufferLayout,
+  ): Mesh {
+    if (this.meshes.has(key)) {
+      return this.meshes.get(key)!;
     }
 
-    const mesh = createTriforceMesh(this.renderer.device);
-    this.meshes.set(MESH_KEY, mesh);
+    const buffer = createGPUBuffer(
+      this.renderer.device,
+      vertexData,
+      GPUBufferUsage.VERTEX,
+    );
+    const vertexCount =
+      vertexData.length / (layout.arrayStride / Float32Array.BYTES_PER_ELEMENT);
+    const mesh: Mesh = { buffer, vertexCount, layout };
+
+    this.meshes.set(key, mesh);
     return mesh;
   }
 }
