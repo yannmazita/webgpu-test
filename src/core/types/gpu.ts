@@ -18,9 +18,11 @@ export type TypedArray =
  * Represents a renderable object with its GPU buffer and metadata.
  */
 export interface Mesh {
-  buffer: GPUBuffer;
+  /** One GPU buffer for each vertex attribute (positions, normals). */
+  buffers: GPUBuffer[];
+  /** The layout descriptions for each buffer in the buffers array. */
+  layouts: GPUVertexBufferLayout[];
   vertexCount: number;
-  layout: GPUVertexBufferLayout;
   indexBuffer?: GPUBuffer;
   indexFormat?: GPUIndexFormat;
   indexCount?: number;
