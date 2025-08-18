@@ -70,6 +70,22 @@ try {
     material: material1,
   });
 
+  const canvasResizeObserver = new ResizeObserver((entries) => {
+    // only need the last entry
+    const lastEntry = entries[entries.length - 1];
+    if (!lastEntry) {
+      return;
+    }
+    renderer.resizeCanvas();
+    camera.setPerspective(
+      (90 * Math.PI) / 180, // 90 degrees field of view
+      lastEntry.contentRect.width / lastEntry.contentRect.height,
+      0.1,
+      100.0,
+    );
+  });
+  canvasResizeObserver.observe(canvas);
+
   renderer.render(camera, scene);
 
   const startTime = performance.now(); // in milliseconds.

@@ -150,6 +150,16 @@ export class Renderer {
   }
 
   /**
+   * Handles canvas resizing in the renderer.
+   *
+   * This method destoys and recreates the depth texture.
+   */
+  public resizeCanvas(): void {
+    this.depthTexture.destroy();
+    this.createDepthTexture();
+  }
+
+  /**
    * Retrieves a cached pipeline for the given layout or creates a new one.
    * Caching pipelines is a critical optimization as pipeline creation is expensive.
    * @param layout - The vertex buffer layout for the mesh to be rendered.
