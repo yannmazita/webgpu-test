@@ -1,4 +1,4 @@
-// src/loaders/objLoader.ts
+// src/loaders/stlLoader.ts
 import { Vec3, vec3 } from "wgpu-matrix";
 
 export interface STLGeometry {
