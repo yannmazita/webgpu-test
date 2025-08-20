@@ -146,8 +146,7 @@ export class Renderer {
    */
   private createDepthTexture(): void {
     this.depthTexture = this.device.createTexture({
-      size: [this.canvas.width, this.canvas.height],
-      //size: [this.canvas.width, this.canvas.height, 1],
+      size: [this.canvas.width, this.canvas.height, 1], // 1 array layer (single texture)
       dimension: "2d",
       format: "depth24plus-stencil8", // same as the depthStencil in the pipeline
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
