@@ -13,6 +13,8 @@ export class Camera {
   public projectionMatrix: Mat4;
   /** Pre-calculated view-projection matrix (P * V) sent to the GPU. */
   public viewProjectionMatrix: Mat4;
+  /** The camera's position in world space. */
+  public position: Vec3;
 
   // GPU-related resources for the camera's uniform data.
   /** GPU buffer storing the view-projection matrix. */
@@ -24,6 +26,7 @@ export class Camera {
     this.viewMatrix = mat4.identity();
     this.projectionMatrix = mat4.identity();
     this.viewProjectionMatrix = mat4.identity();
+    this.position = vec3.create(0, 0, 0);
   }
 
   /**
@@ -92,6 +95,7 @@ export class Camera {
     up: Vec3 = vec3.create(0, 1, 0),
   ): void {
     this.viewMatrix = mat4.lookAt(position, target, up);
+    this.position = position;
     this.updateViewProjectionMatrix();
   }
 
