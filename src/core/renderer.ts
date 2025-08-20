@@ -102,8 +102,8 @@ export class Renderer {
     // The pipeline layout defines the full set of bind groups used by a pipeline.
     this.pipelineLayout = this.device.createPipelineLayout({
       bindGroupLayouts: [
-        this.cameraBindGroupLayout, // @group(0)
-        this.materialBindGroupLayout, // @group(1)
+        this.cameraBindGroupLayout, // This is @group(0)
+        this.materialBindGroupLayout, // This is @group(1)
       ],
     });
   }
