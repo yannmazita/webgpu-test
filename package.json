@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@loaders.gl/obj": "^4.3.4",
     "@mori2003/jsimgui": "^0.8.0",
     "@types/node": "^24.2.1",
     "@webgpu/types": "^0.1.64",
