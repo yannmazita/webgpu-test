@@ -43,7 +43,12 @@ export interface Renderable {
  * GPU resources like textures, samplers, and their corresponding bind group.
  */
 export interface Material {
+  /** The material diffuse texture. Can be a dummy 1x1 texture for solid colors. */
   texture: GPUTexture;
+  /** The sampler for the texture. */
   sampler: GPUSampler;
+  /** A buffer containing uniform data like baseColor and flags (see shader). */
+  uniformBuffer: GPUBuffer;
+  /** The bind group that makes the material resources available to shaders. */
   bindGroup: GPUBindGroup;
 }
