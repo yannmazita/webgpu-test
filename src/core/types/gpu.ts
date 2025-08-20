@@ -18,9 +18,11 @@ export type TypedArray =
  * Represents a renderable object with its GPU buffer and metadata.
  */
 export interface Mesh {
-  buffer: GPUBuffer;
+  /** One GPU buffer for each vertex attribute (positions, normals). */
+  buffers: GPUBuffer[];
+  /** The layout descriptions for each buffer in the buffers array. */
+  layouts: GPUVertexBufferLayout[];
   vertexCount: number;
-  layout: GPUVertexBufferLayout;
   indexBuffer?: GPUBuffer;
   indexFormat?: GPUIndexFormat;
   indexCount?: number;
@@ -41,7 +43,12 @@ export interface Renderable {
  * GPU resources like textures, samplers, and their corresponding bind group.
  */
 export interface Material {
+  /** The material diffuse texture. Can be a dummy 1x1 texture for solid colors. */
   texture: GPUTexture;
+  /** The sampler for the texture. */
   sampler: GPUSampler;
+  /** A buffer containing uniform data like baseColor and flags (see shader). */
+  uniformBuffer: GPUBuffer;
+  /** The bind group that makes the material resources available to shaders. */
   bindGroup: GPUBindGroup;
 }
