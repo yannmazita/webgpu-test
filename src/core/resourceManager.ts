@@ -1,6 +1,6 @@
 // src/core/resourceManager.ts
 import { Renderer } from "./renderer";
-import { Material, Mesh } from "./types/gpu";
+import { Material, Mesh, PhongMaterialOptions } from "./types/gpu";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -57,42 +57,58 @@ export class ResourceManager {
   }
 
   /**
-   * Creates a new material from a texture URL or retrieves it from the cache.
-   * @param imageUrl The URL of the diffuse texture for this material.
-   * @param tintColor Optional RGBA color to tint the texture with.
-   *   Values should be in the normalized [0.0, 1.0] range.
-   *   Defaults to white [1, 1, 1, 1] (no tint).
+   * Creates a new Phong-lit material or retrieves it from the cache.
+   *
+   * @param options - Configuration for the Phong material properties.
    * @returns A promise that resolves to the created or cached Material.
    */
-  public async createTextureMaterial(
-    imageUrl: string,
-    tintColor: [number, number, number, number] = [1, 1, 1, 1],
+  public async createPhongMaterial(
+    options: PhongMaterialOptions = {},
   ): Promise<Material> {
-    const materialKey = `TEXTURE:${imageUrl}:${tintColor.join()}`;
+    // Set default values for any undefined options
+    const baseColor = options.baseColor ?? [1, 1, 1, 1];
+    const specularColor = options.specularColor ?? [1, 1, 1];
+    const shininess = options.shininess ?? 32.0;
+    const textureUrl = options.textureUrl;
+
+    // unique key for caching based on all properties
+    const materialKey = `PHONG:${baseColor.join()}:${specularColor.join()}:${shininess}:${
+      textureUrl ?? ""
+    }`;
     if (this.materials.has(materialKey)) {
       return this.materials.get(materialKey)!;
     }
 
-    const texture = await createTextureFromImage(
-      this.renderer.device,
-      imageUrl,
-    );
+    // Determine the texture to use
+    const hasTexture = !!textureUrl;
+    const texture = hasTexture
+      ? await createTextureFromImage(this.renderer.device, textureUrl)
+      : this.dummyTexture;
     const sampler = this.defaultSampler;
 
-    // Padding the data for uniform buffer to 32 bytes (4*4 + 4 + pad + pad + pad)
-    // [R, G, B, A, hasTexture, pad, pad, pad]
-    const uniformData = new Float32Array(8);
-    uniformData.set(tintColor, 0);
-    uniformData[4] = 1; // hasTexture = 1 (as a float)
+    /*
+     * Create the uniform buffer for material properties.
+     * Layout (48 bytes total):
+     * - baseColor: vec4<f32> (bytes 0-15)
+     * - specularColor: vec3<f32> (bytes 16-27) + 1 float padding
+     * - shininess: f32 (bytes 32-35)
+     * - hasTexture: f32 (bool) (bytes 36-39)
+     */
+    const uniformData = new Float32Array(12);
+    uniformData.set(baseColor, 0); // offset 0
+    uniformData.set(specularColor, 4); // offset 16
+    uniformData[8] = shininess; // offset 32
+    uniformData[9] = hasTexture ? 1.0 : 0.0; // offset 36
 
     const uniformBuffer = this.renderer.device.createBuffer({
+      label: `MATERIAL_UNIFORM_BUFFER_${materialKey}`,
       size: uniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.renderer.device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
     const bindGroup = this.renderer.device.createBindGroup({
-      label: `MATERIAL_BIND_GROUP_${imageUrl}`,
+      label: `MATERIAL_BIND_GROUP_${materialKey}`,
       layout: this.renderer.getMaterialBindGroupLayout(),
       entries: [
         { binding: 0, resource: texture.createView() },
@@ -102,50 +118,6 @@ export class ResourceManager {
     });
 
     const material: Material = { texture, sampler, uniformBuffer, bindGroup };
-    this.materials.set(materialKey, material);
-    return material;
-  }
-
-  /**
-   * Creates a solid color material or retrieves it from the cache.
-   * @param color The RGBA color for the material. Values should be in the
-   *   normalized [0.0, 1.0] range.
-   * @returns The created or cached Material.
-   */
-  public createColorMaterial(
-    color: [number, number, number, number],
-  ): Material {
-    const materialKey = `COLOR:${color.join()}`;
-    if (this.materials.has(materialKey)) {
-      return this.materials.get(materialKey)!;
-    }
-
-    // Data for the uniform buffer, also padded to 32 bytes
-    const uniformData = new Float32Array(8);
-    uniformData.set(color, 0);
-    uniformData[4] = 0; // hasTexture = 0 (as a float)
-    const uniformBuffer = this.renderer.device.createBuffer({
-      size: uniformData.byteLength,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.renderer.device.queue.writeBuffer(uniformBuffer, 0, uniformData);
-
-    const bindGroup = this.renderer.device.createBindGroup({
-      label: `MATERIAL_BIND_GROUP_COLOR_${color.join()}`,
-      layout: this.renderer.getMaterialBindGroupLayout(),
-      entries: [
-        { binding: 0, resource: this.dummyTexture.createView() },
-        { binding: 1, resource: this.defaultSampler },
-        { binding: 2, resource: { buffer: uniformBuffer } },
-      ],
-    });
-
-    const material: Material = {
-      texture: this.dummyTexture,
-      sampler: this.defaultSampler,
-      uniformBuffer,
-      bindGroup,
-    };
     this.materials.set(materialKey, material);
     return material;
   }
