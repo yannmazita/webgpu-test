@@ -4,7 +4,7 @@ import { createShaderModule } from "@/core/utils/webgpu";
 import { getLayoutKey } from "@/core/utils/layout";
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
-import { Mat4 } from "wgpu-matrix";
+import { mat4, Mat4 } from "wgpu-matrix";
 import { Mesh } from "./types/gpu";
 
 /**
@@ -91,6 +91,11 @@ export class Renderer {
           visibility: GPUShaderStage.FRAGMENT,
           sampler: {},
         },
+        {
+          binding: 2, // Material Uniforms (baseColor, flags)
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        },
       ],
     });
 
@@ -160,45 +165,47 @@ export class Renderer {
   }
 
   /**
-   * Retrieves a cached pipeline for the given layout or creates a new one.
+   * Retrieves a cached pipeline for the given layouts or creates a new one.
    * Caching pipelines is a critical optimization as pipeline creation is expensive.
-   * @param layout - The vertex buffer layout for the mesh to be rendered.
+   * @param layouts - Array of vertex buffer layouts for the mesh to be rendered.
    * @returns A GPURenderPipeline configured for the given layout.
    */
   private getOrCreatePipeline(
-    layout: GPUVertexBufferLayout,
+    layouts: GPUVertexBufferLayout[],
   ): GPURenderPipeline {
-    const layoutKey = getLayoutKey(layout);
-    // Check if a pipeline for this specific layout already exists.
+    const layoutKey = getLayoutKey(layouts);
     if (this.pipelines.has(layoutKey)) {
       return this.pipelines.get(layoutKey)!;
     }
 
-    // Define the layout for the per-instance model matrix buffer.
-    const instanceMatrixLayout: GPUVertexBufferLayout = {
-      arrayStride: 4 * 4 * Float32Array.BYTES_PER_ELEMENT, // 4x4 matrix of 32-bit floats
+    // Define the layout for the per-instance data buffer.
+    const instanceDataLayout: GPUVertexBufferLayout = {
+      // The stride is for two 4x4 matrices.
+      arrayStride: Renderer.MATRIX_BYTE_SIZE * 2,
       stepMode: "instance",
-      // The model matrix is passed as four vec4 attributes.
-      // (it's too big to pass through a single location)
+      // Passing the model and normal matrices as 4 vec4 attributes each
+      // (because they're too big to pass through a single location)
       attributes: [
-        // col 1
+        // Model Matrix (locations 3-6)
         { shaderLocation: 3, offset: 0, format: "float32x4" },
-        // col 2
         { shaderLocation: 4, offset: 16, format: "float32x4" },
-        // col 3
         { shaderLocation: 5, offset: 32, format: "float32x4" },
-        // col 4
         { shaderLocation: 6, offset: 48, format: "float32x4" },
+        // Normal Matrix (locations 7-10)
+        { shaderLocation: 7, offset: 64, format: "float32x4" },
+        { shaderLocation: 8, offset: 80, format: "float32x4" },
+        { shaderLocation: 9, offset: 96, format: "float32x4" },
+        { shaderLocation: 10, offset: 112, format: "float32x4" },
       ],
     };
 
     // If not, create a new pipeline.
     const newPipeline = this.device.createRenderPipeline({
-      layout: this.pipelineLayout, // Use the shared pipeline layout
+      layout: this.pipelineLayout,
       vertex: {
         module: this.shaderModule,
         entryPoint: "vs_main",
-        buffers: [layout, instanceMatrixLayout], // Pass both layouts
+        buffers: [...layouts, instanceDataLayout], // Pass all the layouts
       },
       fragment: {
         module: this.shaderModule,
@@ -260,7 +267,9 @@ export class Renderer {
       }
     }
 
-    const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
+    // required buffer size is doubled for each instance (because model and normal matrices)
+    const requiredBufferSize =
+      totalInstanceCount * Renderer.MATRIX_BYTE_SIZE * 2;
 
     if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
       if (this.instanceBuffer) {
@@ -312,34 +321,47 @@ export class Renderer {
       passEncoder.setBindGroup(1, materialBindGroup);
 
       for (const [mesh, modelMatrices] of meshMap.entries()) {
-        const pipeline = this.getOrCreatePipeline(mesh.layout);
+        // Pass the array of layouts for the mesh
+        const pipeline = this.getOrCreatePipeline(mesh.layouts);
         passEncoder.setPipeline(pipeline);
 
         // Prepare instance data
         const instanceCount = modelMatrices.length;
-        const matrixSize = 16 * Float32Array.BYTES_PER_ELEMENT; // 64 bytes
-        const batchByteLength = instanceCount * matrixSize;
-        const matrixData = new Float32Array(instanceCount * 16);
+        const instanceData = new Float32Array(instanceCount * 32); // 2 * 16
+        const normalMatrix = mat4.create();
 
         for (let i = 0; i < instanceCount; i++) {
-          matrixData.set(modelMatrices[i], i * 16);
+          const modelMatrix = modelMatrices[i];
+          // Write model matrix at the start of the instance data block
+          instanceData.set(modelMatrix, i * 32);
+
+          // Calculate and write the normal matrix
+          mat4.invert(modelMatrix, normalMatrix);
+          mat4.transpose(normalMatrix, normalMatrix);
+
+          // Write normal matrix after the model matrix
+          instanceData.set(normalMatrix, i * 32 + 16);
         }
 
-        // Write all matrix data for this batch to the instance buffer
-        // at the correct offset.
+        const batchByteLength = instanceData.byteLength;
+
         this.device.queue.writeBuffer(
           this.instanceBuffer,
           instanceDataOffset,
-          matrixData,
+          instanceData,
         );
 
-        // Set the vertex and instance buffers
-        passEncoder.setVertexBuffer(0, mesh.buffer);
+        // Set the vertex buffers for the mesh attributes (pos, normal, uv)
+        for (let i = 0; i < mesh.buffers.length; i++) {
+          passEncoder.setVertexBuffer(i, mesh.buffers[i]);
+        }
+
+        // Set the instance data buffer at the next available slot
         passEncoder.setVertexBuffer(
-          1,
+          mesh.buffers.length,
           this.instanceBuffer,
-          instanceDataOffset, // Use the offset for this batch
-          batchByteLength, // Specify the size of the data to use
+          instanceDataOffset,
+          batchByteLength,
         );
 
         // Draw all instances in a single call.
