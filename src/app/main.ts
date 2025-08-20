@@ -5,7 +5,6 @@ import { mat4, vec3 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import { Scene } from "@/core/scene";
-import { createTriforceMesh } from "@/features/triforce/meshes/triforceMesh";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -32,41 +31,23 @@ try {
 
   // Position the camera to look at the scene
   camera.lookAt(
-    vec3.fromValues(0, 0, 1.5),
+    vec3.fromValues(0, 1, 0.5),
     vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 1, 0),
+    vec3.fromValues(0, 0, 1), // beetle is exported with z-up and not y-up
   );
 
-  // Create materials and meshes
-  const [material1, material2, triforceMesh] = await Promise.all([
-    resourceManager.createMaterial("/assets/textures/rms.jpg"),
-    resourceManager.createMaterial("/assets/textures/rms2.jpg"),
-    Promise.resolve(createTriforceMesh(resourceManager)),
+  const [material, beetleMesh] = await Promise.all([
+    resourceManager.createColorMaterial([1, 1, 1, 1]),
+    resourceManager.loadMeshFromSTL("/assets/models/Utah_VW_Bug.stl"),
   ]);
 
-  // Create three renderable objects and add them to the scene.
-  const baseMatrices = [
-    mat4.translation([0, 0.5, 0]), // Top
-    mat4.translation([-0.5, -0.5, 0]), // Bottom-left
-    mat4.translation([0.5, -0.5, 0]), // Bottom-right
-  ];
+  // Create renderable object and add to scene
+  const beetleModelMatrix = mat4.identity();
 
   scene.add({
-    mesh: triforceMesh,
-    modelMatrix: mat4.clone(baseMatrices[0]),
-    material: material2,
-  });
-
-  scene.add({
-    mesh: triforceMesh,
-    modelMatrix: mat4.clone(baseMatrices[1]),
-    material: material1,
-  });
-
-  scene.add({
-    mesh: triforceMesh,
-    modelMatrix: mat4.clone(baseMatrices[2]),
-    material: material1,
+    mesh: beetleMesh,
+    modelMatrix: beetleModelMatrix,
+    material: material,
   });
 
   const handleResize = () => {
@@ -106,15 +87,7 @@ try {
   const animate = (now: number) => {
     const time = (now - startTime) / 1000;
 
-    // Rotate in place (top triforce)
-    // modelMatrix = translation * rotation
-    const rotationY = mat4.rotationY(time * 3);
-    mat4.multiply(baseMatrices[0], rotationY, scene.objects[0].modelMatrix);
-
-    // Orbit around the scene center (bottom-left triforce)
-    // modelMatrix = rotation * translation
-    const orbitRotation = mat4.rotationY(time * 2);
-    mat4.multiply(orbitRotation, baseMatrices[1], scene.objects[1].modelMatrix);
+    mat4.rotateZ(beetleModelMatrix, 0.005, beetleModelMatrix);
 
     renderer.render(camera, scene);
     requestAnimationFrame(animate);
