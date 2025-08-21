@@ -111,7 +111,10 @@ fn vs_main(
 
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(
+    in: VertexOutput,
+    @builtin(front_facing) face: bool
+    ) -> @location(0) vec4<f32> {
     // Get Material Properties
     var baseColor = u_material.baseColor;
     if (u_material.hasTexture > 0.5) {
@@ -149,5 +152,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // object base color, plus the specular highlights.
     let finalColor = (ambient + diffuse) * baseColor.rgb + specular;
 
-    return vec4<f32>(finalColor, baseColor.a);
+    if (face) {
+      return vec4<f32>(finalColor, baseColor.a);
+    }
+    else {
+      return vec4<f32>(0.0, 1.0, 0.0 ,1.0); // Green for back-faces
+    }
 }
