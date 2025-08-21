@@ -59,8 +59,14 @@ export class ResourceManager {
   /**
    * Creates a new Phong-lit material or retrieves it from the cache.
    *
-   * @param options - Configuration for the Phong material properties.
-   * @returns A promise that resolves to the created or cached Material.
+   * This method configures a material with properties for the Phong lighting
+   * model. If any options are omitted, the material will be created with
+   * sensible default values.
+   *
+   * @param options - An object specifying the material properties.
+   *   See the `PhongMaterialOptions` interface for details on each property
+   *   and its corresponding default value.
+   * @returns A promise that resolves to the created or cached "Material".
    */
   public async createPhongMaterial(
     options: PhongMaterialOptions = {},

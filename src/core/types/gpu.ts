@@ -19,13 +19,32 @@ export type TypedArray =
  * All properties are optional, with sensible defaults.
  */
 export interface PhongMaterialOptions {
-  /** The base color of the material, also acts as a tint for the texture. Defaults to white. */
+  /**
+   * The base RGBA color of the material. Each component should be in the
+   * normalized [0.0, 1.0] range. This color acts as a tint when a texture
+   * is present. default: [1, 1, 1, 1] (white)
+   */
   baseColor?: [number, number, number, number];
-  /** The color of the specular highlight. Defaults to white. */
+
+  /**
+   * The RGB color of the specular highlight. Each component should be in the
+   * normalized [0.0, 1.0] range. default: [1, 1, 1] (white)
+   */
   specularColor?: [number, number, number];
-  /** Controls the size and intensity of the highlight. Higher is smaller/sharper. Defaults to 32. */
+
+  /**
+   * The shininess factor, which controls the size and intensity of the
+   * specular highlight. It's the exponent in the Phong specular calculation.
+   * Higher values result in smaller, sharper highlights (like plastic), while
+   * lower values create larger, softer highlights (like rubber).
+   * default: 32.0
+   */
   shininess?: number;
-  /** Optional URL for a diffuse texture map. */
+
+  /**
+   * An optional URL for a diffuse texture map. If provided, its color will be
+   * multiplied by the `baseColor`.
+   */
   textureUrl?: string;
 }
 
