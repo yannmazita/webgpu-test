@@ -1,5 +1,5 @@
 // src/core/scene.ts
-import { Renderable } from "./types/gpu";
+import { Light, Renderable } from "./types/gpu";
 
 /**
  * Represents a collection of objects to be rendered in the world.
@@ -19,4 +19,7 @@ export class Scene {
   public add(object: Renderable): void {
     this.objects.push(object);
   }
+
+  /** The primary light source for the scene. */
+  public light!: Light;
 }

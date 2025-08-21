@@ -13,46 +13,14 @@ export class Camera {
   public projectionMatrix: Mat4;
   /** Pre-calculated view-projection matrix (P * V) sent to the GPU. */
   public viewProjectionMatrix: Mat4;
-
-  // GPU-related resources for the camera's uniform data.
-  /** GPU buffer storing the view-projection matrix. */
-  private buffer!: GPUBuffer;
-  /** Bind group making the camera's buffer available to shaders. */
-  public bindGroup!: GPUBindGroup;
+  /** The camera's position in world space. */
+  public position: Vec3;
 
   constructor() {
     this.viewMatrix = mat4.identity();
     this.projectionMatrix = mat4.identity();
     this.viewProjectionMatrix = mat4.identity();
-  }
-
-  /**
-   * Initializes GPU resources for the camera.
-   *
-   * This creates the uniform buffer and the bind group needed to link the
-   * matrix data of the camera to the shader pipeline.
-   *
-   * @param device The GPUDevice.
-   * @param layout The GPUBindGroupLayout for the camera's uniforms (@group(0)).
-   */
-  public init(device: GPUDevice, layout: GPUBindGroupLayout): void {
-    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
-    this.buffer = device.createBuffer({
-      label: "CAMERA_UNIFORM_BUFFER",
-      size: MATRIX_SIZE,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    this.bindGroup = device.createBindGroup({
-      label: "CAMERA_BIND_GROUP",
-      layout: layout,
-      entries: [
-        {
-          binding: 0,
-          resource: { buffer: this.buffer },
-        },
-      ],
-    });
+    this.position = vec3.create(0, 0, 0);
   }
 
   /**
@@ -92,6 +60,7 @@ export class Camera {
     up: Vec3 = vec3.create(0, 1, 0),
   ): void {
     this.viewMatrix = mat4.lookAt(position, target, up);
+    this.position = position;
     this.updateViewProjectionMatrix();
   }
 
@@ -105,23 +74,6 @@ export class Camera {
       this.projectionMatrix,
       this.viewMatrix,
       this.viewProjectionMatrix,
-    );
-  }
-
-  /**
-   * Writes the current view-projection matrix to the associated GPU buffer.
-   * This should be called once per frame before rendering.
-   * @param queue The GPUQueue to use for the write operation.
-   */
-  public writeToGpu(queue: GPUQueue): void {
-    if (!this.buffer) {
-      console.error("Camera buffer not initialized. Call init() first.");
-      return;
-    }
-    queue.writeBuffer(
-      this.buffer,
-      0,
-      this.viewProjectionMatrix as Float32Array,
     );
   }
 }

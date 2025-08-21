@@ -36,8 +36,16 @@ export class Renderer {
   private depthTexture!: GPUTexture;
   /** The layout for the entire pipeline, defining all bind groups. */
   private pipelineLayout!: GPUPipelineLayout;
-  /** The layout for bind group 0, used for per-frame data like the camera. */
-  private cameraBindGroupLayout!: GPUBindGroupLayout;
+
+  /** The layout for bind group 0 or per-frame data (camera, scene). */
+  private frameBindGroupLayout!: GPUBindGroupLayout;
+  /** The bind group for per-frame data. */
+  private frameBindGroup!: GPUBindGroup;
+  /** Uniform buffer for the camera's view-projection matrix. */
+  private cameraUniformBuffer!: GPUBuffer;
+  /** Uniform buffer for scene-wide data like lighting and camera position. */
+  private sceneUniformsBuffer!: GPUBuffer;
+
   /** The layout for bind group 1, used for per-object/material data. */
   private materialBindGroupLayout!: GPUBindGroupLayout;
 
@@ -59,18 +67,47 @@ export class Renderer {
     this.createDepthTexture();
     this.shaderModule = createShaderModule(this.device, shaderCode);
 
+    const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
+    this.cameraUniformBuffer = this.device.createBuffer({
+      label: "CAMERA_UNIFORM_BUFFER",
+      size: MATRIX_SIZE,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // Scene uniforms buffer: lightPos (vec3), lightColor (vec3), cameraPos (vec3)
+    // Using vec4 alignment: 3*vec4 = 3 * 16 = 48 bytes
+    const SCENE_UNIFORMS_SIZE = 3 * 4 * Float32Array.BYTES_PER_ELEMENT;
+    this.sceneUniformsBuffer = this.device.createBuffer({
+      label: "SCENE_UNIFORMS_BUFFER",
+      size: SCENE_UNIFORMS_SIZE,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
     /**
-     * Layout for @group(0), containing per-frame scene data like the camera.
-     * Corresponds to the Camera struct in shaders.wgsl.
+     * Layout for @group(0), containing per-frame scene data.
      */
-    this.cameraBindGroupLayout = this.device.createBindGroupLayout({
-      label: "CAMERA_BIND_GROUP_LAYOUT",
+    this.frameBindGroupLayout = this.device.createBindGroupLayout({
+      label: "FRAME_BIND_GROUP_LAYOUT",
       entries: [
         {
-          binding: 0, // Camera Uniform Buffer
+          binding: 0, // Camera Uniform Buffer (View/Projection Matrix)
           visibility: GPUShaderStage.VERTEX,
           buffer: { type: "uniform" },
         },
+        {
+          binding: 1, // Scene Uniforms (light, camera position)
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+
+    this.frameBindGroup = this.device.createBindGroup({
+      label: "FRAME_BIND_GROUP",
+      layout: this.frameBindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
+        { binding: 1, resource: { buffer: this.sceneUniformsBuffer } },
       ],
     });
 
@@ -102,7 +139,7 @@ export class Renderer {
     // The pipeline layout defines the full set of bind groups used by a pipeline.
     this.pipelineLayout = this.device.createPipelineLayout({
       bindGroupLayouts: [
-        this.cameraBindGroupLayout, // This is @group(0)
+        this.frameBindGroupLayout, // This is @group(0)
         this.materialBindGroupLayout, // This is @group(1)
       ],
     });
@@ -146,8 +183,7 @@ export class Renderer {
    */
   private createDepthTexture(): void {
     this.depthTexture = this.device.createTexture({
-      size: [this.canvas.width, this.canvas.height],
-      //size: [this.canvas.width, this.canvas.height, 1],
+      size: [this.canvas.width, this.canvas.height, 1], // 1 array layer (single texture)
       dimension: "2d",
       format: "depth24plus-stencil8", // same as the depthStencil in the pipeline
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
@@ -237,8 +273,23 @@ export class Renderer {
    * @param scene The scene containing the list of objects to render.
    */
   public render(camera: Camera, scene: Scene): void {
-    // Update the GPU buffer of the camera once per frame.
-    camera.writeToGpu(this.device.queue);
+    // 1. Update camera matrix buffer
+    this.device.queue.writeBuffer(
+      this.cameraUniformBuffer,
+      0,
+      camera.viewProjectionMatrix as Float32Array,
+    );
+
+    // 2. Update scene uniforms buffer
+    const sceneUniformsData = new Float32Array(12);
+    sceneUniformsData.set(scene.light.position, 0); // vec3 lightPos
+    sceneUniformsData.set(scene.light.color, 4); // vec3 lightColor
+    sceneUniformsData.set(camera.position, 8); // vec3 cameraPos
+    this.device.queue.writeBuffer(
+      this.sceneUniformsBuffer,
+      0,
+      sceneUniformsData,
+    );
 
     // Group renderable objects by mesh and material to enable instancing.
     // We use a Map where the key is the material's bind group, and the value
@@ -277,6 +328,7 @@ export class Renderer {
       }
       // Allocate 50% more space to avoid reallocating every frame
       // on minor object count changes.
+      // maybe have an actual maxium...
       const newSize = Math.ceil(requiredBufferSize * 1.5);
       this.instanceBuffer = this.device.createBuffer({
         label: "INSTANCE_MODEL_MATRIX_BUFFER",
@@ -310,8 +362,8 @@ export class Renderer {
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
 
-    // Set the camera bind group once for the entire render pass.
-    passEncoder.setBindGroup(0, camera.bindGroup);
+    // Set the frame bind group once for the entire render pass.
+    passEncoder.setBindGroup(0, this.frameBindGroup);
 
     // Keep track of the current offset into the instance buffer.
     let instanceDataOffset = 0;
@@ -383,16 +435,16 @@ export class Renderer {
   }
 
   /**
-   * Gets the camera bind group layout.
-   * This is needed to initialize the camera object from outside the renderer.
+   * Gets the frame bind group layout.
+   * This is needed by external systems if they were to create compatible bind groups.
    */
-  public getCameraBindGroupLayout(): GPUBindGroupLayout {
-    if (!this.cameraBindGroupLayout) {
+  public getFrameBindGroupLayout(): GPUBindGroupLayout {
+    if (!this.frameBindGroupLayout) {
       throw new Error(
-        "Camera bind group layout is not initialized. Call init() first.",
+        "Frame bind group layout is not initialized. Call init() first.",
       );
     }
-    return this.cameraBindGroupLayout;
+    return this.frameBindGroupLayout;
   }
 
   /**

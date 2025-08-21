@@ -5,6 +5,7 @@ import { mat4, vec3 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import { Scene } from "@/core/scene";
+import { Light } from "@/core/types/gpu";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -18,10 +19,8 @@ try {
   const resourceManager = new ResourceManager(renderer);
   const scene = new Scene();
   const camera = new Camera();
-  // Initialize the GPU resources of the camera using the layout from the renderer
-  camera.init(renderer.device, renderer.getCameraBindGroupLayout());
 
-  // Configure camera projection (this will be set properly by the resize handler)
+  // Configure camera projection
   camera.setPerspective(
     (90 * Math.PI) / 180, // 90 degrees field of view
     1, // dummy aspect ratio
@@ -33,16 +32,29 @@ try {
   camera.lookAt(
     vec3.fromValues(0, 1, 0.5),
     vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 0, 1), // beetle is exported with z-up and not y-up
+    vec3.fromValues(0, 0, 1), // beetle is exported with z-up
   );
 
+  // Create Scene Light
+  const light: Light = {
+    position: vec3.fromValues(1, 1, 1), // Initial light position
+    color: vec3.fromValues(1, 1, 1), // White light
+  };
+  scene.light = light;
+
+  // Create Material and Mesh
   const [material, beetleMesh] = await Promise.all([
-    resourceManager.createColorMaterial([1, 1, 1, 1]),
+    resourceManager.createPhongMaterial({
+      baseColor: [0.8, 0.1, 0.1, 1.0], // Red
+      specularColor: [0.1, 0.1, 0.1], // White highlights
+      shininess: 50.0,
+    }),
     resourceManager.loadMeshFromSTL("/assets/models/Utah_VW_Bug.stl"),
   ]);
 
   // Create renderable object and add to scene
   const beetleModelMatrix = mat4.identity();
+  //mat4.scale(beetleModelMatrix, vec3.fromValues(0.1, 0.1, 0.1), beetleModelMatrix);
 
   scene.add({
     mesh: beetleMesh,
@@ -54,39 +66,39 @@ try {
     const newWidth = canvas.clientWidth;
     const newHeight = canvas.clientHeight;
 
-    // Prevent unnecessary updates if the size hasn't changed
     if (canvas.width === newWidth && canvas.height === newHeight) {
       return;
     }
 
-    // Update the canvas drawing buffer size
     canvas.width = newWidth;
     canvas.height = newHeight;
-
-    // Update renderer resources
     renderer.resizeCanvas();
 
-    // Update camera projection
     camera.setPerspective(
-      (90 * Math.PI) / 180, // 90 degrees field of view
+      (90 * Math.PI) / 180,
       newWidth / newHeight,
       0.1,
       100.0,
     );
   };
 
-  const canvasResizeObserver = new ResizeObserver(() => {
-    handleResize();
-  });
+  const canvasResizeObserver = new ResizeObserver(handleResize);
   canvasResizeObserver.observe(canvas);
+  handleResize();
 
-  renderer.render(camera, scene);
-
-  const startTime = performance.now(); // in milliseconds.
-
+  // Animation Loop
   const animate = (now: number) => {
-    const time = (now - startTime) / 1000;
+    const time = now / 1000; // time in seconds
 
+    // Animate the light in a circle around the object
+    /*
+    const radius = 4.0;
+    scene.light.position[0] = Math.sin(time * 0.5) * radius;
+    scene.light.position[1] = Math.cos(time * 0.5) * radius;
+    scene.light.position[2] = 2.0;
+    */
+
+    // Rotate the beetle
     mat4.rotateZ(beetleModelMatrix, 0.005, beetleModelMatrix);
 
     renderer.render(camera, scene);
@@ -111,16 +123,14 @@ try {
 
   const message = document.createElement("p");
   message.textContent =
-    "Could not initialize the graphics engine. Please ensure you are using a modern browser or a browser with modern features.";
+    "Could not initialize the graphics engine. Please ensure you are using a modern browser that supports WebGPU.";
 
   const details = document.createElement("pre");
   details.textContent = (error as Error).message;
 
-  // Append the new elements to the error container
   errorContainer.appendChild(header);
   errorContainer.appendChild(message);
   errorContainer.appendChild(details);
 
-  // Replace the canvas with the error message
-  appContainer?.replaceChildren(errorContainer);
+  appContainer.replaceChildren(errorContainer);
 }
