@@ -2,7 +2,7 @@
 
 Learning graphics programming with WebGPU.
 
-[Utah Teapot lit with Phong reflection](https://github.com/user-attachments/assets/7e03b1e0-2914-4efc-be67-b81e83eefa39)
+[Utah Teapots](https://github.com/user-attachments/assets/2e8b5b52-a1bf-4e60-9173-9716e5218962)
 
 
 ### Setup
