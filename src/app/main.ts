@@ -37,15 +37,25 @@ try {
 
   // Create Scene Light
   const light: Light = {
-    position: vec3.fromValues(1, 1, 1), // Initial light position
+    position: vec3.fromValues(1, 1, 3), // Initial light position
     color: vec3.fromValues(1, 1, 1), // White light
   };
   scene.light = light;
 
   // Create Material and Mesh
-  const [material, beetleMesh] = await Promise.all([
+  const [material1, material2, material3, teapotMesh] = await Promise.all([
     resourceManager.createPhongMaterial({
       baseColor: [1, 1, 1, 1.0], // White
+      specularColor: [0.1, 0.1, 0.1], // White highlights
+      shininess: 50.0,
+    }),
+    resourceManager.createPhongMaterial({
+      baseColor: [1, 0, 0, 0.1], // Red
+      specularColor: [0.1, 0.1, 0.1], // White highlights
+      shininess: 50.0,
+    }),
+    resourceManager.createPhongMaterial({
+      baseColor: [0, 0, 1, 0.1], // Blue
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
@@ -54,20 +64,37 @@ try {
     resourceManager.loadMeshFromSTL("/assets/models/utah_teapot.stl"),
   ]);
 
-  // Create renderable object and add to scene
-  const beetleModelMatrix = mat4.identity();
-  mat4.scale(
-    beetleModelMatrix,
-    vec3.fromValues(0.07, 0.07, 0.07),
-    beetleModelMatrix,
-  );
+  // Create renderable objects and add them to the scene
+  const scaleVec = vec3.fromValues(0.07, 0.07, 0.07);
 
+  // Teapot 1 (Bottom, White)
+  const teapot1Matrix = mat4.identity();
+  mat4.scale(teapot1Matrix, scaleVec, teapot1Matrix);
   scene.add({
-    mesh: beetleMesh,
-    modelMatrix: beetleModelMatrix,
-    material: material,
+    mesh: teapotMesh,
+    modelMatrix: teapot1Matrix,
+    material: material1,
   });
 
+  // Teapot 2 (Middle, Red)
+  const teapot2Matrix = mat4.identity();
+  mat4.scale(teapot2Matrix, scaleVec, teapot2Matrix);
+  mat4.translate(teapot2Matrix, vec3.fromValues(0, 0, 1), teapot2Matrix);
+  scene.add({
+    mesh: teapotMesh,
+    modelMatrix: teapot2Matrix,
+    material: material2,
+  });
+
+  // Teapot 3 (Top, Blue)
+  const teapot3Matrix = mat4.identity();
+  mat4.scale(teapot3Matrix, scaleVec, teapot3Matrix);
+  mat4.translate(teapot3Matrix, vec3.fromValues(0, 0, 2), teapot3Matrix);
+  scene.add({
+    mesh: teapotMesh,
+    modelMatrix: teapot3Matrix,
+    material: material3,
+  });
   const handleResize = () => {
     const newWidth = canvas.clientWidth;
     const newHeight = canvas.clientHeight;
@@ -104,8 +131,10 @@ try {
     scene.light.position[2] = 2.0;
     */
 
-    // Rotate the beetle
-    mat4.rotateZ(beetleModelMatrix, 0.005, beetleModelMatrix);
+    // Rotate all the teapots together
+    mat4.rotateZ(teapot1Matrix, 0.005, teapot1Matrix);
+    mat4.rotateZ(teapot2Matrix, 0.005, teapot2Matrix);
+    mat4.rotateZ(teapot3Matrix, 0.005, teapot3Matrix);
 
     renderer.render(camera, scene);
     requestAnimationFrame(animate);
