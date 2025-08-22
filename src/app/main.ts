@@ -50,12 +50,12 @@ try {
       shininess: 50.0,
     }),
     resourceManager.createPhongMaterial({
-      baseColor: [1, 0, 0, 0.1], // Red
+      baseColor: [1, 0, 0, 2 / 3], // Red
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
     resourceManager.createPhongMaterial({
-      baseColor: [0, 0, 1, 0.1], // Blue
+      baseColor: [0, 0, 1, 1 / 3], // Blue
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),

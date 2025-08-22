@@ -171,7 +171,7 @@ export class Renderer {
       device: this.device,
       format: navigator.gpu.getPreferredCanvasFormat(),
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
-      alphaMode: "opaque",
+      alphaMode: "premultiplied",
     };
     this.context.configure(canvasConfig);
   }
@@ -246,7 +246,23 @@ export class Renderer {
       fragment: {
         module: this.shaderModule,
         entryPoint: "fs_main",
-        targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
+        targets: [
+          {
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            blend: {
+              color: {
+                srcFactor: "src-alpha",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+              alpha: {
+                srcFactor: "one",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+            },
+          },
+        ],
       },
       primitive: {
         topology: "triangle-list",
