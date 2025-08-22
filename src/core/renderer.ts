@@ -403,7 +403,7 @@ export class Renderer {
           instanceData,
         );
 
-        // Set the vertex buffers for the mesh attributes (pos, normal, uv)
+        // It should look like this: slot 0 positions, slot 1 normals, slot 2 UVs
         for (let i = 0; i < mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, mesh.buffers[i]);
         }

@@ -128,16 +128,6 @@ export class ResourceManager {
     return material;
   }
 
-  /**
-   * Creates a GPU-ready mesh from raw data or retrieves it from the cache.
-   *
-   * This method takes separate arrays for each vertex attribute, creates a
-   * dedicated GPUBuffer for each, and sets up the corresponding layouts.
-   *
-   * @param key A unique string to identify and cache the mesh.
-   * @param data The raw vertex and index data for the mesh.
-   * @returns The mesh object, ready for rendering.
-   */
   public createMesh(key: string, data: MeshData): Mesh {
     if (this.meshes.has(key)) {
       return this.meshes.get(key)!;
@@ -145,6 +135,7 @@ export class ResourceManager {
 
     const buffers: GPUBuffer[] = [];
     const layouts: GPUVertexBufferLayout[] = [];
+    const vertexCount = data.positions.length / 3;
 
     // Position Buffer (shaderLocation: 0)
     buffers.push(
@@ -160,24 +151,26 @@ export class ResourceManager {
     });
 
     // Normal Buffer (shaderLocation: 1)
+    let normals = data.normals;
+    if (!normals || normals.length === 0) {
+      // If normals are missing, create a dummy buffer filled with zeros.
+      // Lighting will be incorrect but it prevents a crash.
+      console.warn(`Mesh "${key}" is missing normals. Generating dummy data.`);
+      normals = new Float32Array(vertexCount * 3);
+    }
     buffers.push(
-      createGPUBuffer(
-        this.renderer.device,
-        data.normals,
-        GPUBufferUsage.VERTEX,
-      ),
+      createGPUBuffer(this.renderer.device, normals, GPUBufferUsage.VERTEX),
     );
     layouts.push({
       arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT, // vec3<f32>
       attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
     });
 
-    // Texture Coordinate Buffer (shaderLocation: 2)
+    // Texture Coordinate (UVs) Buffer (shaderLocation: 2)
     // We must provide a buffer as this attribute is required by the shader.
     // If the model format doesn't include UVs, we create a dummy buffer.
     let texCoords = data.texCoords;
-    if (!texCoords) {
-      const vertexCount = data.positions.length / 3;
+    if (!texCoords || texCoords.length === 0) {
       texCoords = new Float32Array(vertexCount * 2); // Filled with zeros
     }
     buffers.push(
@@ -198,7 +191,7 @@ export class ResourceManager {
     const mesh: Mesh = {
       buffers,
       layouts,
-      vertexCount: data.positions.length / 3,
+      vertexCount: vertexCount,
       indexBuffer,
       indexCount: data.indices.length,
       indexFormat: data.indices instanceof Uint16Array ? "uint16" : "uint32",
@@ -245,8 +238,8 @@ export class ResourceManager {
 
     const meshData: MeshData = {
       positions: data.attributes.POSITION.value as Float32Array,
-      normals: data.attributes.NORMAL.value as Float32Array,
-      texCoords: data.attributes.TEXCOORD_0.value as Float32Array,
+      normals: data.attributes.NORMAL?.value as Float32Array,
+      texCoords: data.attributes.TEXCOORD_0?.value as Float32Array,
       indices: (data.indices?.value ?? new Uint32Array()) as
         | Uint16Array
         | Uint32Array,

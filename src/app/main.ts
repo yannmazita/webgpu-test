@@ -30,9 +30,9 @@ try {
 
   // Position the camera to look at the scene
   camera.lookAt(
-    vec3.fromValues(0, 1, 0.5),
+    vec3.fromValues(0, 1, 1),
     vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 0, 1), // beetle is exported with z-up
+    vec3.fromValues(0, 0, 1), // utah_vw_beetle.stl is exported with z-up
   );
 
   // Create Scene Light
@@ -45,16 +45,22 @@ try {
   // Create Material and Mesh
   const [material, beetleMesh] = await Promise.all([
     resourceManager.createPhongMaterial({
-      baseColor: [0.8, 0.1, 0.1, 1.0], // Red
+      baseColor: [1, 1, 1, 1.0], // White
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
-    resourceManager.loadMeshFromSTL("/assets/models/Utah_VW_Bug.stl"),
+    //resourceManager.loadMeshFromOBJ("/assets/models/beetle.obj"),
+    //resourceManager.loadMeshFromSTL("/assets/models/utah_vw_bug.stl"),
+    resourceManager.loadMeshFromSTL("/assets/models/utah_teapot.stl"),
   ]);
 
   // Create renderable object and add to scene
   const beetleModelMatrix = mat4.identity();
-  //mat4.scale(beetleModelMatrix, vec3.fromValues(0.1, 0.1, 0.1), beetleModelMatrix);
+  mat4.scale(
+    beetleModelMatrix,
+    vec3.fromValues(0.07, 0.07, 0.07),
+    beetleModelMatrix,
+  );
 
   scene.add({
     mesh: beetleMesh,
