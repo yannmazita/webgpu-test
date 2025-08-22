@@ -4,8 +4,8 @@ import { createShaderModule } from "@/core/utils/webgpu";
 import { getLayoutKey } from "@/core/utils/layout";
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
-import { mat4, Mat4 } from "wgpu-matrix";
-import { Mesh } from "./types/gpu";
+import { mat4, Mat4, vec3 } from "wgpu-matrix";
+import { Mesh, Renderable } from "./types/gpu";
 
 /**
  * The central rendering engine.
@@ -204,14 +204,18 @@ export class Renderer {
    * Retrieves a cached pipeline for the given layouts or creates a new one.
    * Caching pipelines is a critical optimization as pipeline creation is expensive.
    * @param layouts - Array of vertex buffer layouts for the mesh to be rendered.
+   * @param isTransparent - Has the material alpha blending enabled
    * @returns A GPURenderPipeline configured for the given layout.
    */
   private getOrCreatePipeline(
     layouts: GPUVertexBufferLayout[],
+    isTransparent: boolean,
   ): GPURenderPipeline {
     const layoutKey = getLayoutKey(layouts);
-    if (this.pipelines.has(layoutKey)) {
-      return this.pipelines.get(layoutKey)!;
+    const finalKey = layoutKey + (isTransparent ? ":transparent" : ":opaque");
+
+    if (this.pipelines.has(finalKey)) {
+      return this.pipelines.get(finalKey)!;
     }
 
     // Define the layout for the per-instance data buffer.
@@ -267,19 +271,20 @@ export class Renderer {
       primitive: {
         topology: "triangle-list",
         frontFace: "ccw",
-        // using none to disable culling of back-facing faces and color them
+        // use none to disable culling of back-facing faces and color them
         // in the shader
-        cullMode: "none",
+        cullMode: "back",
       },
       depthStencil: {
-        depthWriteEnabled: true,
+        // Transparent objects test against the depth buffer but don't write to it.
+        depthWriteEnabled: !isTransparent,
         depthCompare: "less",
         format: "depth24plus-stencil8",
       },
     });
 
     // Cache the new pipeline for future use.
-    this.pipelines.set(layoutKey, newPipeline);
+    this.pipelines.set(finalKey, newPipeline);
     return newPipeline;
   }
 
@@ -289,7 +294,7 @@ export class Renderer {
    * @param scene The scene containing the list of objects to render.
    */
   public render(camera: Camera, scene: Scene): void {
-    // 1. Update camera matrix buffer
+    // 1. Update camera uniform buffer
     this.device.queue.writeBuffer(
       this.cameraUniformBuffer,
       0,
@@ -307,44 +312,24 @@ export class Renderer {
       sceneUniformsData,
     );
 
-    // Group renderable objects by mesh and material to enable instancing.
-    // We use a Map where the key is the material's bind group, and the value
-    // is another Map where the key is the mesh and value is the list of matrices.
-    const batches = new Map<GPUBindGroup, Map<Mesh, Mat4[]>>();
-
+    // 3. Partition objects into opaque and transparent lists
+    const opaqueRenderables: Renderable[] = [];
+    const transparentRenderables: Renderable[] = [];
     for (const renderable of scene.objects) {
-      const { mesh, material, modelMatrix } = renderable;
-
-      if (!batches.has(material.bindGroup)) {
-        batches.set(material.bindGroup, new Map<Mesh, Mat4[]>());
-      }
-      const materialBatch = batches.get(material.bindGroup)!;
-
-      if (!materialBatch.has(mesh)) {
-        materialBatch.set(mesh, []);
-      }
-      const meshBatch = materialBatch.get(mesh)!;
-      meshBatch.push(modelMatrix);
-    }
-
-    let totalInstanceCount = 0;
-    for (const meshMap of batches.values()) {
-      for (const matrices of meshMap.values()) {
-        totalInstanceCount += matrices.length;
+      if (renderable.material.isTransparent) {
+        transparentRenderables.push(renderable);
+      } else {
+        opaqueRenderables.push(renderable);
       }
     }
 
-    // required buffer size is doubled for each instance (because model and normal matrices)
+    // 4. Prepare instance data for both lists
+    const totalInstanceCount = scene.objects.length;
     const requiredBufferSize =
       totalInstanceCount * Renderer.MATRIX_BYTE_SIZE * 2;
 
     if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
-      if (this.instanceBuffer) {
-        this.instanceBuffer.destroy();
-      }
-      // Allocate 50% more space to avoid reallocating every frame
-      // on minor object count changes.
-      // maybe have an actual maxium...
+      if (this.instanceBuffer) this.instanceBuffer.destroy();
       const newSize = Math.ceil(requiredBufferSize * 1.5);
       this.instanceBuffer = this.device.createBuffer({
         label: "INSTANCE_MODEL_MATRIX_BUFFER",
@@ -353,9 +338,8 @@ export class Renderer {
       });
     }
 
-    const textureView = this.context.getCurrentTexture().createView();
     const commandEncoder = this.device.createCommandEncoder();
-
+    const textureView = this.context.getCurrentTexture().createView();
     const passEncoder = commandEncoder.beginRenderPass({
       colorAttachments: [
         {
@@ -377,72 +361,143 @@ export class Renderer {
     });
 
     passEncoder.setViewport(0, 0, this.canvas.width, this.canvas.height, 0, 1);
-
-    // Set the frame bind group once for the entire render pass.
     passEncoder.setBindGroup(0, this.frameBindGroup);
 
-    // Keep track of the current offset into the instance buffer.
-    let instanceDataOffset = 0;
+    let instanceBufferOffset = 0;
 
-    // Iterate over the batched objects and draw them using instancing.
-    for (const [materialBindGroup, meshMap] of batches.entries()) {
-      passEncoder.setBindGroup(1, materialBindGroup);
+    // 5. Opaque rendering pass (using high-performance batching)
+    if (opaqueRenderables.length > 0) {
+      const batches = new Map<GPUBindGroup, Map<Mesh, Mat4[]>>();
+      for (const renderable of opaqueRenderables) {
+        const { mesh, material, modelMatrix } = renderable;
+        if (!batches.has(material.bindGroup)) {
+          batches.set(material.bindGroup, new Map<Mesh, Mat4[]>());
+        }
+        const materialBatch = batches.get(material.bindGroup)!;
+        if (!materialBatch.has(mesh)) {
+          materialBatch.set(mesh, []);
+        }
+        materialBatch.get(mesh)!.push(modelMatrix);
+      }
 
-      for (const [mesh, modelMatrices] of meshMap.entries()) {
-        // Pass the array of layouts for the mesh
-        const pipeline = this.getOrCreatePipeline(mesh.layouts);
-        passEncoder.setPipeline(pipeline);
+      for (const [materialBindGroup, meshMap] of batches.entries()) {
+        passEncoder.setBindGroup(1, materialBindGroup);
+        for (const [mesh, modelMatrices] of meshMap.entries()) {
+          const pipeline = this.getOrCreatePipeline(mesh.layouts, false);
+          passEncoder.setPipeline(pipeline);
 
-        // Prepare instance data
-        const instanceCount = modelMatrices.length;
-        const instanceData = new Float32Array(instanceCount * 32); // 2 * 16
-        const normalMatrix = mat4.create();
+          const instanceCount = modelMatrices.length;
+          const instanceData = new Float32Array(instanceCount * 32);
+          const normalMatrix = mat4.create();
+          for (let i = 0; i < instanceCount; i++) {
+            const modelMatrix = modelMatrices[i];
+            instanceData.set(modelMatrix, i * 32);
+            mat4.invert(modelMatrix, normalMatrix);
+            mat4.transpose(normalMatrix, normalMatrix);
+            instanceData.set(normalMatrix, i * 32 + 16);
+          }
 
-        for (let i = 0; i < instanceCount; i++) {
-          const modelMatrix = modelMatrices[i];
-          // Write model matrix at the start of the instance data block
-          instanceData.set(modelMatrix, i * 32);
+          const batchByteLength = instanceData.byteLength;
+          this.device.queue.writeBuffer(
+            this.instanceBuffer,
+            instanceBufferOffset,
+            instanceData,
+          );
 
-          // Calculate and write the normal matrix
-          mat4.invert(modelMatrix, normalMatrix);
-          mat4.transpose(normalMatrix, normalMatrix);
+          for (let i = 0; i < mesh.buffers.length; i++) {
+            passEncoder.setVertexBuffer(i, mesh.buffers[i]);
+          }
+          passEncoder.setVertexBuffer(
+            mesh.buffers.length,
+            this.instanceBuffer,
+            instanceBufferOffset,
+            batchByteLength,
+          );
 
-          // Write normal matrix after the model matrix
-          instanceData.set(normalMatrix, i * 32 + 16);
+          if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
+            passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+            passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
+          } else {
+            passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+          }
+          instanceBufferOffset += batchByteLength;
+        }
+      }
+    }
+
+    // 6. Transparent rendering pass (sort back-to-front and render individually)
+    if (transparentRenderables.length > 0) {
+      // Sort transparent objects from furthest to nearest
+      transparentRenderables.sort((a, b) => {
+        const posA = vec3.fromValues(
+          a.modelMatrix[12],
+          a.modelMatrix[13],
+          a.modelMatrix[14],
+        );
+        const posB = vec3.fromValues(
+          b.modelMatrix[12],
+          b.modelMatrix[13],
+          b.modelMatrix[14],
+        );
+        const distA = vec3.distanceSq(posA, camera.position);
+        const distB = vec3.distanceSq(posB, camera.position);
+        return distB - distA; // Sort descending by distance
+      });
+
+      // Prepare instance data for all transparent objects in one go
+      const transparentInstanceData = new Float32Array(
+        transparentRenderables.length * 32,
+      );
+      const normalMatrix = mat4.create();
+      for (let i = 0; i < transparentRenderables.length; i++) {
+        const { modelMatrix } = transparentRenderables[i];
+        transparentInstanceData.set(modelMatrix, i * 32);
+        mat4.invert(modelMatrix, normalMatrix);
+        mat4.transpose(normalMatrix, normalMatrix);
+        transparentInstanceData.set(normalMatrix, i * 32 + 16);
+      }
+      this.device.queue.writeBuffer(
+        this.instanceBuffer,
+        instanceBufferOffset,
+        transparentInstanceData,
+      );
+
+      // Render sorted transparent objects
+      let lastMaterial: null | GPUBindGroup = null;
+      let lastMesh: null | Mesh = null;
+      for (let i = 0; i < transparentRenderables.length; i++) {
+        const { mesh, material } = transparentRenderables[i];
+
+        // Minimize state changes
+        if (material.bindGroup !== lastMaterial) {
+          passEncoder.setBindGroup(1, material.bindGroup);
+          lastMaterial = material.bindGroup;
+        }
+        if (mesh !== lastMesh) {
+          const pipeline = this.getOrCreatePipeline(mesh.layouts, true);
+          passEncoder.setPipeline(pipeline);
+
+          for (let j = 0; j < mesh.buffers.length; j++) {
+            passEncoder.setVertexBuffer(j, mesh.buffers[j]);
+          }
+          passEncoder.setVertexBuffer(
+            mesh.buffers.length,
+            this.instanceBuffer,
+            instanceBufferOffset,
+            transparentInstanceData.byteLength,
+          );
+          if (mesh.indexBuffer) {
+            passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+          }
+          lastMesh = mesh;
         }
 
-        const batchByteLength = instanceData.byteLength;
-
-        this.device.queue.writeBuffer(
-          this.instanceBuffer,
-          instanceDataOffset,
-          instanceData,
-        );
-
-        // It should look like this: slot 0 positions, slot 1 normals, slot 2 UVs
-        for (let i = 0; i < mesh.buffers.length; i++) {
-          passEncoder.setVertexBuffer(i, mesh.buffers[i]);
-        }
-
-        // Set the instance data buffer at the next available slot
-        passEncoder.setVertexBuffer(
-          mesh.buffers.length,
-          this.instanceBuffer,
-          instanceDataOffset,
-          batchByteLength,
-        );
-
-        // Draw all instances in a single call.
-        // Use drawIndexed if an index buffer is available, otherwise use draw.
-        if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
-          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
-          passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
+        // Draw this single instance, using 'i' as the firstInstance offset
+        if (mesh.indexBuffer && mesh.indexCount) {
+          passEncoder.drawIndexed(mesh.indexCount, 1, 0, 0, i);
         } else {
-          passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+          passEncoder.draw(mesh.vertexCount, 1, 0, i);
         }
-
-        // Increment the offset for the next batch.
-        instanceDataOffset += batchByteLength;
       }
     }
 

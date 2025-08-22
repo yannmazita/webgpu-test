@@ -77,6 +77,8 @@ export class ResourceManager {
     const shininess = options.shininess ?? 32.0;
     const textureUrl = options.textureUrl;
 
+    const isTransparent = baseColor[3] < 1.0;
+
     // unique key for caching based on all properties
     const materialKey = `PHONG:${baseColor.join()}:${specularColor.join()}:${shininess}:${
       textureUrl ?? ""
@@ -123,7 +125,13 @@ export class ResourceManager {
       ],
     });
 
-    const material: Material = { texture, sampler, uniformBuffer, bindGroup };
+    const material: Material = {
+      texture,
+      sampler,
+      uniformBuffer,
+      bindGroup,
+      isTransparent,
+    };
     this.materials.set(materialKey, material);
     return material;
   }

@@ -69,6 +69,8 @@ export interface Material {
   uniformBuffer: GPUBuffer;
   /** The bind group that makes the material resources available to shaders. */
   bindGroup: GPUBindGroup;
+  /** Has the material alpha blending enabled. */
+  isTransparent: boolean;
 }
 
 /**
