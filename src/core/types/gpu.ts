@@ -80,3 +80,12 @@ export interface Renderable {
   modelMatrix: Mat4;
   material: Material;
 }
+
+/**
+ * Define a structure to hold all data needed for a batch draw call.
+ * A batch is defined by a unique pipeline.
+ */
+export interface PipelineBatch {
+  material: Material;
+  meshMap: Map<Mesh, Mat4[]>;
+}
