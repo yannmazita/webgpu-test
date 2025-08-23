@@ -1,11 +1,9 @@
 // src/core/renderer.ts
-import shaderCode from "@/core/shaders/shaders.wgsl";
-import { createShaderModule } from "@/core/utils/webgpu";
-import { getLayoutKey } from "@/core/utils/layout";
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
 import { mat4, Mat4, vec3 } from "wgpu-matrix";
-import { Mesh, Renderable } from "./types/gpu";
+import { Mesh, PipelineBatch, Renderable } from "./types/gpu";
+import { Material } from "./materials/material";
 
 /**
  * The central rendering engine.
@@ -26,16 +24,10 @@ export class Renderer {
   private context!: GPUCanvasContext;
   /** The GPU adapter, representing a physical GPU. */
   private adapter!: GPUAdapter;
-  /** A cache for render pipelines, keyed by vertex buffer layout. */
-  private pipelines = new Map<string, GPURenderPipeline>();
-  /** The compiled WGSL shader module. */
-  private shaderModule!: GPUShaderModule;
   /** A shared buffer for per-instance data, primarily model matrices. */
   private instanceBuffer!: GPUBuffer;
   /** A depth texture to store depth information of fragments. */
   private depthTexture!: GPUTexture;
-  /** The layout for the entire pipeline, defining all bind groups. */
-  private pipelineLayout!: GPUPipelineLayout;
 
   /** The layout for bind group 0 or per-frame data (camera, scene). */
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -46,12 +38,29 @@ export class Renderer {
   /** Uniform buffer for scene-wide data like lighting and camera position. */
   private sceneUniformsBuffer!: GPUBuffer;
 
-  /** The layout for bind group 1, used for per-object/material data. */
-  private materialBindGroupLayout!: GPUBindGroupLayout;
-
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
     4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
+  /** The layout for the per-instance data buffer. Materials need this to create compatible pipelines. */
+  public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
+    // The stride is for two 4x4 matrices.
+    arrayStride: Renderer.MATRIX_BYTE_SIZE * 2,
+    stepMode: "instance",
+    // Passing the model and normal matrices as 4 vec4 attributes each
+    // (because they're too big to pass through a single location)
+    attributes: [
+      // Model Matrix (locations 3-6)
+      { shaderLocation: 3, offset: 0, format: "float32x4" },
+      { shaderLocation: 4, offset: 16, format: "float32x4" },
+      { shaderLocation: 5, offset: 32, format: "float32x4" },
+      { shaderLocation: 6, offset: 48, format: "float32x4" },
+      // Normal Matrix (locations 7-10)
+      { shaderLocation: 7, offset: 64, format: "float32x4" },
+      { shaderLocation: 8, offset: 80, format: "float32x4" },
+      { shaderLocation: 9, offset: 96, format: "float32x4" },
+      { shaderLocation: 10, offset: 112, format: "float32x4" },
+    ],
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -65,7 +74,6 @@ export class Renderer {
     await this.setupDevice();
     this.setupContext();
     this.createDepthTexture();
-    this.shaderModule = createShaderModule(this.device, shaderCode);
 
     const MATRIX_SIZE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
     this.cameraUniformBuffer = this.device.createBuffer({
@@ -108,39 +116,6 @@ export class Renderer {
       entries: [
         { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
         { binding: 1, resource: { buffer: this.sceneUniformsBuffer } },
-      ],
-    });
-
-    /**
-     * Layout for @group(1), containing per-material data.
-     * Corresponds to the material textures/samplers in shaders.wgsl.
-     */
-    this.materialBindGroupLayout = this.device.createBindGroupLayout({
-      label: "MATERIAL_BIND_GROUP_LAYOUT",
-      entries: [
-        {
-          binding: 0, // Texture View
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: {},
-        },
-        {
-          binding: 1, // Sampler
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: {},
-        },
-        {
-          binding: 2, // Material Uniforms (baseColor, flags)
-          visibility: GPUShaderStage.FRAGMENT,
-          buffer: { type: "uniform" },
-        },
-      ],
-    });
-
-    // The pipeline layout defines the full set of bind groups used by a pipeline.
-    this.pipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [
-        this.frameBindGroupLayout, // This is @group(0)
-        this.materialBindGroupLayout, // This is @group(1)
       ],
     });
   }
@@ -198,94 +173,6 @@ export class Renderer {
   public resizeCanvas(): void {
     this.depthTexture.destroy();
     this.createDepthTexture();
-  }
-
-  /**
-   * Retrieves a cached pipeline for the given layouts or creates a new one.
-   * Caching pipelines is a critical optimization as pipeline creation is expensive.
-   * @param layouts - Array of vertex buffer layouts for the mesh to be rendered.
-   * @param isTransparent - Has the material alpha blending enabled
-   * @returns A GPURenderPipeline configured for the given layout.
-   */
-  private getOrCreatePipeline(
-    layouts: GPUVertexBufferLayout[],
-    isTransparent: boolean,
-  ): GPURenderPipeline {
-    const layoutKey = getLayoutKey(layouts);
-    const finalKey = layoutKey + (isTransparent ? ":transparent" : ":opaque");
-
-    if (this.pipelines.has(finalKey)) {
-      return this.pipelines.get(finalKey)!;
-    }
-
-    // Define the layout for the per-instance data buffer.
-    const instanceDataLayout: GPUVertexBufferLayout = {
-      // The stride is for two 4x4 matrices.
-      arrayStride: Renderer.MATRIX_BYTE_SIZE * 2,
-      stepMode: "instance",
-      // Passing the model and normal matrices as 4 vec4 attributes each
-      // (because they're too big to pass through a single location)
-      attributes: [
-        // Model Matrix (locations 3-6)
-        { shaderLocation: 3, offset: 0, format: "float32x4" },
-        { shaderLocation: 4, offset: 16, format: "float32x4" },
-        { shaderLocation: 5, offset: 32, format: "float32x4" },
-        { shaderLocation: 6, offset: 48, format: "float32x4" },
-        // Normal Matrix (locations 7-10)
-        { shaderLocation: 7, offset: 64, format: "float32x4" },
-        { shaderLocation: 8, offset: 80, format: "float32x4" },
-        { shaderLocation: 9, offset: 96, format: "float32x4" },
-        { shaderLocation: 10, offset: 112, format: "float32x4" },
-      ],
-    };
-
-    // If not, create a new pipeline.
-    const newPipeline = this.device.createRenderPipeline({
-      layout: this.pipelineLayout,
-      vertex: {
-        module: this.shaderModule,
-        entryPoint: "vs_main",
-        buffers: [...layouts, instanceDataLayout], // Pass all the layouts
-      },
-      fragment: {
-        module: this.shaderModule,
-        entryPoint: "fs_main",
-        targets: [
-          {
-            format: navigator.gpu.getPreferredCanvasFormat(),
-            blend: {
-              color: {
-                srcFactor: "src-alpha",
-                dstFactor: "one-minus-src-alpha",
-                operation: "add",
-              },
-              alpha: {
-                srcFactor: "one",
-                dstFactor: "one-minus-src-alpha",
-                operation: "add",
-              },
-            },
-          },
-        ],
-      },
-      primitive: {
-        topology: "triangle-list",
-        frontFace: "ccw",
-        // use none to disable culling of back-facing faces and color them
-        // in the shader
-        cullMode: "back",
-      },
-      depthStencil: {
-        // Transparent objects test against the depth buffer but don't write to it.
-        depthWriteEnabled: !isTransparent,
-        depthCompare: "less",
-        format: "depth24plus-stencil8",
-      },
-    });
-
-    // Cache the new pipeline for future use.
-    this.pipelines.set(finalKey, newPipeline);
-    return newPipeline;
   }
 
   /**
@@ -365,33 +252,53 @@ export class Renderer {
 
     let instanceBufferOffset = 0;
 
-    // 5. Opaque rendering pass (using high-performance batching)
+    // 5. Opaque rendering pass (using batching)
     if (opaqueRenderables.length > 0) {
-      const batches = new Map<GPUBindGroup, Map<Mesh, Mat4[]>>();
+      const batches = new Map<GPURenderPipeline, PipelineBatch>();
+
+      // Group all opaque renderables by their pipeline.
       for (const renderable of opaqueRenderables) {
         const { mesh, material, modelMatrix } = renderable;
-        if (!batches.has(material.bindGroup)) {
-          batches.set(material.bindGroup, new Map<Mesh, Mat4[]>());
+        // The material provides the correct pipeline for the given mesh layout.
+        const pipeline = material.getPipeline(
+          mesh.layouts,
+          Renderer.INSTANCE_DATA_LAYOUT,
+          this.frameBindGroupLayout,
+        );
+
+        if (!batches.has(pipeline)) {
+          batches.set(pipeline, {
+            material: material, // Store the material to get the bind group later.
+            meshMap: new Map<Mesh, Mat4[]>(),
+          });
         }
-        const materialBatch = batches.get(material.bindGroup)!;
-        if (!materialBatch.has(mesh)) {
-          materialBatch.set(mesh, []);
+
+        const pipelineBatch = batches.get(pipeline)!;
+        if (!pipelineBatch.meshMap.has(mesh)) {
+          pipelineBatch.meshMap.set(mesh, []);
         }
-        materialBatch.get(mesh)!.push(modelMatrix);
+        // Add the model matrix to the list of instances for this mesh.
+        pipelineBatch.meshMap.get(mesh)!.push(modelMatrix);
       }
 
-      for (const [materialBindGroup, meshMap] of batches.entries()) {
-        passEncoder.setBindGroup(1, materialBindGroup);
-        for (const [mesh, modelMatrices] of meshMap.entries()) {
-          const pipeline = this.getOrCreatePipeline(mesh.layouts, false);
-          passEncoder.setPipeline(pipeline);
+      // iterate over the batches and draw them.
+      for (const [pipeline, batch] of batches.entries()) {
+        // Set the pipeline and material bind group once for the entire batch.
+        passEncoder.setPipeline(pipeline);
+        passEncoder.setBindGroup(1, batch.material.bindGroup);
 
+        // draw each mesh within the batch
+        for (const [mesh, modelMatrices] of batch.meshMap.entries()) {
           const instanceCount = modelMatrices.length;
-          const instanceData = new Float32Array(instanceCount * 32);
+
+          // Create and write the instance data (model and normal matrices) for this mesh.
+          const instanceData = new Float32Array(instanceCount * 32); // 2 matrices per instance
           const normalMatrix = mat4.create();
           for (let i = 0; i < instanceCount; i++) {
             const modelMatrix = modelMatrices[i];
+            // Write model matrix
             instanceData.set(modelMatrix, i * 32);
+            // Calculate and write normal matrix
             mat4.invert(modelMatrix, normalMatrix);
             mat4.transpose(normalMatrix, normalMatrix);
             instanceData.set(normalMatrix, i * 32 + 16);
@@ -404,22 +311,27 @@ export class Renderer {
             instanceData,
           );
 
+          // Set the vertex buffers for the mesh geometry.
           for (let i = 0; i < mesh.buffers.length; i++) {
             passEncoder.setVertexBuffer(i, mesh.buffers[i]);
           }
+          // Set the vertex buffer for the instance data.
           passEncoder.setVertexBuffer(
-            mesh.buffers.length,
+            mesh.buffers.length, // Next available slot
             this.instanceBuffer,
             instanceBufferOffset,
             batchByteLength,
           );
 
+          // Perform the draw call.
           if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
             passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
             passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
           } else {
             passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
           }
+
+          // Advance the offset for the next batch of instances.
           instanceBufferOffset += batchByteLength;
         }
       }
@@ -429,6 +341,7 @@ export class Renderer {
     if (transparentRenderables.length > 0) {
       // Sort transparent objects from furthest to nearest
       transparentRenderables.sort((a, b) => {
+        // Get world position from model matrix (column 3, elements 0, 1, 2)
         const posA = vec3.fromValues(
           a.modelMatrix[12],
           a.modelMatrix[13],
@@ -439,51 +352,73 @@ export class Renderer {
           b.modelMatrix[13],
           b.modelMatrix[14],
         );
+        // Compare squared distances to avoid expensive sqrt
         const distA = vec3.distanceSq(posA, camera.position);
         const distB = vec3.distanceSq(posB, camera.position);
-        return distB - distA; // Sort descending by distance
+        return distB - distA; // Sort descending by distance (furthest first)
       });
 
-      // Prepare instance data for all transparent objects in one go
+      // Prepare instance data for all transparent objects in one go.
+      // Each object will be drawn with an instanceCount of 1, but we use
+      // firstInstance in the draw call to select the correct matrix
+      // from this single large buffer.
       const transparentInstanceData = new Float32Array(
-        transparentRenderables.length * 32,
+        transparentRenderables.length * 32, // 2 matrices per instance
       );
       const normalMatrix = mat4.create();
       for (let i = 0; i < transparentRenderables.length; i++) {
         const { modelMatrix } = transparentRenderables[i];
+        // Write model matrix
         transparentInstanceData.set(modelMatrix, i * 32);
+        // Calculate and write normal matrix
         mat4.invert(modelMatrix, normalMatrix);
         mat4.transpose(normalMatrix, normalMatrix);
         transparentInstanceData.set(normalMatrix, i * 32 + 16);
       }
       this.device.queue.writeBuffer(
         this.instanceBuffer,
-        instanceBufferOffset,
+        instanceBufferOffset, // Continue writing where the opaque pass left off
         transparentInstanceData,
       );
 
-      // Render sorted transparent objects
-      let lastMaterial: null | GPUBindGroup = null;
+      // Render sorted transparent objects one by one
+      let lastMaterial: null | Material = null;
       let lastMesh: null | Mesh = null;
+      let lastPipeline: null | GPURenderPipeline = null;
+
       for (let i = 0; i < transparentRenderables.length; i++) {
         const { mesh, material } = transparentRenderables[i];
 
-        // Minimize state changes
-        if (material.bindGroup !== lastMaterial) {
-          passEncoder.setBindGroup(1, material.bindGroup);
-          lastMaterial = material.bindGroup;
-        }
-        if (mesh !== lastMesh) {
-          const pipeline = this.getOrCreatePipeline(mesh.layouts, true);
-          passEncoder.setPipeline(pipeline);
+        // Get the pipeline for this specific material and mesh combination.
+        const pipeline = material.getPipeline(
+          mesh.layouts,
+          Renderer.INSTANCE_DATA_LAYOUT,
+          this.frameBindGroupLayout,
+        );
 
+        // Set pipeline if it has changed.
+        if (pipeline !== lastPipeline) {
+          passEncoder.setPipeline(pipeline);
+          lastPipeline = pipeline;
+        }
+
+        // Set material bind group if it has changed.
+        if (material !== lastMaterial) {
+          passEncoder.setBindGroup(1, material.bindGroup);
+          lastMaterial = material;
+        }
+
+        // Set vertex/index buffers if the mesh has changed.
+        if (mesh !== lastMesh) {
           for (let j = 0; j < mesh.buffers.length; j++) {
             passEncoder.setVertexBuffer(j, mesh.buffers[j]);
           }
+          // The instance buffer is set once for all transparent objects,
+          // have to be sure it's set if the mesh changes.
           passEncoder.setVertexBuffer(
             mesh.buffers.length,
             this.instanceBuffer,
-            instanceBufferOffset,
+            instanceBufferOffset, // Base offset for all transparent data
             transparentInstanceData.byteLength,
           );
           if (mesh.indexBuffer) {
@@ -493,6 +428,7 @@ export class Renderer {
         }
 
         // Draw this single instance, using 'i' as the firstInstance offset
+        // to select the correct matrix from the instance buffer.
         if (mesh.indexBuffer && mesh.indexCount) {
           passEncoder.drawIndexed(mesh.indexCount, 1, 0, 0, i);
         } else {
@@ -516,19 +452,5 @@ export class Renderer {
       );
     }
     return this.frameBindGroupLayout;
-  }
-
-  /**
-   * Gets the bind group layout for materials.
-   * Needed by the `ResourceManager` to create compatible material bind groups.
-   * @returns The material's `GPUBindGroupLayout`.
-   */
-  public getMaterialBindGroupLayout(): GPUBindGroupLayout {
-    if (!this.materialBindGroupLayout) {
-      throw new Error(
-        "Material bind group layout is not initialized. Call init() first.",
-      );
-    }
-    return this.materialBindGroupLayout;
   }
 }
