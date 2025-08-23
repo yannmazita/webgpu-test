@@ -1,5 +1,6 @@
 // src/core/types/gpu.ts
 import { Mat4, Vec3 } from "wgpu-matrix";
+import { Material } from "@/core/materials/material";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -57,21 +58,6 @@ export interface Light {
 }
 
 /**
- * Represents the material properties of a renderable object, encapsulating
- * GPU resources like textures, samplers, and their corresponding bind group.
- */
-export interface Material {
-  /** The material diffuse texture. Can be a dummy 1x1 texture for solid colors. */
-  texture: GPUTexture;
-  /** The sampler for the texture. */
-  sampler: GPUSampler;
-  /** A buffer containing uniform data like baseColor and flags (see shader). */
-  uniformBuffer: GPUBuffer;
-  /** The bind group that makes the material resources available to shaders. */
-  bindGroup: GPUBindGroup;
-}
-
-/**
  * Represents a renderable object with its GPU buffer and metadata.
  */
 export interface Mesh {
@@ -93,4 +79,13 @@ export interface Renderable {
   mesh: Mesh;
   modelMatrix: Mat4;
   material: Material;
+}
+
+/**
+ * Define a structure to hold all data needed for a batch draw call.
+ * A batch is defined by a unique pipeline.
+ */
+export interface PipelineBatch {
+  material: Material;
+  meshMap: Map<Mesh, Mat4[]>;
 }

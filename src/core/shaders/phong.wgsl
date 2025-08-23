@@ -1,4 +1,4 @@
-// src/core/shaders/shaders.wgsl
+// src/core/shaders/phong.wgsl
 
 /*
  * The shader organizes bindings into groups based on update frequency.
