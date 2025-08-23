@@ -35,12 +35,19 @@ try {
     vec3.fromValues(0, 0, 1), // utah_vw_beetle.stl is exported with z-up
   );
 
-  // Create Scene Light
-  const light: Light = {
-    position: vec3.fromValues(1, 1, 3), // Initial light position
-    color: vec3.fromValues(1, 1, 1), // White light
+  // Create Scene Lights
+  // light positions will be set in animate loop
+  const light1: Light = {
+    position: vec3.create(),
+    color: vec3.fromValues(1, 0, 0), // Red light
   };
-  scene.light = light;
+  scene.lights.push(light1);
+
+  const light2: Light = {
+    position: vec3.create(),
+    color: vec3.fromValues(0, 0, 1), // Blue light
+  };
+  scene.lights.push(light2);
 
   // Create Material and Mesh
   const [material1, material2, material3, teapotMesh] = await Promise.all([
@@ -50,12 +57,12 @@ try {
       shininess: 50.0,
     }),
     resourceManager.createPhongMaterial({
-      baseColor: [1, 0, 0, 2 / 3], // Red
+      baseColor: [1, 1, 1, 2 / 3], // White, semi transparent
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
     resourceManager.createPhongMaterial({
-      baseColor: [0, 0, 1, 1 / 3], // Blue
+      baseColor: [1, 1, 1, 1 / 3], // White, very transparent
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
@@ -123,13 +130,15 @@ try {
   const animate = (now: number) => {
     const time = now / 1000; // time in seconds
 
-    // Animate the light in a circle around the object
-    /*
-    const radius = 4.0;
-    scene.light.position[0] = Math.sin(time * 0.5) * radius;
-    scene.light.position[1] = Math.cos(time * 0.5) * radius;
-    scene.light.position[2] = 2.0;
-    */
+    // Animate the lights in circles around the objects
+    const radius = 3.0;
+    light1.position[0] = Math.sin(time * 0.7) * radius;
+    light1.position[1] = 2.0;
+    light1.position[2] = Math.cos(time * 0.7) * radius;
+
+    light2.position[0] = Math.sin(-time * 0.4) * radius;
+    light2.position[1] = 2.0;
+    light2.position[2] = Math.cos(-time * 0.4) * radius;
 
     // Rotate all the teapots together
     mat4.rotateZ(teapot1Matrix, 0.005, teapot1Matrix);

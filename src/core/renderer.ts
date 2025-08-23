@@ -35,12 +35,17 @@ export class Renderer {
   private frameBindGroup!: GPUBindGroup;
   /** Uniform buffer for the camera's view-projection matrix. */
   private cameraUniformBuffer!: GPUBuffer;
-  /** Uniform buffer for scene-wide data like lighting and camera position. */
-  private sceneUniformsBuffer!: GPUBuffer;
+  /** Uniform buffer for scene-wide data (camera position). */
+  private sceneDataBuffer!: GPUBuffer;
+  /** Storage buffer for all light data. */
+  private lightStorageBuffer!: GPUBuffer;
+  /** A temporary buffer for writing light data. */
+  private lightDataBuffer!: ArrayBuffer;
 
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
     4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
+  private static readonly MAX_LIGHTS = 16; // Max number of lights supported
   /** The layout for the per-instance data buffer. Materials need this to create compatible pipelines. */
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
     // The stride is for one 4x4 matrices.
@@ -77,14 +82,25 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Scene uniforms buffer: lightPos (vec3), lightColor (vec3), cameraPos (vec3)
-    // Using vec4 alignment: 3*vec4 = 3 * 16 = 48 bytes
-    const SCENE_UNIFORMS_SIZE = 3 * 4 * Float32Array.BYTES_PER_ELEMENT;
-    this.sceneUniformsBuffer = this.device.createBuffer({
-      label: "SCENE_UNIFORMS_BUFFER",
-      size: SCENE_UNIFORMS_SIZE,
+    // Scene data buffer: cameraPos (vec3)
+    // Using vec4 alignment: 1*vec4 = 16 bytes
+    const SCENE_DATA_SIZE = 4 * Float32Array.BYTES_PER_ELEMENT;
+    this.sceneDataBuffer = this.device.createBuffer({
+      label: "SCENE_DATA_UNIFORM_BUFFER",
+      size: SCENE_DATA_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+
+    // Lights storage buffer
+    const lightStructSize = 8 * Float32Array.BYTES_PER_ELEMENT; // 2 vec4s
+    const lightStorageBufferSize = 16 + Renderer.MAX_LIGHTS * lightStructSize; // 16 bytes for count+padding
+    this.lightStorageBuffer = this.device.createBuffer({
+      label: "LIGHT_STORAGE_BUFFER",
+      size: lightStorageBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    // Create a reusable ArrayBuffer for staging light data
+    this.lightDataBuffer = new ArrayBuffer(lightStorageBufferSize);
 
     /**
      * Layout for @group(0), containing per-frame scene data.
@@ -98,8 +114,13 @@ export class Renderer {
           buffer: { type: "uniform" },
         },
         {
-          binding: 1, // Scene Uniforms (light, camera position)
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          binding: 1, // Lights Storage Buffer
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" },
+        },
+        {
+          binding: 2, // Scene Data Uniform Buffer (cameraPos)
+          visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         },
       ],
@@ -110,7 +131,8 @@ export class Renderer {
       layout: this.frameBindGroupLayout,
       entries: [
         { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
-        { binding: 1, resource: { buffer: this.sceneUniformsBuffer } },
+        { binding: 1, resource: { buffer: this.lightStorageBuffer } },
+        { binding: 2, resource: { buffer: this.sceneDataBuffer } },
       ],
     });
   }
@@ -183,18 +205,33 @@ export class Renderer {
       camera.viewProjectionMatrix as Float32Array,
     );
 
-    // 2. Update scene uniforms buffer
-    const sceneUniformsData = new Float32Array(12);
-    sceneUniformsData.set(scene.light.position, 0); // vec3 lightPos
-    sceneUniformsData.set(scene.light.color, 4); // vec3 lightColor
-    sceneUniformsData.set(camera.position, 8); // vec3 cameraPos
+    // 2. Update scene data buffer (camera position)
     this.device.queue.writeBuffer(
-      this.sceneUniformsBuffer,
+      this.sceneDataBuffer,
       0,
-      sceneUniformsData,
+      camera.position as Float32Array,
     );
 
-    // 3. Partition objects into opaque and transparent lists
+    // 3. Update light storage buffer
+    const lightCount = Math.min(scene.lights.length, Renderer.MAX_LIGHTS);
+    // Use views to write to the same ArrayBuffer with different types
+    const lightCountView = new Uint32Array(this.lightDataBuffer, 0, 1);
+    const lightDataView = new Float32Array(this.lightDataBuffer, 16);
+
+    lightCountView[0] = lightCount;
+    for (let i = 0; i < lightCount; i++) {
+      const light = scene.lights[i];
+      const offset = i * 8; // Each light is 8 floats (2 vec4s)
+      lightDataView.set(light.position, offset);
+      lightDataView.set(light.color, offset + 4);
+    }
+    this.device.queue.writeBuffer(
+      this.lightStorageBuffer,
+      0,
+      this.lightDataBuffer,
+    );
+
+    // 4. Partition objects into opaque and transparent lists
     const opaqueRenderables: Renderable[] = [];
     const transparentRenderables: Renderable[] = [];
     for (const renderable of scene.objects) {
@@ -205,7 +242,7 @@ export class Renderer {
       }
     }
 
-    // 4. Prepare instance data for both lists
+    // 5. Prepare instance data for both lists
     const totalInstanceCount = scene.objects.length;
     const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
 
@@ -246,7 +283,7 @@ export class Renderer {
 
     let instanceBufferOffset = 0;
 
-    // 5. Opaque rendering pass (using batching)
+    // 6. Opaque rendering pass (using batching)
     if (opaqueRenderables.length > 0) {
       const batches = new Map<GPURenderPipeline, PipelineBatch>();
 
@@ -326,7 +363,7 @@ export class Renderer {
       }
     }
 
-    // 6. Transparent rendering pass (sort back-to-front and render individually)
+    // 7. Transparent rendering pass (sort back-to-front and render individually)
     if (transparentRenderables.length > 0) {
       // Sort transparent objects from furthest to nearest
       transparentRenderables.sort((a, b) => {

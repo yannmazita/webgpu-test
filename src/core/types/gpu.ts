@@ -1,5 +1,5 @@
 // src/core/types/gpu.ts
-import { Mat4, Vec3 } from "wgpu-matrix";
+import { Mat4, Vec4 } from "wgpu-matrix";
 import { Material } from "@/core/materials/material";
 
 /**
@@ -51,10 +51,13 @@ export interface PhongMaterialOptions {
 
 /**
  * Represents a point light source in the scene.
+ *
+ * We're using Vec4 instead of Vec3 to not deal with WebGPU padding of vec3's
+ * 12 bytes of data (3 * 4 bytes) into 16 bytes in memory ((3 * 4) + 4 bytes)
  */
 export interface Light {
-  position: Vec3;
-  color: Vec3;
+  position: Vec4;
+  color: Vec4;
 }
 
 /**

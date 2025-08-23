@@ -8,7 +8,8 @@
  *   - Contains scene-level information like the camera and lighting.
  *   - Bindings:
  *     @binding(0): Camera Matrix Uniforms
- *     @binding(1): Scene Uniforms (lighting, camera position)
+ *     @binding(1): Lights storage
+ *     @binding(2): Scene Uniforms (camera position)
  *
  * @group(1) - Per-Material Data
  *   - Updated for each distinct material.
@@ -25,10 +26,6 @@ struct CameraUniforms {
 };
 
 struct SceneUniforms {
-    lightPos: vec3<f32>,
-    // padding
-    lightColor: vec3<f32>,
-    // padding
     cameraPos: vec3<f32>,
 };
 
@@ -40,11 +37,28 @@ struct MaterialUniforms {
     hasTexture: f32, // using f32 as bools have complex padding rules
 };
 
+// A struct to represent a single light source.
+// We use vec4 for position and color to ensure 16-byte alignment within the array.
+struct Light {
+    position: vec4<f32>,
+    color: vec4<f32>,
+};
+
+// A struct for the storage buffer containing all lights.
+struct LightsBuffer {
+    count: u32,
+    // The 'lights' array must start at an offset that is a multiple of its
+    // element's alignment (16). Since 'count' is 4 bytes, we need 12 bytes
+    // of padding here.
+    lights: array<Light>,
+};
 
 // @group(0) is for per-frame data.
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
 @group(0) @binding(1)
+var<storage, read> lightsBuffer: LightsBuffer;
+@group(0) @binding(2)
 var<uniform> scene: SceneUniforms;
 
 // @group(1) is for per-material data.
@@ -130,30 +144,33 @@ fn fs_main(
     // The interpolated normal needs to be re-normalized in the fragment shader.
     let normal = normalize(in.worldNormal);
     let viewDir = normalize(scene.cameraPos - in.worldPosition);
-    let lightDir = normalize(scene.lightPos - in.worldPosition);
 
-    // Phong Ambient Component
-    // A constant low-intensity light to simulate indirect illumination.
-    let ambientStrength = 0.1;
-    let ambient = ambientStrength * scene.lightColor;
+    // Initialize lighting components
+    var totalDiffuse = vec3<f32>(0.0, 0.0, 0.0);
+    var totalSpecular = vec3<f32>(0.0, 0.0, 0.0);
 
-    // Phong Diffuse Component
-    // Simulates light scattering on matte surfaces.
-    // Depends on the angle between the light and the surface normal.
-    let diff = max(dot(normal, lightDir), 0.0);
-    let diffuse = diff * scene.lightColor;
+    // Loop through all active lights
+    for (var i: u32 = 0u; i < lightsBuffer.count; i = i + 1u) {
+        let currentLight = lightsBuffer.lights[i];
+        let lightDir = normalize(currentLight.position.xyz - in.worldPosition);
 
-    // Phong Specular Component
-    // Simulates reflections on shiny surfaces.
-    // Depends on the view direction and the light's reflection direction.
-    let reflectDir = reflect(-lightDir, normal);
-    let spec = pow(max(dot(viewDir, reflectDir), 0.0), u_material.shininess);
-    let specular = u_material.specularColor * spec * scene.lightColor;
+        // Phong diffuse component
+        let diff = max(dot(normal, lightDir), 0.0);
+        totalDiffuse = totalDiffuse + (diff * currentLight.color.rgb);
+
+        // Phong specular component
+        let reflectDir = reflect(-lightDir, normal);
+        let spec = pow(max(dot(viewDir, reflectDir), 0.0), u_material.shininess);
+        totalSpecular = totalSpecular + (u_material.specularColor * spec * currentLight.color.rgb);
+    }
+
+    // Phong ambient component
+    let ambient = vec3<f32>(0.1, 0.1, 0.1);
 
     // Combine Components
-    // The final color is the sum of ambient and diffuse light, modulated by the
-    // object base color, plus the specular highlights.
-    let finalColor = (ambient + diffuse) * baseColor.rgb + specular;
+    // The final color is the sum of ambient and total diffuse light, modulated by the
+    // object base color, plus the total specular highlights.
+    let finalColor = (ambient + totalDiffuse) * baseColor.rgb + totalSpecular;
 
     if (face) {
       return vec4<f32>(finalColor, baseColor.a);
