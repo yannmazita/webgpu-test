@@ -52,12 +52,14 @@ export const createGPUBuffer = (
   device: GPUDevice,
   data: TypedArray,
   usage: GPUBufferUsageFlags,
+  label?: string,
 ): GPUBuffer => {
   // Pad the buffer size to a multiple of 4 bytes.
   // This is required for buffers created with mappedAtCreation set to true.
   const paddedSize = Math.ceil(data.byteLength / 4) * 4;
 
   const bufferDescriptor: GPUBufferDescriptor = {
+    label: label,
     size: paddedSize,
     usage: usage,
     mappedAtCreation: true,
