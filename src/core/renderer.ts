@@ -43,22 +43,17 @@ export class Renderer {
     4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
   /** The layout for the per-instance data buffer. Materials need this to create compatible pipelines. */
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
-    // The stride is for two 4x4 matrices.
-    arrayStride: Renderer.MATRIX_BYTE_SIZE * 2,
+    // The stride is for one 4x4 matrices.
+    arrayStride: Renderer.MATRIX_BYTE_SIZE,
     stepMode: "instance",
-    // Passing the model and normal matrices as 4 vec4 attributes each
-    // (because they're too big to pass through a single location)
+    // Passing the model matrix as 4 vec4 attributes
+    // (because it's big to pass through a single location)
     attributes: [
       // Model Matrix (locations 3-6)
       { shaderLocation: 3, offset: 0, format: "float32x4" },
       { shaderLocation: 4, offset: 16, format: "float32x4" },
       { shaderLocation: 5, offset: 32, format: "float32x4" },
       { shaderLocation: 6, offset: 48, format: "float32x4" },
-      // Normal Matrix (locations 7-10)
-      { shaderLocation: 7, offset: 64, format: "float32x4" },
-      { shaderLocation: 8, offset: 80, format: "float32x4" },
-      { shaderLocation: 9, offset: 96, format: "float32x4" },
-      { shaderLocation: 10, offset: 112, format: "float32x4" },
     ],
   };
 
@@ -212,8 +207,7 @@ export class Renderer {
 
     // 4. Prepare instance data for both lists
     const totalInstanceCount = scene.objects.length;
-    const requiredBufferSize =
-      totalInstanceCount * Renderer.MATRIX_BYTE_SIZE * 2;
+    const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
 
     if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
       if (this.instanceBuffer) this.instanceBuffer.destroy();
@@ -291,17 +285,12 @@ export class Renderer {
         for (const [mesh, modelMatrices] of batch.meshMap.entries()) {
           const instanceCount = modelMatrices.length;
 
-          // Create and write the instance data (model and normal matrices) for this mesh.
-          const instanceData = new Float32Array(instanceCount * 32); // 2 matrices per instance
-          const normalMatrix = mat4.create();
+          // Create and write the instance data (model matrix) for this mesh.
+          const instanceData = new Float32Array(instanceCount * 16); // 1 matrix per instance
           for (let i = 0; i < instanceCount; i++) {
             const modelMatrix = modelMatrices[i];
             // Write model matrix
-            instanceData.set(modelMatrix, i * 32);
-            // Calculate and write normal matrix
-            mat4.invert(modelMatrix, normalMatrix);
-            mat4.transpose(normalMatrix, normalMatrix);
-            instanceData.set(normalMatrix, i * 32 + 16);
+            instanceData.set(modelMatrix, i * 16);
           }
 
           const batchByteLength = instanceData.byteLength;
@@ -363,17 +352,12 @@ export class Renderer {
       // firstInstance in the draw call to select the correct matrix
       // from this single large buffer.
       const transparentInstanceData = new Float32Array(
-        transparentRenderables.length * 32, // 2 matrices per instance
+        transparentRenderables.length * 16, // 1 matrix per instance
       );
-      const normalMatrix = mat4.create();
       for (let i = 0; i < transparentRenderables.length; i++) {
         const { modelMatrix } = transparentRenderables[i];
         // Write model matrix
-        transparentInstanceData.set(modelMatrix, i * 32);
-        // Calculate and write normal matrix
-        mat4.invert(modelMatrix, normalMatrix);
-        mat4.transpose(normalMatrix, normalMatrix);
-        transparentInstanceData.set(normalMatrix, i * 32 + 16);
+        transparentInstanceData.set(modelMatrix, i * 16);
       }
       this.device.queue.writeBuffer(
         this.instanceBuffer,
