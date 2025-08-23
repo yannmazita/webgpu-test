@@ -1,6 +1,8 @@
 // src/core/resourceManager.ts
 import { Renderer } from "./renderer";
-import { Material, Mesh, PhongMaterialOptions } from "./types/gpu";
+import { Material } from "./materials/material";
+import { Mesh, PhongMaterialOptions } from "./types/gpu";
+import { PhongMaterial } from "./materials/phongMaterial";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -18,9 +20,9 @@ import { OBJLoader } from "@loaders.gl/obj";
 export class ResourceManager {
   /** A reference to the main renderer instance. */
   private renderer: Renderer;
-  /** A cache for `Material` objects, keyed by their texture image URL. */
+  /** A cache for Material objects keyed by their properties. */
   private materials = new Map<string, Material>();
-  /** A cache for `Mesh` objects, keyed by a unique string identifier. */
+  /** A cache for Mesh objects keyed by a unique string identifier. */
   private meshes = new Map<string, Mesh>();
   /** A 1x1 white texture for materials with no textures. */
   private dummyTexture!: GPUTexture;
@@ -66,7 +68,7 @@ export class ResourceManager {
    * @param options - An object specifying the material properties.
    *   See the `PhongMaterialOptions` interface for details on each property
    *   and its corresponding default value.
-   * @returns A promise that resolves to the created or cached "Material".
+   * @returns A promise that resolves to the created or cached `PhongMaterial`.
    */
   public async createPhongMaterial(
     options: PhongMaterialOptions = {},
@@ -77,8 +79,6 @@ export class ResourceManager {
     const shininess = options.shininess ?? 32.0;
     const textureUrl = options.textureUrl;
 
-    const isTransparent = baseColor[3] < 1.0;
-
     // unique key for caching based on all properties
     const materialKey = `PHONG:${baseColor.join()}:${specularColor.join()}:${shininess}:${
       textureUrl ?? ""
@@ -88,50 +88,17 @@ export class ResourceManager {
     }
 
     // Determine the texture to use
-    const hasTexture = !!textureUrl;
-    const texture = hasTexture
+    const texture = textureUrl
       ? await createTextureFromImage(this.renderer.device, textureUrl)
       : this.dummyTexture;
-    const sampler = this.defaultSampler;
 
-    /*
-     * Create the uniform buffer for material properties.
-     * Layout (48 bytes total):
-     * - baseColor: vec4<f32> (bytes 0-15)
-     * - specularColor: vec3<f32> (bytes 16-27) + 1 float padding
-     * - shininess: f32 (bytes 32-35)
-     * - hasTexture: f32 (bool) (bytes 36-39)
-     */
-    const uniformData = new Float32Array(12);
-    uniformData.set(baseColor, 0); // offset 0
-    uniformData.set(specularColor, 4); // offset 16
-    uniformData[8] = shininess; // offset 32
-    uniformData[9] = hasTexture ? 1.0 : 0.0; // offset 36
-
-    const uniformBuffer = this.renderer.device.createBuffer({
-      label: `MATERIAL_UNIFORM_BUFFER_${materialKey}`,
-      size: uniformData.byteLength,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.renderer.device.queue.writeBuffer(uniformBuffer, 0, uniformData);
-
-    const bindGroup = this.renderer.device.createBindGroup({
-      label: `MATERIAL_BIND_GROUP_${materialKey}`,
-      layout: this.renderer.getMaterialBindGroupLayout(),
-      entries: [
-        { binding: 0, resource: texture.createView() },
-        { binding: 1, resource: sampler },
-        { binding: 2, resource: { buffer: uniformBuffer } },
-      ],
-    });
-
-    const material: Material = {
+    const material = new PhongMaterial(
+      this.renderer.device,
+      options,
       texture,
-      sampler,
-      uniformBuffer,
-      bindGroup,
-      isTransparent,
-    };
+      this.defaultSampler,
+    );
+
     this.materials.set(materialKey, material);
     return material;
   }
