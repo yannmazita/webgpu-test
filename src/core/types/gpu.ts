@@ -1,5 +1,6 @@
 // src/core/types/gpu.ts
 import { Mat4, Vec3 } from "wgpu-matrix";
+import { Material } from "@/core/materials/material";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -54,23 +55,6 @@ export interface PhongMaterialOptions {
 export interface Light {
   position: Vec3;
   color: Vec3;
-}
-
-/**
- * Represents the material properties of a renderable object, encapsulating
- * GPU resources like textures, samplers, and their corresponding bind group.
- */
-export interface Material {
-  /** The material diffuse texture. Can be a dummy 1x1 texture for solid colors. */
-  texture: GPUTexture;
-  /** The sampler for the texture. */
-  sampler: GPUSampler;
-  /** A buffer containing uniform data like baseColor and flags (see shader). */
-  uniformBuffer: GPUBuffer;
-  /** The bind group that makes the material resources available to shaders. */
-  bindGroup: GPUBindGroup;
-  /** Has the material alpha blending enabled. */
-  isTransparent: boolean;
 }
 
 /**
