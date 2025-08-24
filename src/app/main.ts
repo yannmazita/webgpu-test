@@ -6,6 +6,12 @@ import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import { Scene } from "@/core/scene";
 import { Light } from "@/core/types/gpu";
+import {
+  init as initDebugUI,
+  beginFrame as beginDebugUIFrame,
+  render as renderDebugUI,
+} from "@/core/debugUI";
+import { ImGui } from "@mori2003/jsimgui";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -13,8 +19,17 @@ if (!canvas) {
 }
 
 try {
+  /*
+  // Synchronize canvas bitmap size with its display size.
+  // This must be done before the Renderer is initialized so that the
+  // first depth texture it creates has the correct dimensions.
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  */
   const renderer = new Renderer(canvas);
   await renderer.init();
+
+  await initDebugUI(canvas, renderer.device);
 
   const resourceManager = new ResourceManager(renderer);
   const scene = new Scene();
@@ -23,7 +38,7 @@ try {
   // Configure camera projection
   camera.setPerspective(
     (90 * Math.PI) / 180, // 90 degrees field of view
-    1, // dummy aspect ratio
+    canvas.width / canvas.height,
     0.1,
     100.0,
   );
@@ -102,33 +117,33 @@ try {
     modelMatrix: teapot3Matrix,
     material: material3,
   });
-  const handleResize = () => {
-    const newWidth = canvas.clientWidth;
-    const newHeight = canvas.clientHeight;
 
-    if (canvas.width === newWidth && canvas.height === newHeight) {
-      return;
-    }
-
-    canvas.width = newWidth;
-    canvas.height = newHeight;
-    renderer.resizeCanvas();
-
-    camera.setPerspective(
-      (90 * Math.PI) / 180,
-      newWidth / newHeight,
-      0.1,
-      100.0,
-    );
+  const UI_STATE = {
+    light1Color: { r: light1.color[0], g: light1.color[1], b: light1.color[2] },
+    light2Color: { r: light2.color[0], g: light2.color[1], b: light2.color[2] },
   };
-
-  const canvasResizeObserver = new ResizeObserver(handleResize);
-  canvasResizeObserver.observe(canvas);
-  handleResize();
 
   // Animation Loop
   const animate = (now: number) => {
     const time = now / 1000; // time in seconds
+
+    beginDebugUIFrame();
+
+    // Create the UI window and its widgets
+    ImGui.Begin("Debug Controls");
+    ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
+    ImGui.Text("Light Controls");
+    if (ImGui.ColorEdit3("Light 1 Color", UI_STATE.light1Color)) {
+      light1.color[0] = UI_STATE.light1Color.r;
+      light1.color[1] = UI_STATE.light1Color.g;
+      light1.color[2] = UI_STATE.light1Color.b;
+    }
+    if (ImGui.ColorEdit3("Light 2 Color", UI_STATE.light2Color)) {
+      light2.color[0] = UI_STATE.light2Color.r;
+      light2.color[1] = UI_STATE.light2Color.g;
+      light2.color[2] = UI_STATE.light2Color.b;
+    }
+    ImGui.End();
 
     // Animate the lights in circles around the objects
     const radius = 3.0;
@@ -145,7 +160,7 @@ try {
     mat4.rotateZ(teapot2Matrix, 0.005, teapot2Matrix);
     mat4.rotateZ(teapot3Matrix, 0.005, teapot3Matrix);
 
-    renderer.render(camera, scene);
+    renderer.render(camera, scene, renderDebugUI);
     requestAnimationFrame(animate);
   };
 

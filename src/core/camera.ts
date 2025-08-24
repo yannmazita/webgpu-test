@@ -16,11 +16,18 @@ export class Camera {
   /** The camera's position in world space. */
   public position: Vec3;
 
+  public fovYRadians: number;
+  public near: number;
+  public far: number;
+
   constructor() {
     this.viewMatrix = mat4.identity();
     this.projectionMatrix = mat4.identity();
     this.viewProjectionMatrix = mat4.identity();
     this.position = vec3.create(0, 0, 0);
+    this.fovYRadians = (75 * Math.PI) / 180;
+    this.near = 0.1;
+    this.far = 100.0;
   }
 
   /**
@@ -37,6 +44,9 @@ export class Camera {
     near: number,
     far: number,
   ): void {
+    this.fovYRadians = fovYRadians;
+    this.near = near;
+    this.far = far;
     this.projectionMatrix = mat4.perspective(
       fovYRadians,
       aspectRatio,

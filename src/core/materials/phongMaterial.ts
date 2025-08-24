@@ -81,6 +81,8 @@ export class PhongMaterial extends Material {
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,
     frameBindGroupLayout: GPUBindGroupLayout,
+    canvasFormat: GPUTextureFormat,
+    depthFormat: GPUTextureFormat,
   ): GPURenderPipeline {
     if (!this.pipelineLayout) {
       this.pipelineLayout = this.device.createPipelineLayout({
@@ -103,7 +105,7 @@ export class PhongMaterial extends Material {
         entryPoint: "fs_main",
         targets: [
           {
-            format: navigator.gpu.getPreferredCanvasFormat(),
+            format: canvasFormat,
             blend: this.isTransparent
               ? {
                   color: {
@@ -132,7 +134,7 @@ export class PhongMaterial extends Material {
         // Transparent objects test against the depth buffer but don't write to it.
         depthWriteEnabled: !this.isTransparent,
         depthCompare: "less",
-        format: "depth24plus-stencil8",
+        format: depthFormat,
       },
     });
   }

@@ -23,14 +23,20 @@ export abstract class Material {
    * @param meshLayouts - Array of vertex buffer layouts for the mesh to be rendered.
    * @param instanceDataLayout - The layout for the per-instance data buffer.
    * @param frameBindGroupLayout - The layout for the per-frame bind group (@group(0)).
+   * @param canvasFormat - The color format of the render target.
+   * @param depthFormat - The depth/stencil format of the render target.
    * @returns A GPURenderPipeline configured for this material and the given mesh layout.
    */
   public getPipeline(
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,
     frameBindGroupLayout: GPUBindGroupLayout,
+    canvasFormat: GPUTextureFormat,
+    depthFormat: GPUTextureFormat,
   ): GPURenderPipeline {
-    const layoutKey = getLayoutKey(meshLayouts);
+    const layoutKey = `${getLayoutKey(
+      meshLayouts,
+    )}|${canvasFormat}|${depthFormat}`;
     if (this.pipelineCache.has(layoutKey)) {
       return this.pipelineCache.get(layoutKey)!;
     }
@@ -39,6 +45,8 @@ export abstract class Material {
       meshLayouts,
       instanceDataLayout,
       frameBindGroupLayout,
+      canvasFormat,
+      depthFormat,
     );
     this.pipelineCache.set(layoutKey, pipeline);
     return pipeline;
@@ -52,5 +60,7 @@ export abstract class Material {
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,
     frameBindGroupLayout: GPUBindGroupLayout,
+    canvasFormat: GPUTextureFormat,
+    depthFormat: GPUTextureFormat,
   ): GPURenderPipeline;
 }
