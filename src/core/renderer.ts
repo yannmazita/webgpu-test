@@ -443,8 +443,14 @@ export class Renderer {
           b.modelMatrix[14],
         );
         // Compare squared distances to avoid expensive sqrt
-        const distA = vec3.distanceSq(posA, camera.position);
-        const distB = vec3.distanceSq(posB, camera.position);
+        // Extract vec3 from camera's vec4 position for distance calculation
+        const cameraPosVec3 = vec3.fromValues(
+          camera.position[0],
+          camera.position[1],
+          camera.position[2],
+        );
+        const distA = vec3.distanceSq(posA, cameraPosVec3);
+        const distB = vec3.distanceSq(posB, cameraPosVec3);
         return distB - distA; // Sort descending by distance (furthest first)
       });
 

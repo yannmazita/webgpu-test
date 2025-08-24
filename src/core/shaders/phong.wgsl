@@ -18,6 +18,9 @@
  *     @binding(0): Diffuse Texture
  *     @binding(1): Texture Sampler
  *     @binding(2): Material properties (colors, shininess)
+ *
+ * If vec3 data needs to be transfered between cpu-gpu, vec4 is used
+ * to avoid padding shenanigans
  */
 
 // Uniforms that are constant for the entire frame.
@@ -26,13 +29,13 @@ struct CameraUniforms {
 };
 
 struct SceneUniforms {
-    cameraPos: vec3<f32>,
+    cameraPos: vec4<f32>,
 };
 
 // Uniforms for material properties.
 struct MaterialUniforms {
     baseColor: vec4<f32>,
-    specularColor: vec3<f32>,
+    specularColor: vec4<f32>,
     shininess: f32,
     hasTexture: f32, // using f32 as bools have complex padding rules
 };
@@ -143,7 +146,7 @@ fn fs_main(
     // Prepare Vectors for Lighting
     // The interpolated normal needs to be re-normalized in the fragment shader.
     let normal = normalize(in.worldNormal);
-    let viewDir = normalize(scene.cameraPos - in.worldPosition);
+    let viewDir = normalize(scene.cameraPos.xyz - in.worldPosition);
 
     // Initialize lighting components
     var totalDiffuse = vec3<f32>(0.0, 0.0, 0.0);
@@ -161,7 +164,7 @@ fn fs_main(
         // Phong specular component
         let reflectDir = reflect(-lightDir, normal);
         let spec = pow(max(dot(viewDir, reflectDir), 0.0), u_material.shininess);
-        totalSpecular = totalSpecular + (u_material.specularColor * spec * currentLight.color.rgb);
+        totalSpecular = totalSpecular + (u_material.specularColor.rgb * spec * currentLight.color.rgb);
     }
 
     // Phong ambient component
