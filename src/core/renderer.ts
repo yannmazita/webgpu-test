@@ -204,35 +204,47 @@ export class Renderer {
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
   ): void {
     // =========================================================================
-    // Scene rendering passes
+    // Resize Handling
     // =========================================================================
 
-    // Get the texture from the canvas context.
+    // Stage 1: If canvas display size has changed, update the
+    // drawing buffer size and skip the rest of the frame.
+    const newWidth = this.canvas.clientWidth;
+    const newHeight = this.canvas.clientHeight;
+    if (this.canvas.width !== newWidth || this.canvas.height !== newHeight) {
+      // If the canvas has a non-zero size, update its drawing buffer.
+      if (newWidth > 0 && newHeight > 0) {
+        this.canvas.width = newWidth;
+        this.canvas.height = newHeight;
+      }
+      // Abort the current frame. The next frame will have the correct size.
+      // This prevents using a destroyed texture from the old swap chain.
+      return;
+    }
+
+    // Stage 2: Get the current texture and synchronize other resources to it.
     const currentTexture = this.context.getCurrentTexture();
     const textureView = currentTexture.createView();
 
-    // Check if the canvas size or depth texture size is out of sync with the
-    // swap chain texture.
-    const newWidth = currentTexture.width;
-    const newHeight = currentTexture.height;
+    // If our depth texture is out of sync, recreate it and update the camera.
+    // This will trigger on the frame after the resize in Stage 1.
     if (
-      this.depthTexture.width !== newWidth ||
-      this.depthTexture.height !== newHeight
+      this.depthTexture.width !== currentTexture.width ||
+      this.depthTexture.height !== currentTexture.height
     ) {
-      this.canvas.width = newWidth;
-      this.canvas.height = newHeight;
       this.createDepthTexture();
-
-      if (newWidth > 0 && newHeight > 0) {
-        const aspectRatio = newWidth / newHeight;
-        camera.setPerspective(
-          camera.fovYRadians,
-          aspectRatio,
-          camera.near,
-          camera.far,
-        );
-      }
+      const aspectRatio = currentTexture.width / currentTexture.height;
+      camera.setPerspective(
+        camera.fovYRadians,
+        aspectRatio,
+        camera.near,
+        camera.far,
+      );
     }
+
+    // =========================================================================
+    // Scene rendering passes
+    // =========================================================================
 
     // 1. Update camera uniform buffer
     this.device.queue.writeBuffer(

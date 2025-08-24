@@ -19,13 +19,11 @@ if (!canvas) {
 }
 
 try {
-  /*
   // Synchronize canvas bitmap size with its display size.
   // This must be done before the Renderer is initialized so that the
   // first depth texture it creates has the correct dimensions.
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
-  */
   const renderer = new Renderer(canvas);
   await renderer.init();
 
