@@ -1,7 +1,7 @@
 // src/app/main.ts
 import { Renderer } from "@/core/renderer";
 import "@/style.css";
-import { mat4, vec3 } from "wgpu-matrix";
+import { mat4, vec3, vec4 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import { Scene } from "@/core/scene";
@@ -51,16 +51,20 @@ try {
   // Create Scene Lights
   // light positions will be set in animate loop
   const light1: Light = {
-    position: vec3.create(),
-    color: vec3.fromValues(1, 0, 0), // Red light
+    position: vec4.create(),
+    color: vec4.fromValues(1, 0, 0, 1), // Red light
   };
   scene.lights.push(light1);
 
   const light2: Light = {
-    position: vec3.create(),
-    color: vec3.fromValues(0, 0, 1), // Blue light
+    position: vec4.create(),
+    color: vec4.fromValues(0, 1, 0, 1), // Green light
   };
   scene.lights.push(light2);
+
+  // ImGui needs plain arrays that it can modify directly
+  const light1ColorUI = [1.0, 0.0, 0.0, 1.0]; // Red
+  const light2ColorUI = [0.0, 1.0, 0.0, 1.0]; // Green
 
   // Create Material and Mesh
   const [material1, material2, material3, teapotMesh] = await Promise.all([
@@ -116,11 +120,6 @@ try {
     material: material3,
   });
 
-  const UI_STATE = {
-    light1Color: { r: light1.color[0], g: light1.color[1], b: light1.color[2] },
-    light2Color: { r: light2.color[0], g: light2.color[1], b: light2.color[2] },
-  };
-
   // Animation Loop
   const animate = (now: number) => {
     const time = now / 1000; // time in seconds
@@ -131,16 +130,24 @@ try {
     ImGui.Begin("Debug Controls");
     ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
     ImGui.Text("Light Controls");
-    if (ImGui.ColorEdit3("Light 1 Color", UI_STATE.light1Color)) {
-      light1.color[0] = UI_STATE.light1Color.r;
-      light1.color[1] = UI_STATE.light1Color.g;
-      light1.color[2] = UI_STATE.light1Color.b;
+
+    // Edit the UI arrays (not the light colors directly)
+    if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
+      // When UI changes, copy values to the actual light
+      light1.color[0] = light1ColorUI[0];
+      light1.color[1] = light1ColorUI[1];
+      light1.color[2] = light1ColorUI[2];
+      light1.color[3] = light1ColorUI[3];
     }
-    if (ImGui.ColorEdit3("Light 2 Color", UI_STATE.light2Color)) {
-      light2.color[0] = UI_STATE.light2Color.r;
-      light2.color[1] = UI_STATE.light2Color.g;
-      light2.color[2] = UI_STATE.light2Color.b;
+
+    if (ImGui.ColorEdit4("Light 2 Color", light2ColorUI)) {
+      // When UI changes, copy values to the actual light
+      light2.color[0] = light2ColorUI[0];
+      light2.color[1] = light2ColorUI[1];
+      light2.color[2] = light2ColorUI[2];
+      light2.color[3] = light2ColorUI[3];
     }
+
     ImGui.End();
 
     // Animate the lights in circles around the objects
@@ -148,10 +155,12 @@ try {
     light1.position[0] = Math.sin(time * 0.7) * radius;
     light1.position[1] = 2.0;
     light1.position[2] = Math.cos(time * 0.7) * radius;
+    light1.position[3] = 1.0; // Keep w=1 for position
 
     light2.position[0] = Math.sin(-time * 0.4) * radius;
     light2.position[1] = 2.0;
     light2.position[2] = Math.cos(-time * 0.4) * radius;
+    light2.position[3] = 1.0; // Keep w=1 for position
 
     // Rotate all the teapots together
     mat4.rotateZ(teapot1Matrix, 0.005, teapot1Matrix);
