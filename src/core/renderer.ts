@@ -2,7 +2,7 @@
 import { Camera } from "@/core/camera";
 import { Scene } from "@/core/scene";
 import { mat4, Mat4, vec3 } from "wgpu-matrix";
-import { Mesh, PipelineBatch, Renderable } from "./types/gpu";
+import { InstanceData, Mesh, PipelineBatch, Renderable } from "./types/gpu";
 import { Material } from "./materials/material";
 
 /**
@@ -51,10 +51,12 @@ export class Renderer {
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
     4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
-
+  private static readonly INSTANCE_STRIDE_IN_FLOATS = 20; // 16 for matrix + 1 for flag + 3 for padding
+  private static readonly INSTANCE_BYTE_STRIDE =
+    Renderer.INSTANCE_STRIDE_IN_FLOATS * Float32Array.BYTES_PER_ELEMENT; // 80 bytes
   /** The layout for the per-instance data buffer. Materials need this to create compatible pipelines. */
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
-    arrayStride: Renderer.MATRIX_BYTE_SIZE,
+    arrayStride: Renderer.INSTANCE_BYTE_STRIDE,
     stepMode: "instance",
     attributes: [
       // Model Matrix (locations 3-6)
@@ -62,6 +64,12 @@ export class Renderer {
       { shaderLocation: 4, offset: 16, format: "float32x4" },
       { shaderLocation: 5, offset: 32, format: "float32x4" },
       { shaderLocation: 6, offset: 48, format: "float32x4" },
+      // isUniformlyScaled flag (location 7)
+      {
+        shaderLocation: 7,
+        offset: Renderer.MATRIX_BYTE_SIZE,
+        format: "float32",
+      },
     ],
   };
 
@@ -380,7 +388,7 @@ export class Renderer {
 
       // Group all opaque renderables by their pipeline.
       for (const renderable of opaqueRenderables) {
-        const { mesh, material, modelMatrix } = renderable;
+        const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
         // The material provides the correct pipeline for the given mesh layout.
         const pipeline = material.getPipeline(
           mesh.layouts,
@@ -393,7 +401,7 @@ export class Renderer {
         if (!batches.has(pipeline)) {
           batches.set(pipeline, {
             material: material, // Store the material to get the bind group later.
-            meshMap: new Map<Mesh, Mat4[]>(),
+            meshMap: new Map<Mesh, InstanceData[]>(),
           });
         }
 
@@ -402,7 +410,9 @@ export class Renderer {
           pipelineBatch.meshMap.set(mesh, []);
         }
         // Add the model matrix to the list of instances for this mesh.
-        pipelineBatch.meshMap.get(mesh)!.push(modelMatrix);
+        pipelineBatch.meshMap
+          .get(mesh)!
+          .push({ modelMatrix, isUniformlyScaled });
       }
 
       // iterate over the batches and draw them.
@@ -412,17 +422,22 @@ export class Renderer {
         scenePassEncoder.setBindGroup(1, batch.material.bindGroup);
 
         // draw each mesh within the batch
-        for (const [mesh, modelMatrices] of batch.meshMap.entries()) {
-          const instanceCount = modelMatrices.length;
+        for (const [mesh, instances] of batch.meshMap.entries()) {
+          const instanceCount = instances.length;
 
-          // Create and write the instance data (model matrix) for this mesh.
-          const instanceData = new Float32Array(instanceCount * 16); // 1 matrix per instance
+          // Create and write the instance data (model matrix + flag) for this mesh.
+          const instanceData = new Float32Array(
+            instanceCount * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+          );
 
           for (let i = 0; i < instanceCount; i++) {
-            const modelMatrix = modelMatrices[i];
+            const { modelMatrix, isUniformlyScaled } = instances[i];
+            const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
 
             // Write model matrix
-            instanceData.set(modelMatrix, i * 16);
+            instanceData.set(modelMatrix, offsetInFloats);
+            // Write isUniformlyScaled flag (at float offset 16 within the stride)
+            instanceData[offsetInFloats + 16] = isUniformlyScaled ? 1.0 : 0.0;
           }
 
           const batchByteLength = instanceData.byteLength;
@@ -492,16 +507,18 @@ export class Renderer {
       });
 
       // Prepare instance data for all transparent objects in one go.
-      // Each object will be drawn with an instanceCount of 1, but we use
-      // firstInstance in the draw call to select the correct matrix
-      // from this single large buffer.
       const transparentInstanceData = new Float32Array(
-        transparentRenderables.length * 16, // 1 matrix per instance
+        transparentRenderables.length * Renderer.INSTANCE_STRIDE_IN_FLOATS,
       );
       for (let i = 0; i < transparentRenderables.length; i++) {
-        const { modelMatrix } = transparentRenderables[i];
+        const { modelMatrix, isUniformlyScaled } = transparentRenderables[i];
+        const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
         // Write model matrix
-        transparentInstanceData.set(modelMatrix, i * 16);
+        transparentInstanceData.set(modelMatrix, offsetInFloats);
+        // Write isUniformlyScaled flag
+        transparentInstanceData[offsetInFloats + 16] = isUniformlyScaled
+          ? 1.0
+          : 0.0;
       }
       this.device.queue.writeBuffer(
         this.instanceBuffer,

@@ -94,6 +94,7 @@ fn vs_main(
     @location(4) model_mat_col_1: vec4<f32>,
     @location(5) model_mat_col_2: vec4<f32>,
     @location(6) model_mat_col_3: vec4<f32>,
+    @location(7) is_uniformly_scaled: f32,
 ) -> VertexOutput {
     var out: VertexOutput;
 
@@ -108,8 +109,15 @@ fn vs_main(
         modelMatrix[2].xyz
     );
 
-    // The normal matrix is the inverse transpose of the model matrix.
-    let normalMatrix = transpose(mat3_inverse(modelMatrix3x3));
+    var normalMatrix: mat3x3<f32>;
+    // If scaling is uniform, we can use the model matrix directly.
+    // This avoids a very expensive inverse-transpose calculation.
+    // Otherwise, we must compute the full normal matrix for correctness.
+    if (is_uniformly_scaled > 0.5) {
+      normalMatrix = modelMatrix3x3;
+    } else {
+      normalMatrix = transpose(mat3_inverse(modelMatrix3x3));
+    }
 
     // Transform vertex position and normal to world space
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);

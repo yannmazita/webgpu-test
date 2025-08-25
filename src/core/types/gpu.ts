@@ -87,6 +87,15 @@ export interface Renderable {
   mesh: Mesh;
   modelMatrix: Mat4;
   material: Material;
+  isUniformlyScaled: boolean;
+}
+
+/**
+ * Data for a single instance to be passed to the GPU.
+ */
+export interface InstanceData {
+  modelMatrix: Mat4;
+  isUniformlyScaled: boolean;
 }
 
 /**
@@ -95,5 +104,5 @@ export interface Renderable {
  */
 export interface PipelineBatch {
   material: Material;
-  meshMap: Map<Mesh, Mat4[]>;
+  meshMap: Map<Mesh, InstanceData[]>;
 }

@@ -59,26 +59,34 @@ export class Scene {
    */
   public getRenderables(): Renderable[] {
     // First, update all world matrices starting from the root.
-    // The dirty flag system ensures this is efficient.
+    // The dirty flag ensures this is efficient.
     this.root.updateWorldMatrix();
 
     const renderables: Renderable[] = [];
-    const traverse = (node: SceneNode) => {
+    const traverse = (node: SceneNode, parentIsUniformlyScaled: boolean) => {
+      // Check if the node's own local scale is uniform.
+      const isNodeScaleUniform =
+        node.scale[0] === node.scale[1] && node.scale[1] === node.scale[2];
+
+      // The final world transform is uniform only if the parent's was and this node's is.
+      const isWorldScaleUniform = parentIsUniformlyScaled && isNodeScaleUniform;
+
       // If a node has both a mesh and a material, it's renderable.
       if (node.mesh && node.material) {
         renderables.push({
           mesh: node.mesh,
           material: node.material,
           modelMatrix: node.worldMatrix,
+          isUniformlyScaled: isWorldScaleUniform,
         });
       }
       // Recurse for all children
       for (const child of node.children) {
-        traverse(child);
+        traverse(child, isWorldScaleUniform);
       }
     };
 
-    traverse(this.root);
+    traverse(this.root, true); // Start traversal, assuming root of the parent is uniform.
     return renderables;
   }
 }
