@@ -1,7 +1,7 @@
 // src/app/main.ts
 import { Renderer } from "@/core/renderer";
 import "@/style.css";
-import { mat4, vec3, vec4 } from "wgpu-matrix";
+import { vec3, vec4 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import { Scene } from "@/core/scene";
@@ -12,6 +12,7 @@ import {
   render as renderDebugUI,
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
+import { SceneNode } from "@/core/sceneNode";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -89,36 +90,28 @@ try {
   ]);
 
   // Create renderable objects and add them to the scene
-  const scaleVec = vec3.fromValues(0.07, 0.07, 0.07);
+  const teapotScale = vec3.fromValues(0.07, 0.07, 0.07);
 
-  // Teapot 1 (Bottom, White)
-  const teapot1Matrix = mat4.identity();
-  mat4.scale(teapot1Matrix, scaleVec, teapot1Matrix);
-  scene.add({
-    mesh: teapotMesh,
-    modelMatrix: teapot1Matrix,
-    material: material1,
-  });
+  // Teapot 1 (Parent, Opaque)
+  const teapotNode1 = new SceneNode();
+  teapotNode1.mesh = teapotMesh;
+  teapotNode1.material = material1;
+  teapotNode1.setScale(teapotScale);
+  scene.add(teapotNode1); // Add node to the scene root
 
-  // Teapot 2 (Middle, Red)
-  const teapot2Matrix = mat4.identity();
-  mat4.scale(teapot2Matrix, scaleVec, teapot2Matrix);
-  mat4.translate(teapot2Matrix, vec3.fromValues(0, 0, 1), teapot2Matrix);
-  scene.add({
-    mesh: teapotMesh,
-    modelMatrix: teapot2Matrix,
-    material: material2,
-  });
+  // Teapot 2 (Child, Semi-Transparent)
+  const teapotNode2 = new SceneNode();
+  teapotNode2.mesh = teapotMesh;
+  teapotNode2.material = material2;
+  teapotNode2.setPosition(0, 0, 1); // Position is local to the parent
+  teapotNode1.addChild(teapotNode2); // Add as a child of teapot 1
 
-  // Teapot 3 (Top, Blue)
-  const teapot3Matrix = mat4.identity();
-  mat4.scale(teapot3Matrix, scaleVec, teapot3Matrix);
-  mat4.translate(teapot3Matrix, vec3.fromValues(0, 0, 2), teapot3Matrix);
-  scene.add({
-    mesh: teapotMesh,
-    modelMatrix: teapot3Matrix,
-    material: material3,
-  });
+  // Teapot 3 (Grandchild, Very Transparent)
+  const teapotNode3 = new SceneNode();
+  teapotNode3.mesh = teapotMesh;
+  teapotNode3.material = material3;
+  teapotNode3.setPosition(0, 0, 1); // Position is local to its parent (teapot 2)
+  teapotNode2.addChild(teapotNode3); // Add as a child of teapot 2
 
   // Animation Loop
   const animate = (now: number) => {
@@ -162,10 +155,20 @@ try {
     light2.position[2] = Math.cos(-time * 0.4) * radius;
     light2.position[3] = 1.0; // Keep w=1 for position
 
-    // Rotate all the teapots together
-    mat4.rotateZ(teapot1Matrix, 0.005, teapot1Matrix);
-    mat4.rotateZ(teapot2Matrix, 0.005, teapot2Matrix);
-    mat4.rotateZ(teapot3Matrix, 0.005, teapot3Matrix);
+    // Rotate the parent teapot. Its children will inherit the transformation.
+    teapotNode1.rotateZ(0.005);
+
+    // Also make the middle teapot orbit its parent (the bottom one)
+    const orbitRadius = 1.5;
+    const orbitSpeed = 1.0;
+    teapotNode2.setPosition(
+      Math.cos(time * orbitSpeed) * orbitRadius,
+      Math.sin(time * orbitSpeed) * orbitRadius,
+      1, // Keep its height relative to parent
+    );
+
+    // also rotate top teapot
+    teapotNode3.rotateZ(0.008);
 
     renderer.render(camera, scene, renderDebugUI);
     requestAnimationFrame(animate);
