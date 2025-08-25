@@ -98,6 +98,23 @@ export class SceneNode {
     }
   }
 
+  /**
+   * Recursively destroys this node and all its children, removing them from the scene graph.
+   * This performs the logical removal. For GPU resource cleanup, the corresponding
+   * resources in the ResourceManager must also be destroyed separately.
+   */
+  public destroy(): void {
+    // Destroy children first (depth-first).
+    // We iterate over a copy of the children array because the original array
+    // will be modified by each child's destroy() call as it removes itself.
+    [...this.children].forEach((child) => child.destroy());
+
+    // Remove self from parent.
+    if (this.parent) {
+      this.parent.removeChild(this);
+    }
+  }
+
   // --- Core Update Logic ---
 
   /**

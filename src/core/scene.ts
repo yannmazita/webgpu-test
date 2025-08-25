@@ -23,11 +23,33 @@ export class Scene {
   }
 
   /**
+   * Removes a node from the scene's root.
+   * @param node The SceneNode to remove.
+   */
+  public remove(node: SceneNode): void {
+    this.root.removeChild(node);
+  }
+
+  /**
    * Adds a light to the scene.
    * @param light The light to add.
    */
   public addLight(light: Light): void {
     this.lights.push(light);
+  }
+
+  /**
+   * Removes a light from the scene.
+   * @param lightToRemove The light to remove.
+   * @returns True if the light was found and removed, false otherwise.
+   */
+  public removeLight(lightToRemove: Light): boolean {
+    const index = this.lights.findIndex((light) => light === lightToRemove);
+    if (index > -1) {
+      this.lights.splice(index, 1);
+      return true;
+    }
+    return false;
   }
 
   /**
