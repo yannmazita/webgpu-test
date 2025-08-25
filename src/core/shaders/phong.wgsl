@@ -50,9 +50,6 @@ struct Light {
 // A struct for the storage buffer containing all lights.
 struct LightsBuffer {
     count: u32,
-    // The 'lights' array must start at an offset that is a multiple of its
-    // element's alignment (16). Since 'count' is 4 bytes, we need 12 bytes
-    // of padding here.
     lights: array<Light>,
 };
 

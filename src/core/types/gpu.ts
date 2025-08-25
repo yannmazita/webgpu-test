@@ -50,14 +50,19 @@ export interface PhongMaterialOptions {
 }
 
 /**
- * Represents a point light source in the scene.
+ * Represents a light source in the scene.
  *
- * We're using Vec4 instead of Vec3 to not deal with WebGPU padding of vec3's
- * 12 bytes of data (3 * 4 bytes) into 16 bytes in memory ((3 * 4) + 4 bytes)
  */
 export interface Light {
+  /** Light position, vec4 and w=1 for padding purposes */
   position: Vec4;
+  /** Light color, vec4 and w=1 for padding purposes */
   color: Vec4;
+  /** Light intensity */
+  //intensity: number;
+  /** Light type, 0 = point, 1 = directional 2 = spot */
+  //type: number;
+  //enabled: boolean;
 }
 
 /**

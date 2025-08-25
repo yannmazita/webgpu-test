@@ -45,6 +45,8 @@ export class Renderer {
   private lightStorageBuffer!: GPUBuffer;
   /** A temporary buffer for writing light data. */
   private lightDataBuffer!: ArrayBuffer;
+  /** The current capacity of the light storage buffer, in number of lights. */
+  private lightStorageBufferCapacity!: number;
   //** A scratch matrix */
   private static _SCRATCH_INV_MODEL: Mat4 = mat4.identity();
 
@@ -158,14 +160,15 @@ export class Renderer {
     });
 
     // Lights storage buffer
+    this.lightStorageBufferCapacity = 4; // Initial capacity for 4 lights
     const lightStructSize = 8 * Float32Array.BYTES_PER_ELEMENT; // 2 vec4s
-    const lightStorageBufferSize = 16 + Renderer.MAX_LIGHTS * lightStructSize; // 16 bytes for count+padding
+    const lightStorageBufferSize =
+      16 + this.lightStorageBufferCapacity * lightStructSize; // 16 bytes for count+padding
     this.lightStorageBuffer = this.device.createBuffer({
       label: "LIGHT_STORAGE_BUFFER",
       size: lightStorageBufferSize,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    // Create a reusable ArrayBuffer for staging light data
     this.lightDataBuffer = new ArrayBuffer(lightStorageBufferSize);
 
     /**
@@ -322,7 +325,37 @@ export class Renderer {
     );
 
     // 3. Update light storage buffer
-    const lightCount = Math.min(scene.lights.length, Renderer.MAX_LIGHTS);
+    const lightCount = scene.lights.length;
+    const lightStructSize = 8 * Float32Array.BYTES_PER_ELEMENT; // 2 vec4s
+
+    if (lightCount > this.lightStorageBufferCapacity) {
+      this.lightStorageBuffer.destroy();
+
+      // new capacity = 1.5x the required size
+      this.lightStorageBufferCapacity = Math.ceil(lightCount * 1.5);
+      const newSize = 16 + this.lightStorageBufferCapacity * lightStructSize;
+
+      this.lightStorageBuffer = this.device.createBuffer({
+        label: "LIGHT_STORAGE_BUFFER (resized)",
+        size: newSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+
+      // Re-create the CPU-side staging buffer
+      this.lightDataBuffer = new ArrayBuffer(newSize);
+
+      // The bind group is now stale, so re-create it with the new buffer
+      this.frameBindGroup = this.device.createBindGroup({
+        label: "FRAME_BIND_GROUP (re-bound)",
+        layout: this.frameBindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
+          { binding: 1, resource: { buffer: this.lightStorageBuffer } },
+          { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+        ],
+      });
+    }
+
     // Use views to write to the same ArrayBuffer with different types
     const lightCountView = new Uint32Array(this.lightDataBuffer, 0, 1);
     const lightDataView = new Float32Array(this.lightDataBuffer, 16);
@@ -338,6 +371,8 @@ export class Renderer {
       this.lightStorageBuffer,
       0,
       this.lightDataBuffer,
+      0, // source offset
+      16 + lightCount * lightStructSize, // only write the data for active lights
     );
 
     // 4. Get all renderable objects by traversing the scene graph
