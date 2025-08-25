@@ -279,10 +279,13 @@ export class Renderer {
       this.lightDataBuffer,
     );
 
-    // 4. Partition objects into opaque and transparent lists
+    // 4. Get all renderable objects by traversing the scene graph
+    const allRenderables = scene.getRenderables();
+
+    // 5. Partition objects into opaque and transparent lists
     const opaqueRenderables: Renderable[] = [];
     const transparentRenderables: Renderable[] = [];
-    for (const renderable of scene.objects) {
+    for (const renderable of allRenderables) {
       if (renderable.material.isTransparent) {
         transparentRenderables.push(renderable);
       } else {
@@ -290,8 +293,8 @@ export class Renderer {
       }
     }
 
-    // 5. Prepare instance data for both lists
-    const totalInstanceCount = scene.objects.length;
+    // 6. Prepare instance data for both lists
+    const totalInstanceCount = allRenderables.length;
     const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
 
     if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
@@ -339,7 +342,7 @@ export class Renderer {
 
     let instanceBufferOffset = 0;
 
-    // 6. Opaque rendering pass (using batching)
+    // 7. Opaque rendering pass (using batching)
     if (opaqueRenderables.length > 0) {
       const batches = new Map<GPURenderPipeline, PipelineBatch>();
 
@@ -427,7 +430,7 @@ export class Renderer {
       }
     }
 
-    // 7. Transparent rendering pass (sort back-to-front and render individually)
+    // 8. Transparent rendering pass (sort back-to-front and render individually)
     if (transparentRenderables.length > 0) {
       // Sort transparent objects from furthest to nearest
       transparentRenderables.sort((a, b) => {

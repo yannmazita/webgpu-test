@@ -1,25 +1,25 @@
 // src/core/scene.ts
 import { Light, Renderable } from "./types/gpu";
+import { SceneNode } from "./sceneNode";
 
 /**
  * Represents a collection of objects and lights to be rendered in the world.
  *
  * The Scene class acts as a container for all the `Renderable` objects
- * that make up the visible world. The renderer will iterate over the
- * objects in this scene during the rendering passes.
+ * that make up the visible world, organized in a hierarchical graph structure.
  */
 export class Scene {
-  /** The list of renderable objects in the scene. */
-  public objects: Renderable[] = [];
+  /** The root node of the scene graph. All other nodes are descendants of this. */
+  public root: SceneNode = new SceneNode();
   /** Light sources for the scene. */
   public lights: Light[] = [];
 
   /**
-   * Adds a renderable object to the scene.
-   * @param object The renderable object to add.
+   * Adds a node to the scene's root.
+   * @param node The SceneNode to add.
    */
-  public add(object: Renderable): void {
-    this.objects.push(object);
+  public add(node: SceneNode): void {
+    this.root.addChild(node);
   }
 
   /**
@@ -28,5 +28,35 @@ export class Scene {
    */
   public addLight(light: Light): void {
     this.lights.push(light);
+  }
+
+  /**
+   * Traverses the scene graph, updates all world matrices, and collects
+   * all renderable objects for the renderer.
+   * @returns A flat list of objects to be rendered.
+   */
+  public getRenderables(): Renderable[] {
+    // First, update all world matrices starting from the root.
+    // The dirty flag system ensures this is efficient.
+    this.root.updateWorldMatrix();
+
+    const renderables: Renderable[] = [];
+    const traverse = (node: SceneNode) => {
+      // If a node has both a mesh and a material, it's renderable.
+      if (node.mesh && node.material) {
+        renderables.push({
+          mesh: node.mesh,
+          material: node.material,
+          modelMatrix: node.worldMatrix,
+        });
+      }
+      // Recurse for all children
+      for (const child of node.children) {
+        traverse(child);
+      }
+    };
+
+    traverse(this.root);
+    return renderables;
   }
 }
