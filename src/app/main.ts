@@ -13,6 +13,8 @@ import {
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
 import { SceneNode } from "@/core/sceneNode";
+import { InputManager } from "@/core/inputManager";
+import { CameraController } from "@/core/cameraController";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -33,6 +35,8 @@ try {
   const resourceManager = new ResourceManager(renderer);
   const scene = new Scene();
   const camera = new Camera();
+  const inputManager = new InputManager(canvas);
+  const cameraController = new CameraController(camera, inputManager);
 
   // Configure camera projection
   camera.setPerspective(
@@ -47,6 +51,7 @@ try {
     vec3.fromValues(0, 1, 1),
     vec3.fromValues(0, 0, 0),
     vec3.fromValues(0, 0, 1), // utah_vw_beetle.stl is exported with z-up
+    //vec3.fromValues(0, 1, 0), // Standard y-up
   );
 
   // Create Scene Lights
@@ -114,14 +119,20 @@ try {
   teapotNode2.addChild(teapotNode3); // Add as a child of teapot 2
 
   // Animation Loop
+  let lastFrameTime = performance.now();
   const animate = (now: number) => {
-    const time = now / 1000; // time in seconds
+    const deltaTime = (now - lastFrameTime) / 1000; // time in seconds
+    lastFrameTime = now;
 
+    // Update camera based on input
+    cameraController.update(deltaTime);
     beginDebugUIFrame();
 
     // Create the UI window and its widgets
     ImGui.Begin("Debug Controls");
     ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
+    ImGui.Text("Camera Controls: Click canvas to lock pointer.");
+    ImGui.Text("WASD: Move, Shift: Down, Space: Up");
     ImGui.Text("Light Controls");
 
     // Edit the UI arrays (not the light colors directly)
@@ -144,6 +155,7 @@ try {
     ImGui.End();
 
     // Animate the lights in circles around the objects
+    const time = now / 1000; // time in seconds
     const radius = 3.0;
     light1.position[0] = Math.sin(time * 0.7) * radius;
     light1.position[1] = 2.0;
@@ -154,21 +166,6 @@ try {
     light2.position[1] = 2.0;
     light2.position[2] = Math.cos(-time * 0.4) * radius;
     light2.position[3] = 1.0; // Keep w=1 for position
-
-    // Rotate the parent teapot. Its children will inherit the transformation.
-    teapotNode1.rotateZ(0.005);
-
-    // Also make the middle teapot orbit its parent (the bottom one)
-    const orbitRadius = 1.5;
-    const orbitSpeed = 1.0;
-    teapotNode2.setPosition(
-      Math.cos(time * orbitSpeed) * orbitRadius,
-      Math.sin(time * orbitSpeed) * orbitRadius,
-      1, // Keep its height relative to parent
-    );
-
-    // also rotate top teapot
-    teapotNode3.rotateZ(0.008);
 
     renderer.render(camera, scene, renderDebugUI);
     requestAnimationFrame(animate);

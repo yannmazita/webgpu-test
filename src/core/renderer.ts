@@ -41,6 +41,8 @@ export class Renderer {
   private cameraUniformBuffer!: GPUBuffer;
   /** Uniform buffer for scene-wide data (camera position). */
   private sceneDataBuffer!: GPUBuffer;
+  /** A temporary array for writing scene data to the GPU buffer. */
+  private sceneDataArray!: Float32Array;
   /** Storage buffer for all light data. */
   private lightStorageBuffer!: GPUBuffer;
   /** A temporary buffer for writing light data. */
@@ -75,6 +77,7 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+    this.sceneDataArray = new Float32Array(4);
   }
 
   /**
@@ -248,11 +251,8 @@ export class Renderer {
     );
 
     // 2. Update scene data buffer (camera position)
-    this.device.queue.writeBuffer(
-      this.sceneDataBuffer,
-      0,
-      camera.position as Float32Array,
-    );
+    this.sceneDataArray.set(camera.position, 0); // Write vec3 at offset 0
+    this.device.queue.writeBuffer(this.sceneDataBuffer, 0, this.sceneDataArray);
 
     // 3. Update light storage buffer
     const lightCount = scene.lights.length;
@@ -421,11 +421,7 @@ export class Renderer {
         b.modelMatrix[13],
         b.modelMatrix[14],
       );
-      const cameraPosVec3 = vec3.fromValues(
-        camera.position[0],
-        camera.position[1],
-        camera.position[2],
-      );
+      const cameraPosVec3 = camera.position;
       const distA = vec3.distanceSq(posA, cameraPosVec3);
       const distB = vec3.distanceSq(posB, cameraPosVec3);
       return distB - distA;

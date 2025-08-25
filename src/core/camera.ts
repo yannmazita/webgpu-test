@@ -1,5 +1,5 @@
 // src/core/camera.ts
-import { Mat4, mat4, vec3, Vec3, vec4, Vec4 } from "wgpu-matrix";
+import { Mat4, mat4, vec3, Vec3 } from "wgpu-matrix";
 
 /**
  * Represents a camera in the 3D scene, managing view and projection matrices.
@@ -14,7 +14,11 @@ export class Camera {
   /** Pre-calculated view-projection matrix (P * V) sent to the GPU. */
   public viewProjectionMatrix: Mat4;
   /** The camera's position in world space. */
-  public position: Vec4;
+  public position: Vec3;
+  /** The point in world space the camera is looking at. */
+  public target: Vec3;
+  /** The vector defining the "up" direction for the camera. */
+  public up: Vec3;
 
   public fovYRadians: number;
   public near: number;
@@ -24,7 +28,9 @@ export class Camera {
     this.viewMatrix = mat4.identity();
     this.projectionMatrix = mat4.identity();
     this.viewProjectionMatrix = mat4.identity();
-    this.position = vec4.create(0, 0, 0, 1);
+    this.position = vec3.create(0, 0, 0);
+    this.target = vec3.create(0, 0, 0);
+    this.up = vec3.create(0, 1, 0);
     this.fovYRadians = (75 * Math.PI) / 180;
     this.near = 0.1;
     this.far = 100.0;
@@ -69,12 +75,10 @@ export class Camera {
     target: Vec3,
     up: Vec3 = vec3.create(0, 1, 0),
   ): void {
+    vec3.copy(position, this.position);
+    vec3.copy(target, this.target);
+    vec3.copy(up, this.up);
     this.viewMatrix = mat4.lookAt(position, target, up);
-    // Store position as a Vec4 for uniform buffer alignment
-    this.position[0] = position[0];
-    this.position[1] = position[1];
-    this.position[2] = position[2];
-    this.position[3] = 1.0; // w component
     this.updateViewProjectionMatrix();
   }
 
