@@ -92,11 +92,16 @@ fn vs_main(
     @location(1) inNormal: vec3<f32>,
     @location(2) inTexCoords: vec2<f32>,
 
-    // Per-instance attributes
+    // Per-instance attributes (model matrix)
     @location(3) model_mat_col_0: vec4<f32>,
     @location(4) model_mat_col_1: vec4<f32>,
     @location(5) model_mat_col_2: vec4<f32>,
     @location(6) model_mat_col_3: vec4<f32>,
+
+    // Per-instance attributes (precomputed normal matrix columns; w is unused)
+    @location(7) normal_mat_col_0: vec4<f32>,
+    @location(8) normal_mat_col_1: vec4<f32>,
+    @location(9) normal_mat_col_2: vec4<f32>,
 ) -> VertexOutput {
     var out: VertexOutput;
 
@@ -104,21 +109,17 @@ fn vs_main(
       model_mat_col_0, model_mat_col_1, model_mat_col_2, model_mat_col_3
     );
 
-    // Create the normal matrix on the GPU.
-    // We only need the upper 3x3 part for transforming normals.
-    let modelMatrix3x3 = mat3x3<f32>(
-        modelMatrix[0].xyz,
-        modelMatrix[1].xyz,
-        modelMatrix[2].xyz
+    // Use CPU-precomputed normal matrix (3x3) passed as three vec4 columns (xyz used)
+    let normalMatrix3x3 = mat3x3<f32>(
+        normal_mat_col_0.xyz,
+        normal_mat_col_1.xyz,
+        normal_mat_col_2.xyz
     );
-    // The normal matrix is the inverse transpose of the model matrix.
-    let normalMatrix = transpose(mat3_inverse(modelMatrix3x3));
-
 
     // Transform vertex position and normal to world space
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
     out.worldPosition = worldPos4.xyz;
-    out.worldNormal = normalize(normalMatrix * inNormal);
+    out.worldNormal = normalize(normalMatrix3x3 * inNormal);
 
     // Transform vertex to clip space
     out.clip_position = camera.viewProjectionMatrix * worldPos4;

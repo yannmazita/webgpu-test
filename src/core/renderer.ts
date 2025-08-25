@@ -45,26 +45,87 @@ export class Renderer {
   private lightStorageBuffer!: GPUBuffer;
   /** A temporary buffer for writing light data. */
   private lightDataBuffer!: ArrayBuffer;
+  //** A scratch matrix */
+  private static _SCRATCH_INV_MODEL: Mat4 = mat4.identity();
 
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
     4 * 4 * Float32Array.BYTES_PER_ELEMENT; // 4x4 matrix of 4 bytes = 64 bytes
   private static readonly MAX_LIGHTS = 16; // Max number of lights supported
+  private static readonly NORMAL_MATRIX_BYTE_SIZE =
+    3 * 4 * Float32Array.BYTES_PER_ELEMENT; // 3 vec4 (xyz used, w padding) = 48 bytes
+  private static readonly PER_INSTANCE_BYTE_SIZE =
+    Renderer.MATRIX_BYTE_SIZE + Renderer.NORMAL_MATRIX_BYTE_SIZE; // 64 + 48 = 112 bytes
+  private static readonly PER_INSTANCE_FLOATS =
+    Renderer.PER_INSTANCE_BYTE_SIZE / Float32Array.BYTES_PER_ELEMENT; // 28 floats
+
   /** The layout for the per-instance data buffer. Materials need this to create compatible pipelines. */
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
-    // The stride is for one 4x4 matrices.
-    arrayStride: Renderer.MATRIX_BYTE_SIZE,
+    arrayStride: Renderer.PER_INSTANCE_BYTE_SIZE,
     stepMode: "instance",
-    // Passing the model matrix as 4 vec4 attributes
-    // (because it's big to pass through a single location)
     attributes: [
       // Model Matrix (locations 3-6)
       { shaderLocation: 3, offset: 0, format: "float32x4" },
       { shaderLocation: 4, offset: 16, format: "float32x4" },
       { shaderLocation: 5, offset: 32, format: "float32x4" },
       { shaderLocation: 6, offset: 48, format: "float32x4" },
+
+      // Normal Matrix columns (locations 7-9), xyz used, w is padding (0)
+      { shaderLocation: 7, offset: 64, format: "float32x4" },
+      { shaderLocation: 8, offset: 80, format: "float32x4" },
+      { shaderLocation: 9, offset: 96, format: "float32x4" },
     ],
   };
+
+  private static writeNormalMatrixColumns(
+    modelMatrix: Mat4,
+    out: Float32Array,
+    outFloatOffset: number,
+  ): void {
+    // Compute inv(model) into scratch; mat4.invert writes into dst if provided.
+    const inv = mat4.invert(
+      modelMatrix,
+      Renderer._SCRATCH_INV_MODEL,
+    ) as Mat4 | null;
+
+    if (inv) {
+      // normalMatrix = transpose(inverse(modelMatrix3x3))
+      // Columns of normalMatrix are rows of inv(model) upper-left 3x3.
+      // Column-major indexing:
+      // row0: [0, 4, 8], row1: [1, 5, 9], row2: [2, 6, 10]
+      // Write as three vec4 (xyz + w=0)
+      out[outFloatOffset + 0] = inv[0];
+      out[outFloatOffset + 1] = inv[4];
+      out[outFloatOffset + 2] = inv[8];
+      out[outFloatOffset + 3] = 0.0;
+
+      out[outFloatOffset + 4] = inv[1];
+      out[outFloatOffset + 5] = inv[5];
+      out[outFloatOffset + 6] = inv[9];
+      out[outFloatOffset + 7] = 0.0;
+
+      out[outFloatOffset + 8] = inv[2];
+      out[outFloatOffset + 9] = inv[6];
+      out[outFloatOffset + 10] = inv[10];
+      out[outFloatOffset + 11] = 0.0;
+    } else {
+      // Fallback: assume uniform scale, use upper-left 3x3 of modelMatrix (no transpose)
+      out[outFloatOffset + 0] = modelMatrix[0];
+      out[outFloatOffset + 1] = modelMatrix[4];
+      out[outFloatOffset + 2] = modelMatrix[8];
+      out[outFloatOffset + 3] = 0.0;
+
+      out[outFloatOffset + 4] = modelMatrix[1];
+      out[outFloatOffset + 5] = modelMatrix[5];
+      out[outFloatOffset + 6] = modelMatrix[9];
+      out[outFloatOffset + 7] = 0.0;
+
+      out[outFloatOffset + 8] = modelMatrix[2];
+      out[outFloatOffset + 9] = modelMatrix[6];
+      out[outFloatOffset + 10] = modelMatrix[10];
+      out[outFloatOffset + 11] = 0.0;
+    }
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -295,7 +356,8 @@ export class Renderer {
 
     // 6. Prepare instance data for both lists
     const totalInstanceCount = allRenderables.length;
-    const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
+    const requiredBufferSize =
+      totalInstanceCount * Renderer.PER_INSTANCE_BYTE_SIZE;
 
     if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
       if (this.instanceBuffer) this.instanceBuffer.destroy();
@@ -383,12 +445,25 @@ export class Renderer {
         for (const [mesh, modelMatrices] of batch.meshMap.entries()) {
           const instanceCount = modelMatrices.length;
 
-          // Create and write the instance data (model matrix) for this mesh.
-          const instanceData = new Float32Array(instanceCount * 16); // 1 matrix per instance
+          // Create and write the instance data (model + normal matrices) for this mesh.
+          const floatsPerInstance = Renderer.PER_INSTANCE_FLOATS; // 28
+          const instanceData = new Float32Array(
+            instanceCount * floatsPerInstance,
+          );
+
           for (let i = 0; i < instanceCount; i++) {
             const modelMatrix = modelMatrices[i];
-            // Write model matrix
-            instanceData.set(modelMatrix, i * 16);
+
+            // Write model matrix (16 floats)
+            const base = i * floatsPerInstance;
+            instanceData.set(modelMatrix, base);
+
+            // Write normal matrix columns (12 floats across three vec4; w=0)
+            Renderer.writeNormalMatrixColumns(
+              modelMatrix,
+              instanceData,
+              base + 16,
+            );
           }
 
           const batchByteLength = instanceData.byteLength;
@@ -457,21 +532,28 @@ export class Renderer {
         return distB - distA; // Sort descending by distance (furthest first)
       });
 
-      // Prepare instance data for all transparent objects in one go.
-      // Each object will be drawn with an instanceCount of 1, but we use
-      // firstInstance in the draw call to select the correct matrix
-      // from this single large buffer.
+      const floatsPerInstance = Renderer.PER_INSTANCE_FLOATS; // 28
       const transparentInstanceData = new Float32Array(
-        transparentRenderables.length * 16, // 1 matrix per instance
+        transparentRenderables.length * floatsPerInstance,
       );
       for (let i = 0; i < transparentRenderables.length; i++) {
         const { modelMatrix } = transparentRenderables[i];
-        // Write model matrix
-        transparentInstanceData.set(modelMatrix, i * 16);
+
+        const base = i * floatsPerInstance;
+
+        // Write model matrix (16 floats)
+        transparentInstanceData.set(modelMatrix, base);
+
+        // Write normal matrix columns (12 floats across three vec4; w=0)
+        Renderer.writeNormalMatrixColumns(
+          modelMatrix,
+          transparentInstanceData,
+          base + 16,
+        );
       }
       this.device.queue.writeBuffer(
         this.instanceBuffer,
-        instanceBufferOffset, // Continue writing where the opaque pass left off
+        instanceBufferOffset,
         transparentInstanceData,
       );
 
@@ -514,7 +596,7 @@ export class Renderer {
           scenePassEncoder.setVertexBuffer(
             mesh.buffers.length,
             this.instanceBuffer,
-            instanceBufferOffset, // Base offset for all transparent data
+            instanceBufferOffset,
             transparentInstanceData.byteLength,
           );
           if (mesh.indexBuffer) {
