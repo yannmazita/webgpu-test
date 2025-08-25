@@ -7,7 +7,11 @@ const ReactCompilerConfig = {
 };
 
 export default defineConfig({
-  plugins: [glsl()],
+  plugins: [
+    glsl({
+      defaultExtension: "wgsl",
+    }),
+  ],
   envDir: "./",
   resolve: {
     alias: {

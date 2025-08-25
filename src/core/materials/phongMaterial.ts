@@ -2,7 +2,6 @@
 import { Material } from "./material";
 import { PhongMaterialOptions } from "@/core/types/gpu";
 import shaderCode from "@/core/shaders/phong.wgsl";
-import utilsCode from "@/core/shaders/utils.wgsl";
 import { createGPUBuffer } from "../utils/webgpu";
 
 export class PhongMaterial extends Material {
@@ -20,10 +19,8 @@ export class PhongMaterial extends Material {
     const isTransparent = baseColor[3] < 1.0;
     super(device, isTransparent);
 
-    // concatenate utility shader code
-    const finalShaderCode = `${utilsCode}\n${shaderCode}`;
     this.shaderModule = this.device.createShaderModule({
-      code: finalShaderCode,
+      code: shaderCode,
     });
 
     this.materialBindGroupLayout = this.device.createBindGroupLayout({
