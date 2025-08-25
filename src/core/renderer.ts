@@ -77,7 +77,8 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.sceneDataArray = new Float32Array(4);
+    // 4 floats for cameraPos + 4 floats for ambientColor
+    this.sceneDataArray = new Float32Array(8);
   }
 
   /**
@@ -97,9 +98,9 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Scene data buffer: cameraPos (vec3)
-    // Using vec4 alignment: 1*vec4 = 16 bytes
-    const SCENE_DATA_SIZE = 4 * Float32Array.BYTES_PER_ELEMENT;
+    // Scene data buffer: cameraPos (vec4) + ambientColor (vec4)
+    // Using vec4 alignment: 2*vec4 = 32 bytes
+    const SCENE_DATA_SIZE = 8 * Float32Array.BYTES_PER_ELEMENT;
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
       size: SCENE_DATA_SIZE,
@@ -252,6 +253,7 @@ export class Renderer {
 
     // 2. Update scene data buffer (camera position)
     this.sceneDataArray.set(camera.position, 0); // Write vec3 at offset 0
+    this.sceneDataArray.set(scene.ambientColor, 4); // Write vec4 at offset 4
     this.device.queue.writeBuffer(this.sceneDataBuffer, 0, this.sceneDataArray);
 
     // 3. Update light storage buffer

@@ -69,6 +69,7 @@ try {
   scene.lights.push(light2);
 
   // ImGui needs plain arrays that it can modify directly
+  const ambientColorUI = [0.1, 0.1, 0.1];
   const light1ColorUI = [1.0, 0.0, 0.0, 1.0]; // Red
   const light2ColorUI = [0.0, 1.0, 0.0, 1.0]; // Green
 
@@ -135,6 +136,11 @@ try {
     ImGui.Text("WASD: Move, Shift: Down, Space: Up");
     ImGui.Text("Light Controls");
 
+    if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
+      scene.ambientColor[0] = ambientColorUI[0];
+      scene.ambientColor[1] = ambientColorUI[1];
+      scene.ambientColor[2] = ambientColorUI[2];
+    }
     // Edit the UI arrays (not the light colors directly)
     if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
       // When UI changes, copy values to the actual light

@@ -1,32 +1,33 @@
 // src/core/materials/material.ts
 import { getLayoutKey } from "@/core/utils/layout";
+import { Shader } from "@/core/shaders/shader";
 
-export abstract class Material {
+export class Material {
   /** A cache for pipelines, keyed by mesh layouts. */
   protected pipelineCache = new Map<string, GPURenderPipeline>();
   /** The bind group containing resources specific to this material (textures, uniforms). */
-  public bindGroup!: GPUBindGroup;
+  public bindGroup: GPUBindGroup;
   /** Does the material require alpha blending. */
   public isTransparent: boolean;
+  public shader: Shader;
+  public materialBindGroupLayout: GPUBindGroupLayout;
 
   protected device: GPUDevice;
 
-  constructor(device: GPUDevice, isTransparent = false) {
+  constructor(
+    device: GPUDevice,
+    shader: Shader,
+    layout: GPUBindGroupLayout,
+    bindGroup: GPUBindGroup,
+    isTransparent = false,
+  ) {
     this.device = device;
+    this.shader = shader;
+    this.materialBindGroupLayout = layout;
+    this.bindGroup = bindGroup;
     this.isTransparent = isTransparent;
   }
 
-  /**
-   * Retrieves a cached pipeline for the given layouts or creates a new one.
-   *
-   * This method is implemented by concrete material classes.
-   * @param meshLayouts - Array of vertex buffer layouts for the mesh to be rendered.
-   * @param instanceDataLayout - The layout for the per-instance data buffer.
-   * @param frameBindGroupLayout - The layout for the per-frame bind group (@group(0)).
-   * @param canvasFormat - The color format of the render target.
-   * @param depthFormat - The depth/stencil format of the render target.
-   * @returns A GPURenderPipeline configured for this material and the given mesh layout.
-   */
   public getPipeline(
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,
@@ -52,15 +53,60 @@ export abstract class Material {
     return pipeline;
   }
 
-  /**
-   * Abstract method that must be implemented by subclasses to create the actual
-   * render pipeline.
-   */
-  protected abstract createPipeline(
+  protected createPipeline(
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,
     frameBindGroupLayout: GPUBindGroupLayout,
     canvasFormat: GPUTextureFormat,
     depthFormat: GPUTextureFormat,
-  ): GPURenderPipeline;
+  ): GPURenderPipeline {
+    const pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [
+        frameBindGroupLayout, // @group(0)
+        this.materialBindGroupLayout, // @group(1)
+      ],
+    });
+
+    return this.device.createRenderPipeline({
+      layout: pipelineLayout,
+      vertex: {
+        module: this.shader.module,
+        entryPoint: this.shader.vertexEntryPoint,
+        buffers: [...meshLayouts, instanceDataLayout],
+      },
+      fragment: {
+        module: this.shader.module,
+        entryPoint: this.shader.fragmentEntryPoint,
+        targets: [
+          {
+            format: canvasFormat,
+            blend: this.isTransparent
+              ? {
+                  color: {
+                    srcFactor: "src-alpha",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                  alpha: {
+                    srcFactor: "one",
+                    dstFactor: "one-minus-src-alpha",
+                    operation: "add",
+                  },
+                }
+              : undefined,
+          },
+        ],
+      },
+      primitive: {
+        topology: "triangle-list",
+        frontFace: "ccw",
+        cullMode: "back",
+      },
+      depthStencil: {
+        depthWriteEnabled: !this.isTransparent,
+        depthCompare: "less",
+        format: depthFormat,
+      },
+    });
+  }
 }
