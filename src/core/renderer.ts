@@ -200,42 +200,26 @@ export class Renderer {
   }
 
   /**
-   * Renders a given `Scene` from the perspective of a `Camera`.
-   * @param camera The camera providing the view and projection matrices.
-   * @param scene The scene containing the list of objects to render.
-   * @param postSceneDrawCallback An optional callback to execute additional
-   *   drawing commands within the main render pass (e.g., for UI).
+   * Handles canvas resizing and resource synchronization.
+   * @returns `true` if the frame should be skipped, `false` otherwise.
    */
-  public render(
-    camera: Camera,
-    scene: Scene,
-    postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
-  ): void {
-    // =========================================================================
-    // Resize Handling
-    // =========================================================================
+  private _handleResize(camera: Camera): boolean {
+    const newWidth = this.canvas.clientWidth;
+    const newHeight = this.canvas.clientHeight;
 
     // Stage 1: If canvas display size has changed, update the
     // drawing buffer size and skip the rest of the frame.
-    const newWidth = this.canvas.clientWidth;
-    const newHeight = this.canvas.clientHeight;
     if (this.canvas.width !== newWidth || this.canvas.height !== newHeight) {
-      // If the canvas has a non-zero size, update its drawing buffer.
       if (newWidth > 0 && newHeight > 0) {
         this.canvas.width = newWidth;
         this.canvas.height = newHeight;
       }
-      // Abort the current frame. The next frame will have the correct size.
-      // This prevents using a destroyed texture from the old swap chain.
-      return;
+      return true; // Skip this frame
     }
 
-    // Stage 2: Get the current texture and synchronize other resources to it.
-    const currentTexture = this.context.getCurrentTexture();
-    const textureView = currentTexture.createView();
-
-    // If our depth texture is out of sync, recreate it and update the camera.
+    // Stage 2: Synchronize other resources to the current texture size.
     // This will trigger on the frame after the resize in Stage 1.
+    const currentTexture = this.context.getCurrentTexture();
     if (
       this.depthTexture.width !== currentTexture.width ||
       this.depthTexture.height !== currentTexture.height
@@ -249,11 +233,13 @@ export class Renderer {
         camera.far,
       );
     }
+    return false; // Continue with rendering
+  }
 
-    // =========================================================================
-    // Scene rendering passes
-    // =========================================================================
-
+  /**
+   * Updates all per-frame uniform and storage buffers.
+   */
+  private _updateFrameUniforms(camera: Camera, scene: Scene): void {
     // 1. Update camera uniform buffer
     this.device.queue.writeBuffer(
       this.cameraUniformBuffer,
@@ -275,7 +261,6 @@ export class Renderer {
     if (lightCount > this.lightStorageBufferCapacity) {
       this.lightStorageBuffer.destroy();
 
-      // new capacity = 1.5x the required size
       this.lightStorageBufferCapacity = Math.ceil(lightCount * 1.5);
       const newSize = 16 + this.lightStorageBufferCapacity * lightStructSize;
 
@@ -284,11 +269,8 @@ export class Renderer {
         size: newSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-
-      // Re-create the CPU-side staging buffer
       this.lightDataBuffer = new ArrayBuffer(newSize);
 
-      // The bind group is now stale, so re-create it with the new buffer
       this.frameBindGroup = this.device.createBindGroup({
         label: "FRAME_BIND_GROUP (re-bound)",
         layout: this.frameBindGroupLayout,
@@ -300,10 +282,8 @@ export class Renderer {
       });
     }
 
-    // Use views to write to the same ArrayBuffer with different types
     const lightCountView = new Uint32Array(this.lightDataBuffer, 0, 1);
     const lightDataView = new Float32Array(this.lightDataBuffer, 16);
-
     lightCountView[0] = lightCount;
     for (let i = 0; i < lightCount; i++) {
       const light = scene.lights[i];
@@ -315,14 +295,248 @@ export class Renderer {
       this.lightStorageBuffer,
       0,
       this.lightDataBuffer,
-      0, // source offset
-      16 + lightCount * lightStructSize, // only write the data for active lights
+      0,
+      16 + lightCount * lightStructSize,
+    );
+  }
+
+  /**
+   * Checks if the instance buffer is large enough and resizes it if not.
+   */
+  private _prepareInstanceBuffer(instanceCount: number): void {
+    const requiredBufferSize = instanceCount * Renderer.INSTANCE_BYTE_STRIDE;
+
+    if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
+      if (this.instanceBuffer) this.instanceBuffer.destroy();
+      const newSize = Math.ceil(requiredBufferSize * 1.5); // Allocate 1.5x needed
+      this.instanceBuffer = this.device.createBuffer({
+        label: "INSTANCE_DATA_BUFFER",
+        size: newSize,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+    }
+  }
+
+  /**
+   * Renders all opaque objects using batched, instanced draw calls.
+   * @returns The number of bytes written to the instance buffer.
+   */
+  private _renderOpaquePass(
+    passEncoder: GPURenderPassEncoder,
+    renderables: Renderable[],
+  ): number {
+    if (renderables.length === 0) return 0;
+
+    const batches = new Map<GPURenderPipeline, PipelineBatch>();
+    for (const renderable of renderables) {
+      const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+      const pipeline = material.getPipeline(
+        mesh.layouts,
+        Renderer.INSTANCE_DATA_LAYOUT,
+        this.frameBindGroupLayout,
+        this.canvasFormat,
+        this.depthFormat,
+      );
+
+      if (!batches.has(pipeline)) {
+        batches.set(pipeline, {
+          material: material,
+          meshMap: new Map<Mesh, InstanceData[]>(),
+        });
+      }
+      const pipelineBatch = batches.get(pipeline)!;
+      if (!pipelineBatch.meshMap.has(mesh)) {
+        pipelineBatch.meshMap.set(mesh, []);
+      }
+      pipelineBatch.meshMap.get(mesh)!.push({ modelMatrix, isUniformlyScaled });
+    }
+
+    let instanceBufferOffset = 0;
+    for (const [pipeline, batch] of batches.entries()) {
+      passEncoder.setPipeline(pipeline);
+      passEncoder.setBindGroup(1, batch.material.bindGroup);
+
+      for (const [mesh, instances] of batch.meshMap.entries()) {
+        const instanceCount = instances.length;
+        const instanceData = new Float32Array(
+          instanceCount * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+        );
+
+        for (let i = 0; i < instanceCount; i++) {
+          const { modelMatrix, isUniformlyScaled } = instances[i];
+          const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+          instanceData.set(modelMatrix, offsetInFloats);
+          instanceData[offsetInFloats + 16] = isUniformlyScaled ? 1.0 : 0.0;
+        }
+
+        const batchByteLength = instanceData.byteLength;
+        this.device.queue.writeBuffer(
+          this.instanceBuffer,
+          instanceBufferOffset,
+          instanceData,
+        );
+
+        for (let i = 0; i < mesh.buffers.length; i++) {
+          passEncoder.setVertexBuffer(i, mesh.buffers[i]);
+        }
+        passEncoder.setVertexBuffer(
+          mesh.buffers.length,
+          this.instanceBuffer,
+          instanceBufferOffset,
+          batchByteLength,
+        );
+
+        if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
+          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
+          passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
+        } else {
+          passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
+        }
+
+        instanceBufferOffset += batchByteLength;
+      }
+    }
+    return instanceBufferOffset;
+  }
+
+  /**
+   * Renders all transparent objects, sorted back-to-front.
+   */
+  private _renderTransparentPass(
+    passEncoder: GPURenderPassEncoder,
+    renderables: Renderable[],
+    camera: Camera,
+    instanceBufferOffset: number,
+  ): void {
+    if (renderables.length === 0) return;
+
+    renderables.sort((a, b) => {
+      const posA = vec3.fromValues(
+        a.modelMatrix[12],
+        a.modelMatrix[13],
+        a.modelMatrix[14],
+      );
+      const posB = vec3.fromValues(
+        b.modelMatrix[12],
+        b.modelMatrix[13],
+        b.modelMatrix[14],
+      );
+      const cameraPosVec3 = vec3.fromValues(
+        camera.position[0],
+        camera.position[1],
+        camera.position[2],
+      );
+      const distA = vec3.distanceSq(posA, cameraPosVec3);
+      const distB = vec3.distanceSq(posB, cameraPosVec3);
+      return distB - distA;
+    });
+
+    const instanceData = new Float32Array(
+      renderables.length * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+    );
+    for (let i = 0; i < renderables.length; i++) {
+      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+      instanceData.set(modelMatrix, offsetInFloats);
+      instanceData[offsetInFloats + 16] = isUniformlyScaled ? 1.0 : 0.0;
+    }
+    this.device.queue.writeBuffer(
+      this.instanceBuffer,
+      instanceBufferOffset,
+      instanceData,
     );
 
-    // 4. Get all renderable objects by traversing the scene graph
-    const allRenderables = scene.getRenderables();
+    let lastMaterial: null | Material = null;
+    let lastMesh: null | Mesh = null;
+    let lastPipeline: null | GPURenderPipeline = null;
 
-    // 5. Partition objects into opaque and transparent lists
+    for (let i = 0; i < renderables.length; i++) {
+      const { mesh, material } = renderables[i];
+      const pipeline = material.getPipeline(
+        mesh.layouts,
+        Renderer.INSTANCE_DATA_LAYOUT,
+        this.frameBindGroupLayout,
+        this.canvasFormat,
+        this.depthFormat,
+      );
+
+      if (pipeline !== lastPipeline) {
+        passEncoder.setPipeline(pipeline);
+        lastPipeline = pipeline;
+      }
+      if (material !== lastMaterial) {
+        passEncoder.setBindGroup(1, material.bindGroup);
+        lastMaterial = material;
+      }
+      if (mesh !== lastMesh) {
+        for (let j = 0; j < mesh.buffers.length; j++) {
+          passEncoder.setVertexBuffer(j, mesh.buffers[j]);
+        }
+        passEncoder.setVertexBuffer(
+          mesh.buffers.length,
+          this.instanceBuffer,
+          instanceBufferOffset,
+          instanceData.byteLength,
+        );
+        if (mesh.indexBuffer) {
+          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+        }
+        lastMesh = mesh;
+      }
+
+      if (mesh.indexBuffer && mesh.indexCount) {
+        passEncoder.drawIndexed(mesh.indexCount, 1, 0, 0, i);
+      } else {
+        passEncoder.draw(mesh.vertexCount, 1, 0, i);
+      }
+    }
+  }
+
+  /**
+   * Executes the post-scene draw callback in a separate render pass.
+   */
+  private _renderUIPass(
+    commandEncoder: GPUCommandEncoder,
+    textureView: GPUTextureView,
+    callback: (passEncoder: GPURenderPassEncoder) => void,
+  ): void {
+    const uiPassEncoder = commandEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: textureView,
+          loadOp: "load",
+          storeOp: "store",
+        },
+      ],
+    });
+    callback(uiPassEncoder);
+    uiPassEncoder.end();
+  }
+
+  /**
+   * Renders a given Scene from the perspective of a Camera.
+   * @param camera The camera providing the view and projection matrices.
+   * @param scene The scene containing the list of objects to render.
+   * @param postSceneDrawCallback An optional callback to execute additional
+   *   drawing commands within the main render pass (like for the UI).
+   */
+  public render(
+    camera: Camera,
+    scene: Scene,
+    postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
+  ): void {
+    // Abort frame if canvas is not ready
+    if (this._handleResize(camera)) {
+      return;
+    }
+
+    const textureView = this.context.getCurrentTexture().createView();
+
+    // Update all per-frame GPU buffers
+    this._updateFrameUniforms(camera, scene);
+
+    // Prepare scene objects
+    const allRenderables = scene.getRenderables();
     const opaqueRenderables: Renderable[] = [];
     const transparentRenderables: Renderable[] = [];
     for (const renderable of allRenderables) {
@@ -333,23 +547,15 @@ export class Renderer {
       }
     }
 
-    // 6. Prepare instance data for both lists
-    const totalInstanceCount = allRenderables.length;
-    const requiredBufferSize = totalInstanceCount * Renderer.MATRIX_BYTE_SIZE;
+    // Ensure instance buffer is large enough for all objects
+    this._prepareInstanceBuffer(allRenderables.length);
 
-    if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
-      if (this.instanceBuffer) this.instanceBuffer.destroy();
-      const newSize = Math.ceil(requiredBufferSize * 1.5);
-      this.instanceBuffer = this.device.createBuffer({
-        label: "INSTANCE_MODEL_MATRIX_BUFFER",
-        size: newSize,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      });
-    }
-
+    // Begin encoding commands
     const commandEncoder = this.device.createCommandEncoder({
       label: "MAIN_COMMAND_ENCODER",
     });
+
+    // Main scene render pass
     const scenePassEncoder = commandEncoder.beginRenderPass({
       colorAttachments: [
         {
@@ -380,236 +586,28 @@ export class Renderer {
     );
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
 
-    let instanceBufferOffset = 0;
+    // Opaque objects pass
+    const opaqueBytesWritten = this._renderOpaquePass(
+      scenePassEncoder,
+      opaqueRenderables,
+    );
 
-    // 7. Opaque rendering pass (using batching)
-    if (opaqueRenderables.length > 0) {
-      const batches = new Map<GPURenderPipeline, PipelineBatch>();
-
-      // Group all opaque renderables by their pipeline.
-      for (const renderable of opaqueRenderables) {
-        const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
-        // The material provides the correct pipeline for the given mesh layout.
-        const pipeline = material.getPipeline(
-          mesh.layouts,
-          Renderer.INSTANCE_DATA_LAYOUT,
-          this.frameBindGroupLayout,
-          this.canvasFormat,
-          this.depthFormat,
-        );
-
-        if (!batches.has(pipeline)) {
-          batches.set(pipeline, {
-            material: material, // Store the material to get the bind group later.
-            meshMap: new Map<Mesh, InstanceData[]>(),
-          });
-        }
-
-        const pipelineBatch = batches.get(pipeline)!;
-        if (!pipelineBatch.meshMap.has(mesh)) {
-          pipelineBatch.meshMap.set(mesh, []);
-        }
-        // Add the model matrix to the list of instances for this mesh.
-        pipelineBatch.meshMap
-          .get(mesh)!
-          .push({ modelMatrix, isUniformlyScaled });
-      }
-
-      // iterate over the batches and draw them.
-      for (const [pipeline, batch] of batches.entries()) {
-        // Set the pipeline and material bind group once for the entire batch.
-        scenePassEncoder.setPipeline(pipeline);
-        scenePassEncoder.setBindGroup(1, batch.material.bindGroup);
-
-        // draw each mesh within the batch
-        for (const [mesh, instances] of batch.meshMap.entries()) {
-          const instanceCount = instances.length;
-
-          // Create and write the instance data (model matrix + flag) for this mesh.
-          const instanceData = new Float32Array(
-            instanceCount * Renderer.INSTANCE_STRIDE_IN_FLOATS,
-          );
-
-          for (let i = 0; i < instanceCount; i++) {
-            const { modelMatrix, isUniformlyScaled } = instances[i];
-            const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
-
-            // Write model matrix
-            instanceData.set(modelMatrix, offsetInFloats);
-            // Write isUniformlyScaled flag (at float offset 16 within the stride)
-            instanceData[offsetInFloats + 16] = isUniformlyScaled ? 1.0 : 0.0;
-          }
-
-          const batchByteLength = instanceData.byteLength;
-          this.device.queue.writeBuffer(
-            this.instanceBuffer,
-            instanceBufferOffset,
-            instanceData,
-          );
-
-          // Set the vertex buffers for the mesh geometry.
-          for (let i = 0; i < mesh.buffers.length; i++) {
-            scenePassEncoder.setVertexBuffer(i, mesh.buffers[i]);
-          }
-          // Set the vertex buffer for the instance data.
-          scenePassEncoder.setVertexBuffer(
-            mesh.buffers.length, // Next available slot
-            this.instanceBuffer,
-            instanceBufferOffset,
-            batchByteLength,
-          );
-
-          // Perform the draw call.
-          if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
-            scenePassEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
-            scenePassEncoder.drawIndexed(
-              mesh.indexCount,
-              instanceCount,
-              0,
-              0,
-              0,
-            );
-          } else {
-            scenePassEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
-          }
-
-          // Advance the offset for the next batch of instances.
-          instanceBufferOffset += batchByteLength;
-        }
-      }
-    }
-
-    // 8. Transparent rendering pass (sort back-to-front and render individually)
-    if (transparentRenderables.length > 0) {
-      // Sort transparent objects from furthest to nearest
-      transparentRenderables.sort((a, b) => {
-        // Get world position from model matrix (column 3, elements 0, 1, 2)
-        const posA = vec3.fromValues(
-          a.modelMatrix[12],
-          a.modelMatrix[13],
-          a.modelMatrix[14],
-        );
-        const posB = vec3.fromValues(
-          b.modelMatrix[12],
-          b.modelMatrix[13],
-          b.modelMatrix[14],
-        );
-        // Compare squared distances to avoid expensive sqrt
-        // Extract vec3 from camera's vec4 position for distance calculation
-        const cameraPosVec3 = vec3.fromValues(
-          camera.position[0],
-          camera.position[1],
-          camera.position[2],
-        );
-        const distA = vec3.distanceSq(posA, cameraPosVec3);
-        const distB = vec3.distanceSq(posB, cameraPosVec3);
-        return distB - distA; // Sort descending by distance (furthest first)
-      });
-
-      // Prepare instance data for all transparent objects in one go.
-      const transparentInstanceData = new Float32Array(
-        transparentRenderables.length * Renderer.INSTANCE_STRIDE_IN_FLOATS,
-      );
-      for (let i = 0; i < transparentRenderables.length; i++) {
-        const { modelMatrix, isUniformlyScaled } = transparentRenderables[i];
-        const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
-        // Write model matrix
-        transparentInstanceData.set(modelMatrix, offsetInFloats);
-        // Write isUniformlyScaled flag
-        transparentInstanceData[offsetInFloats + 16] = isUniformlyScaled
-          ? 1.0
-          : 0.0;
-      }
-      this.device.queue.writeBuffer(
-        this.instanceBuffer,
-        instanceBufferOffset, // Continue writing where the opaque pass left off
-        transparentInstanceData,
-      );
-
-      // Render sorted transparent objects one by one
-      let lastMaterial: null | Material = null;
-      let lastMesh: null | Mesh = null;
-      let lastPipeline: null | GPURenderPipeline = null;
-
-      for (let i = 0; i < transparentRenderables.length; i++) {
-        const { mesh, material } = transparentRenderables[i];
-
-        // Get the pipeline for this specific material and mesh combination.
-        const pipeline = material.getPipeline(
-          mesh.layouts,
-          Renderer.INSTANCE_DATA_LAYOUT,
-          this.frameBindGroupLayout,
-          this.canvasFormat,
-          this.depthFormat,
-        );
-
-        // Set pipeline if it has changed.
-        if (pipeline !== lastPipeline) {
-          scenePassEncoder.setPipeline(pipeline);
-          lastPipeline = pipeline;
-        }
-
-        // Set material bind group if it has changed.
-        if (material !== lastMaterial) {
-          scenePassEncoder.setBindGroup(1, material.bindGroup);
-          lastMaterial = material;
-        }
-
-        // Set vertex/index buffers if the mesh has changed.
-        if (mesh !== lastMesh) {
-          for (let j = 0; j < mesh.buffers.length; j++) {
-            scenePassEncoder.setVertexBuffer(j, mesh.buffers[j]);
-          }
-          // The instance buffer is set once for all transparent objects,
-          // have to be sure it's set if the mesh changes.
-          scenePassEncoder.setVertexBuffer(
-            mesh.buffers.length,
-            this.instanceBuffer,
-            instanceBufferOffset,
-            transparentInstanceData.byteLength,
-          );
-          if (mesh.indexBuffer) {
-            scenePassEncoder.setIndexBuffer(
-              mesh.indexBuffer,
-              mesh.indexFormat!,
-            );
-          }
-          lastMesh = mesh;
-        }
-
-        // Draw this single instance, using 'i' as the firstInstance offset
-        // to select the correct matrix from the instance buffer.
-        if (mesh.indexBuffer && mesh.indexCount) {
-          scenePassEncoder.drawIndexed(mesh.indexCount, 1, 0, 0, i);
-        } else {
-          scenePassEncoder.draw(mesh.vertexCount, 1, 0, i);
-        }
-      }
-    }
+    // Transparent objects pass
+    this._renderTransparentPass(
+      scenePassEncoder,
+      transparentRenderables,
+      camera,
+      opaqueBytesWritten,
+    );
 
     scenePassEncoder.end();
 
-    // =========================================================================
-    // UI rendering pass
-    // =========================================================================
-
-    // Call the post-scene draw callback if it exists.
+    // UI render pass
     if (postSceneDrawCallback) {
-      const uiPassEncoder = commandEncoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: textureView,
-            loadOp: "load", // Load the contents of the previous pass
-            storeOp: "store",
-          },
-        ],
-        // no depthStencilAttachment for the UI pass
-      });
-
-      postSceneDrawCallback(uiPassEncoder);
-      uiPassEncoder.end();
+      this._renderUIPass(commandEncoder, textureView, postSceneDrawCallback);
     }
 
+    // Submit all GPU commands for this frame
     this.device.queue.submit([commandEncoder.finish()]);
   }
 
