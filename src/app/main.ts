@@ -40,10 +40,21 @@ try {
   const inputManager = new InputManager(canvas);
   // Define the abstract actions and their default keyboard mappings
   const actionMap: ActionMapConfig = {
-    move_vertical: { type: "axis", positiveKey: "KeyZ", negativeKey: "KeyS" },
-    move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyQ" },
-    move_up: { type: "button", keys: ["Space"] },
-    move_down: { type: "button", keys: ["ShiftLeft"] },
+    move_vertical: {
+      type: "axis",
+      positiveKey: "Key_Z", // The actual Z character
+      negativeKey: "Key_S", // The actual S character
+    },
+    move_horizontal: {
+      type: "axis",
+      positiveKey: "Key_D", // The actual D character
+      negativeKey: "Key_Q", // The actual Q character (instead of A)
+    },
+    move_y_axis: {
+      type: "axis",
+      positiveKey: "Space",
+      negativeKey: "ShiftLeft",
+    },
   };
 
   const actionManager = new ActionManager(inputManager, actionMap);
@@ -60,10 +71,9 @@ try {
 
   // Position the camera to look at the scene
   camera.lookAt(
-    vec3.fromValues(0, 1, 1),
+    vec3.fromValues(0, 1, 3),
     vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 0, 1), // utah_vw_beetle.stl is exported with z-up
-    //vec3.fromValues(0, 1, 0), // Standard y-up
+    vec3.fromValues(0, 1, 0),
   );
 
   // Create Scene Lights
@@ -115,6 +125,8 @@ try {
   teapotNode1.mesh = teapotMesh;
   teapotNode1.material = material1;
   teapotNode1.setScale(teapotScale);
+  // The teapot model is Z-up. Rotate it -90 degrees around the X-axis to make it Y-up.
+  teapotNode1.rotateX(-Math.PI / 2);
   scene.add(teapotNode1); // Add node to the scene root
 
   // Teapot 2 (Child, Semi-Transparent)
@@ -163,9 +175,14 @@ try {
     ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
     ImGui.Separator();
     ImGui.Text("Camera Controls: Click canvas to lock pointer.");
-    ImGui.Text("Z/S: Forward/Back, Q/D: Left/Right");
+    ImGui.Text("Movement: ZQSD/WASD");
     ImGui.Text("Space: Up, Left Shift: Down");
     ImGui.Text("Light Controls");
+    ImGui.Separator();
+    ImGui.Text("Key Debug:");
+    const pressedKeys = Array.from(inputManager.keys).join(", ");
+    ImGui.Text(`Pressed Keys: ${pressedKeys || "None"}`);
+    ImGui.Separator();
 
     if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
       scene.ambientColor[0] = ambientColorUI[0];

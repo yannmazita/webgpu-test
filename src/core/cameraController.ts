@@ -1,15 +1,11 @@
 // src/core/cameraController.ts
-import { vec3 } from "wgpu-matrix";
+import { vec3, quat } from "wgpu-matrix";
 import { Camera } from "./camera";
 import { ActionManager } from "./actionManager";
 
 export class CameraController {
   private camera: Camera;
   private actions: ActionManager;
-
-  // Rotation state
-  private yaw = 0;
-  private pitch = 0;
 
   // Configurable settings
   public moveSpeed = 5.0; // units per second
@@ -18,18 +14,6 @@ export class CameraController {
   constructor(camera: Camera, actions: ActionManager) {
     this.camera = camera;
     this.actions = actions;
-    this.initializeOrientation();
-  }
-
-  /**
-   * Calculates the initial yaw and pitch from the camera's starting orientation.
-   */
-  private initializeOrientation(): void {
-    const viewDir = vec3.subtract(this.camera.target, this.camera.position);
-    vec3.normalize(viewDir, viewDir);
-
-    this.yaw = Math.atan2(viewDir[0], viewDir[2]);
-    this.pitch = Math.asin(viewDir[1]);
   }
 
   /**
@@ -37,50 +21,73 @@ export class CameraController {
    * @param deltaTime The time in seconds since the last frame.
    */
   public update(deltaTime: number): void {
-    // --- Rotation (Mouse Look) ---
+    // Rotation (Mouse Look)
     if (this.actions.isPointerLocked()) {
       const mouseDelta = this.actions.getMouseDelta();
-      this.yaw += mouseDelta.x * this.mouseSensitivity;
-      this.pitch -= mouseDelta.y * this.mouseSensitivity;
+      const yawAngle = mouseDelta.x * this.mouseSensitivity;
+      const pitchAngle = -mouseDelta.y * this.mouseSensitivity;
 
-      // Clamp pitch to prevent flipping
-      const pitchLimit = Math.PI / 2 - 0.01;
-      this.pitch = Math.max(-pitchLimit, Math.min(pitchLimit, this.pitch));
+      // Yaw (Horizontal) Rotation
+      // Rotate around the world's up vector (0, 1, 0)
+      if (yawAngle !== 0) {
+        const yawQuat = quat.fromAxisAngle(vec3.fromValues(0, 1, 0), yawAngle);
+        vec3.transformQuat(this.camera.forward, yawQuat, this.camera.forward);
+        vec3.transformQuat(this.camera.right, yawQuat, this.camera.right);
+      }
+
+      // Pitch (Vertical) Rotation
+      if (pitchAngle !== 0) {
+        // Limiting pitch to prevent camera flipping
+        // We check the angle between the current forward vector and the world up vector.
+        const worldUp = vec3.fromValues(0, 1, 0);
+        const pitchQuat = quat.fromAxisAngle(this.camera.right, pitchAngle);
+        const potentialForward = vec3.transformQuat(
+          this.camera.forward,
+          pitchQuat,
+        );
+        const dotProd = vec3.dot(potentialForward, worldUp);
+
+        // Allow rotation only if it doesn't push the camera over the top or bottom
+        // 0.995 is about 5.7 degrees from vertical.
+        if (Math.abs(dotProd) < 0.995) {
+          vec3.copy(potentialForward, this.camera.forward);
+          // rotate the camera's local 'up' vector
+          vec3.transformQuat(this.camera.up, pitchQuat, this.camera.up);
+        }
+      }
+      // Re-orthogonalize the camera's basis vectors to prevent drift.
+      // (assuming the forward vector is the most correct after rotation)
+      // The world up vector is used as a reference to maintain a stable roll.
+      const worldUp = vec3.fromValues(0, 1, 0);
+      vec3.cross(this.camera.forward, worldUp, this.camera.right);
+      vec3.normalize(this.camera.right, this.camera.right);
+      vec3.cross(this.camera.right, this.camera.forward, this.camera.up);
+      vec3.normalize(this.camera.up, this.camera.up);
     }
 
-    // Calculate forward, right, and up vectors from yaw and pitch
-    const cosPitch = Math.cos(this.pitch);
-    const sinPitch = Math.sin(this.pitch);
-    const cosYaw = Math.cos(this.yaw);
-    const sinYaw = Math.sin(this.yaw);
-
-    const forward = vec3.fromValues(
-      sinYaw * cosPitch,
-      sinPitch,
-      cosYaw * cosPitch,
-    );
-    const right = vec3.fromValues(cosYaw, 0, -sinYaw);
-
-    // --- Movement (Keyboard) ---
+    // Movement (Keyboard)
     const moveDirection = vec3.create(0, 0, 0);
-    // Create temporary vectors for movement calculation to avoid modifying the originals.
-    const verticalMovement = vec3.scale(
-      forward,
+
+    // Forward/Backward movement (local Z)
+    const forwardMovement = vec3.scale(
+      this.camera.forward,
       this.actions.getAxis("move_vertical"),
     );
+    vec3.add(moveDirection, forwardMovement, moveDirection);
+
+    // Strafe Left/Right movement (local X)
     const horizontalMovement = vec3.scale(
-      right,
+      this.camera.right,
       this.actions.getAxis("move_horizontal"),
     );
-
-    vec3.add(moveDirection, verticalMovement, moveDirection);
     vec3.add(moveDirection, horizontalMovement, moveDirection);
-    if (this.actions.isPressed("move_up")) {
-      moveDirection[1] += 1;
-    }
-    if (this.actions.isPressed("move_down")) {
-      moveDirection[1] -= 1;
-    }
+
+    // Up/Down movement (local Y)
+    const upMovement = vec3.scale(
+      this.camera.up,
+      this.actions.getAxis("move_y_axis"),
+    );
+    vec3.add(moveDirection, upMovement, moveDirection);
 
     // Normalize move direction to prevent faster diagonal movement
     if (vec3.lengthSq(moveDirection) > 0) {
@@ -89,12 +96,7 @@ export class CameraController {
       vec3.add(this.camera.position, moveVector, this.camera.position);
     }
 
-    // --- Update Camera ---
-    const newTarget = vec3.add(this.camera.position, forward);
-    this.camera.lookAt(
-      this.camera.position,
-      newTarget,
-      vec3.fromValues(0, 1, 0),
-    );
+    // Update Camera
+    this.camera.updateViewMatrix();
   }
 }
