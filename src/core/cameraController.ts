@@ -1,11 +1,11 @@
 // src/core/cameraController.ts
 import { vec3 } from "wgpu-matrix";
 import { Camera } from "./camera";
-import { InputManager } from "./inputManager";
+import { ActionManager } from "./actionManager";
 
 export class CameraController {
   private camera: Camera;
-  private input: InputManager;
+  private actions: ActionManager;
 
   // Rotation state
   private yaw = 0;
@@ -15,9 +15,9 @@ export class CameraController {
   public moveSpeed = 5.0; // units per second
   public mouseSensitivity = 0.002;
 
-  constructor(camera: Camera, input: InputManager) {
+  constructor(camera: Camera, actions: ActionManager) {
     this.camera = camera;
-    this.input = input;
+    this.actions = actions;
     this.initializeOrientation();
   }
 
@@ -38,9 +38,10 @@ export class CameraController {
    */
   public update(deltaTime: number): void {
     // --- Rotation (Mouse Look) ---
-    if (this.input.isPointerLocked) {
-      this.yaw += this.input.mouseDelta.x * this.mouseSensitivity;
-      this.pitch -= this.input.mouseDelta.y * this.mouseSensitivity;
+    if (this.actions.isPointerLocked()) {
+      const mouseDelta = this.actions.getMouseDelta();
+      this.yaw += mouseDelta.x * this.mouseSensitivity;
+      this.pitch -= mouseDelta.y * this.mouseSensitivity;
 
       // Clamp pitch to prevent flipping
       const pitchLimit = Math.PI / 2 - 0.01;
@@ -62,23 +63,23 @@ export class CameraController {
 
     // --- Movement (Keyboard) ---
     const moveDirection = vec3.create(0, 0, 0);
-    if (this.input.keys.has("KeyZ")) {
-      vec3.add(moveDirection, forward, moveDirection);
+    // Create temporary vectors for movement calculation to avoid modifying the originals.
+    const verticalMovement = vec3.scale(
+      forward,
+      this.actions.getAxis("move_vertical"),
+    );
+    const horizontalMovement = vec3.scale(
+      right,
+      this.actions.getAxis("move_horizontal"),
+    );
+
+    vec3.add(moveDirection, verticalMovement, moveDirection);
+    vec3.add(moveDirection, horizontalMovement, moveDirection);
+    if (this.actions.isPressed("move_up")) {
+      moveDirection[1] += 1;
     }
-    if (this.input.keys.has("KeyS")) {
-      vec3.subtract(moveDirection, forward, moveDirection);
-    }
-    if (this.input.keys.has("KeyD")) {
-      vec3.add(moveDirection, right, moveDirection);
-    }
-    if (this.input.keys.has("KeyQ")) {
-      vec3.subtract(moveDirection, right, moveDirection);
-    }
-    if (this.input.keys.has("Space")) {
-      moveDirection[1] += 1; // Move up
-    }
-    if (this.input.keys.has("ShiftLeft")) {
-      moveDirection[1] -= 1; // Move down
+    if (this.actions.isPressed("move_down")) {
+      moveDirection[1] -= 1;
     }
 
     // Normalize move direction to prevent faster diagonal movement

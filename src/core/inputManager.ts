@@ -9,6 +9,8 @@ export class InputManager {
   public readonly keys = new Set<string>();
   /** The change in mouse position since the last frame. */
   public readonly mouseDelta = { x: 0, y: 0 };
+  /** The current mouse position in pixels, relative to the canvas top-left. */
+  public readonly mousePosition = { x: -1, y: -1 };
   /** Indicates if the pointer is currently locked to the canvas. */
   public isPointerLocked = false;
 
@@ -72,9 +74,15 @@ export class InputManager {
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
+    // Update delta when pointer is locked
     if (this.isPointerLocked) {
       this.mouseDelta.x += e.movementX;
       this.mouseDelta.y += e.movementY;
     }
+
+    // Update absolute position regardless of lock state
+    const rect = this.canvas.getBoundingClientRect();
+    this.mousePosition.x = e.clientX - rect.left;
+    this.mousePosition.y = e.clientY - rect.top;
   };
 }

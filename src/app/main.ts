@@ -15,6 +15,8 @@ import { ImGui } from "@mori2003/jsimgui";
 import { SceneNode } from "@/core/sceneNode";
 import { InputManager } from "@/core/inputManager";
 import { CameraController } from "@/core/cameraController";
+import { ActionManager, ActionMapConfig } from "@/core/actionManager";
+import { getMouseWorldPosition } from "@/core/utils/raycast";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -36,7 +38,17 @@ try {
   const scene = new Scene();
   const camera = new Camera();
   const inputManager = new InputManager(canvas);
-  const cameraController = new CameraController(camera, inputManager);
+  // Define the abstract actions and their default keyboard mappings
+  const actionMap: ActionMapConfig = {
+    move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
+    move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
+    move_up: { type: "button", keys: ["Space"] },
+    move_down: { type: "button", keys: ["ShiftLeft"] },
+  };
+
+  const actionManager = new ActionManager(inputManager, actionMap);
+
+  const cameraController = new CameraController(camera, actionManager);
 
   // Configure camera projection
   camera.setPerspective(
@@ -129,11 +141,30 @@ try {
     cameraController.update(deltaTime);
     beginDebugUIFrame();
 
+    // Calculate world position from mouse
+    let worldPosStr = "N/A (off-canvas)";
+    const mousePos = inputManager.mousePosition;
+    if (mousePos.x >= 0 && mousePos.y >= 0) {
+      const worldPos = getMouseWorldPosition(mousePos, canvas, camera);
+      if (worldPos) {
+        worldPosStr = `(${worldPos[0].toFixed(2)}, ${worldPos[1].toFixed(
+          2,
+        )}, ${worldPos[2].toFixed(2)})`;
+      } else {
+        worldPosStr = "N/A (no intersection)";
+      }
+    }
+
     // Create the UI window and its widgets
     ImGui.Begin("Debug Controls");
     ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
+    ImGui.Separator();
+    ImGui.Text(`Mouse Screen: (${mousePos.x}, ${mousePos.y})`);
+    ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
+    ImGui.Separator();
     ImGui.Text("Camera Controls: Click canvas to lock pointer.");
-    ImGui.Text("WASD: Move, Shift: Down, Space: Up");
+    ImGui.Text("W/S: Forward/Back, A/D: Left/Right");
+    ImGui.Text("Space: Up, Left Shift: Down");
     ImGui.Text("Light Controls");
 
     if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
@@ -174,6 +205,7 @@ try {
     light2.position[3] = 1.0; // Keep w=1 for position
 
     renderer.render(camera, scene, renderDebugUI);
+    inputManager.lateUpdate(); // Reset input deltas for the next frame
     requestAnimationFrame(animate);
   };
 

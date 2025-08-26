@@ -13,6 +13,10 @@ export class Camera {
   public projectionMatrix: Mat4;
   /** Pre-calculated view-projection matrix (P * V) sent to the GPU. */
   public viewProjectionMatrix: Mat4;
+  /** Inverse of the view matrix. */
+  public inverseViewMatrix: Mat4;
+  /** Inverse of the projection matrix. */
+  public inverseProjectionMatrix: Mat4;
   /** The camera's position in world space. */
   public position: Vec3;
   /** The point in world space the camera is looking at. */
@@ -28,6 +32,8 @@ export class Camera {
     this.viewMatrix = mat4.identity();
     this.projectionMatrix = mat4.identity();
     this.viewProjectionMatrix = mat4.identity();
+    this.inverseViewMatrix = mat4.identity();
+    this.inverseProjectionMatrix = mat4.identity();
     this.position = vec3.create(0, 0, 0);
     this.target = vec3.create(0, 0, 0);
     this.up = vec3.create(0, 1, 0);
@@ -59,6 +65,7 @@ export class Camera {
       near,
       far,
     );
+    mat4.invert(this.projectionMatrix, this.inverseProjectionMatrix);
     this.updateViewProjectionMatrix();
   }
 
@@ -79,6 +86,7 @@ export class Camera {
     vec3.copy(target, this.target);
     vec3.copy(up, this.up);
     this.viewMatrix = mat4.lookAt(position, target, up);
+    mat4.invert(this.viewMatrix, this.inverseViewMatrix);
     this.updateViewProjectionMatrix();
   }
 
