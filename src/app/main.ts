@@ -40,8 +40,8 @@ try {
   const inputManager = new InputManager(canvas);
   // Define the abstract actions and their default keyboard mappings
   const actionMap: ActionMapConfig = {
-    move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
-    move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
+    move_vertical: { type: "axis", positiveKey: "KeyZ", negativeKey: "KeyS" },
+    move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyQ" },
     move_up: { type: "button", keys: ["Space"] },
     move_down: { type: "button", keys: ["ShiftLeft"] },
   };
@@ -163,7 +163,7 @@ try {
     ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
     ImGui.Separator();
     ImGui.Text("Camera Controls: Click canvas to lock pointer.");
-    ImGui.Text("W/S: Forward/Back, A/D: Left/Right");
+    ImGui.Text("Z/S: Forward/Back, Q/D: Left/Right");
     ImGui.Text("Space: Up, Left Shift: Down");
     ImGui.Text("Light Controls");
 

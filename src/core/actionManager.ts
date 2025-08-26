@@ -48,7 +48,7 @@ export class ActionManager {
 
   /**
    * Checks if a button-type action is currently being pressed.
-   * @param actionName The name of the action to check (e.g., "jump").
+   * @param actionName The name of the action to check (ex "jump").
    * @returns `true` if any of the keys mapped to the action are pressed.
    */
   public isPressed(actionName: string): boolean {
@@ -63,7 +63,7 @@ export class ActionManager {
 
   /**
    * Gets the value of an axis-type action, typically between -1 and 1.
-   * @param actionName The name of the action to check (e.g., "move_vertical").
+   * @param actionName The name of the action to check (ex "move_vertical").
    * @returns `1` if the positive key is pressed, `-1` if the negative key is
    *   pressed, and `0` otherwise.
    */
