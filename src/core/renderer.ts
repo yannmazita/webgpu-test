@@ -321,7 +321,9 @@ export class Renderer {
 
   /**
    * Renders all opaque objects using batched, instanced draw calls.
-   * @returns The number of bytes written to the instance buffer.
+   * This method is optimized to minimize GPU state changes and draw calls.
+   * @returns The number of bytes written to the instance buffer, which is needed
+   *          as an offset for the subsequent transparent pass.
    */
   private _renderOpaquePass(
     passEncoder: GPURenderPassEncoder,
@@ -329,9 +331,15 @@ export class Renderer {
   ): number {
     if (renderables.length === 0) return 0;
 
+    // 1. Batching Phase: Group all renderables by pipeline and then by mesh.
+    // The goal is to create large batches of objects that can be drawn together
+    // in a single instanced draw call, changing pipelines is expensive so we
+    // group that first
     const batches = new Map<GPURenderPipeline, PipelineBatch>();
     for (const renderable of renderables) {
       const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+
+      // The material caches this pipeline, so this is a fast lookup.
       const pipeline = material.getPipeline(
         mesh.layouts,
         Renderer.INSTANCE_DATA_LAYOUT,
@@ -340,6 +348,7 @@ export class Renderer {
         this.depthFormat,
       );
 
+      // If we haven't seen this pipeline before, create a new top-level batch for it.
       if (!batches.has(pipeline)) {
         batches.set(pipeline, {
           material: material,
@@ -347,23 +356,28 @@ export class Renderer {
         });
       }
       const pipelineBatch = batches.get(pipeline)!;
+
+      // Within the pipeline batch, group instances by their mesh.
       if (!pipelineBatch.meshMap.has(mesh)) {
         pipelineBatch.meshMap.set(mesh, []);
       }
       pipelineBatch.meshMap.get(mesh)!.push({ modelMatrix, isUniformlyScaled });
     }
 
+    // 2. Drawing Phase: Iterate through the batches and issue draw calls.
     let instanceBufferOffset = 0;
     for (const [pipeline, batch] of batches.entries()) {
+      // Set the pipeline and material bind group once for all meshes in this batch.
       passEncoder.setPipeline(pipeline);
       passEncoder.setBindGroup(1, batch.material.bindGroup);
 
       for (const [mesh, instances] of batch.meshMap.entries()) {
         const instanceCount = instances.length;
+
+        // Prepare the instance data (model matrices, etc.) for this specific sub-batch.
         const instanceData = new Float32Array(
           instanceCount * Renderer.INSTANCE_STRIDE_IN_FLOATS,
         );
-
         for (let i = 0; i < instanceCount; i++) {
           const { modelMatrix, isUniformlyScaled } = instances[i];
           const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
@@ -372,15 +386,19 @@ export class Renderer {
         }
 
         const batchByteLength = instanceData.byteLength;
+
+        // Write this sub-batch's data into the shared instance buffer at the correct offset.
         this.device.queue.writeBuffer(
           this.instanceBuffer,
           instanceBufferOffset,
           instanceData,
         );
 
+        // Set the mesh-specific vertex buffers.
         for (let i = 0; i < mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, mesh.buffers[i]);
         }
+        // Set the instance data buffer, pointing to the specific slice for this batch.
         passEncoder.setVertexBuffer(
           mesh.buffers.length,
           this.instanceBuffer,
@@ -388,6 +406,7 @@ export class Renderer {
           batchByteLength,
         );
 
+        // Issue the single instanced draw call for this sub-batch.
         if (mesh.indexBuffer && mesh.indexFormat && mesh.indexCount) {
           passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat);
           passEncoder.drawIndexed(mesh.indexCount, instanceCount, 0, 0, 0);
@@ -395,6 +414,7 @@ export class Renderer {
           passEncoder.draw(mesh.vertexCount, instanceCount, 0, 0);
         }
 
+        // Advance the offset for the next batch.
         instanceBufferOffset += batchByteLength;
       }
     }
@@ -402,7 +422,8 @@ export class Renderer {
   }
 
   /**
-   * Renders all transparent objects, sorted back-to-front.
+   * Renders all transparent objects, sorted back-to-front, using instancing
+   * for contiguous batches of identical objects.
    */
   private _renderTransparentPass(
     passEncoder: GPURenderPassEncoder,
@@ -412,6 +433,7 @@ export class Renderer {
   ): void {
     if (renderables.length === 0) return;
 
+    // 1. Sort all transparent objects from back-to-front relative to the camera.
     renderables.sort((a, b) => {
       const posA = vec3.fromValues(
         a.modelMatrix[12],
@@ -429,6 +451,7 @@ export class Renderer {
       return distB - distA;
     });
 
+    // 2. Write all instance data for the sorted objects into the GPU buffer.
     const instanceData = new Float32Array(
       renderables.length * Renderer.INSTANCE_STRIDE_IN_FLOATS,
     );
@@ -444,12 +467,14 @@ export class Renderer {
       instanceData,
     );
 
-    let lastMaterial: null | Material = null;
-    let lastMesh: null | Mesh = null;
-    let lastPipeline: null | GPURenderPipeline = null;
+    // 3. Iterate through the sorted list, batching consecutive identical
+    //    objects into single instanced draw calls.
+    let i = 0;
+    while (i < renderables.length) {
+      const firstInBatch = renderables[i];
+      const { mesh, material } = firstInBatch;
 
-    for (let i = 0; i < renderables.length; i++) {
-      const { mesh, material } = renderables[i];
+      // Set pipeline and material bind group for the upcoming batch.
       const pipeline = material.getPipeline(
         mesh.layouts,
         Renderer.INSTANCE_DATA_LAYOUT,
@@ -457,36 +482,44 @@ export class Renderer {
         this.canvasFormat,
         this.depthFormat,
       );
+      passEncoder.setPipeline(pipeline);
+      passEncoder.setBindGroup(1, material.bindGroup);
 
-      if (pipeline !== lastPipeline) {
-        passEncoder.setPipeline(pipeline);
-        lastPipeline = pipeline;
+      // Set the mesh-specific vertex and index buffers.
+      for (let j = 0; j < mesh.buffers.length; j++) {
+        passEncoder.setVertexBuffer(j, mesh.buffers[j]);
       }
-      if (material !== lastMaterial) {
-        passEncoder.setBindGroup(1, material.bindGroup);
-        lastMaterial = material;
-      }
-      if (mesh !== lastMesh) {
-        for (let j = 0; j < mesh.buffers.length; j++) {
-          passEncoder.setVertexBuffer(j, mesh.buffers[j]);
-        }
-        passEncoder.setVertexBuffer(
-          mesh.buffers.length,
-          this.instanceBuffer,
-          instanceBufferOffset,
-          instanceData.byteLength,
-        );
-        if (mesh.indexBuffer) {
-          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-        }
-        lastMesh = mesh;
+      // Set the single instance data buffer for all transparent objects.
+      passEncoder.setVertexBuffer(
+        mesh.buffers.length,
+        this.instanceBuffer,
+        instanceBufferOffset,
+        instanceData.byteLength,
+      );
+      if (mesh.indexBuffer) {
+        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
       }
 
+      // Find how many consecutive renderables use the same mesh and material.
+      let count = 1;
+      while (i + count < renderables.length) {
+        const nextInBatch = renderables[i + count];
+        if (nextInBatch.mesh === mesh && nextInBatch.material === material) {
+          count++;
+        } else {
+          break; // End of this batch
+        }
+      }
+
+      // Issue a single instanced draw call for the entire batch.
       if (mesh.indexBuffer && mesh.indexCount) {
-        passEncoder.drawIndexed(mesh.indexCount, 1, 0, 0, i);
+        passEncoder.drawIndexed(mesh.indexCount, count, 0, 0, i);
       } else {
-        passEncoder.draw(mesh.vertexCount, 1, 0, i);
+        passEncoder.draw(mesh.vertexCount, count, 0, i);
       }
+
+      // Advance main index to the start of the next potential batch.
+      i += count;
     }
   }
 
