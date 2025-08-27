@@ -4,7 +4,6 @@ import "@/style.css";
 import { vec3, vec4 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
-import { Scene } from "@/core/scene/scene";
 import { Light } from "@/core/types/gpu";
 import {
   init as initDebugUI,
@@ -12,11 +11,15 @@ import {
   render as renderDebugUI,
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
-import { SceneNode } from "@/core/scene/sceneNode";
 import { InputManager } from "@/core/inputManager";
 import { CameraController } from "@/core/cameraController";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
 import { getMouseWorldPosition } from "@/core/utils/raycast";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
+import { World } from "@/core/ecs/world";
+import { transformSystem } from "@/core/ecs/systems/transformSystem";
+import { renderSystem } from "@/core/ecs/systems/renderSystem";
+import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -35,7 +38,7 @@ try {
   await initDebugUI(canvas, renderer.device);
 
   const resourceManager = new ResourceManager(renderer);
-  const scene = new Scene();
+  const world = new World();
   const camera = new Camera();
   const inputManager = new InputManager(canvas);
   // Define the abstract actions and their default keyboard mappings
@@ -83,13 +86,12 @@ try {
     position: vec4.create(),
     color: vec4.fromValues(1, 0, 0, 1), // Red light
   };
-  scene.lights.push(light1);
 
   const light2: Light = {
     position: vec4.create(),
     color: vec4.fromValues(0, 1, 0, 1), // Green light
   };
-  scene.lights.push(light2);
+  const lights = [light1, light2];
 
   // ImGui needs plain arrays that it can modify directly
   const ambientColorUI = [0.1, 0.1, 0.1];
@@ -111,14 +113,15 @@ try {
   // Create renderable objects and add them to the scene
   const teapotScale = vec3.fromValues(0.07, 0.07, 0.07);
 
-  // Teapot 1 (Parent, Opaque)
-  const teapotNode1 = new SceneNode();
-  teapotNode1.mesh = teapotMesh;
-  teapotNode1.material = material1;
-  teapotNode1.transform.setScale(teapotScale);
-  // The teapot model is Z-up. Rotate it -90 degrees around the X-axis to make it Y-up.
-  teapotNode1.transform.rotateX(-Math.PI / 2);
-  scene.add(teapotNode1); // Add node to the scene root
+  const teapotEntity = world.createEntity();
+  const teapotTransform = new TransformComponent();
+  teapotTransform.setScale(teapotScale);
+  teapotTransform.rotateX(-Math.PI / 2);
+  world.addComponent(teapotEntity, teapotTransform);
+  world.addComponent(
+    teapotEntity,
+    new MeshRendererComponent(teapotMesh, material1),
+  );
 
   // Animation Loop
   let lastFrameTime = performance.now();
@@ -161,11 +164,8 @@ try {
     ImGui.Text(`Pressed Keys: ${pressedKeys || "None"}`);
     ImGui.Separator();
 
-    if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
-      scene.ambientColor[0] = ambientColorUI[0];
-      scene.ambientColor[1] = ambientColorUI[1];
-      scene.ambientColor[2] = ambientColorUI[2];
-    }
+    ImGui.ColorEdit3("Ambient Color", ambientColorUI);
+
     // Edit the UI arrays (not the light colors directly)
     if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
       // When UI changes, copy values to the actual light
@@ -198,9 +198,29 @@ try {
     light2.position[2] = Math.cos(-time * 0.4) * radius;
     light2.position[3] = 1.0; // Keep w=1 for position
 
-    renderer.render(camera, scene, renderDebugUI);
+    // -- SYSTEM EXECUTION --
+    // 1. Update transforms based on component data
+    transformSystem(world);
+
+    // 2. Collect data and render the scene
+    const ambientColorVec4 = vec4.fromValues(
+      ambientColorUI[0],
+      ambientColorUI[1],
+      ambientColorUI[2],
+      1.0,
+    );
+    renderSystem(
+      world,
+      renderer,
+      camera,
+      lights,
+      ambientColorVec4,
+      renderDebugUI,
+    );
+
+    // -- FRAME END --
     inputManager.lateUpdate(); // Reset input deltas for the next frame
-    requestAnimationFrame(animate);
+    requestAnimationFrame(animate); // Request the next frame
   };
 
   // Start the animation loop.

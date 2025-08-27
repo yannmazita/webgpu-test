@@ -1,9 +1,14 @@
 // src/core/renderer.ts
 import { Camera } from "@/core/camera";
-import { Scene } from "@/core/scene";
-import { mat4, Mat4, vec3 } from "wgpu-matrix";
-import { InstanceData, Mesh, PipelineBatch, Renderable } from "./types/gpu";
-import { Material } from "./materials/material";
+import { vec3, Vec4 } from "wgpu-matrix";
+import {
+  InstanceData,
+  Light,
+  Mesh,
+  PipelineBatch,
+  Renderable,
+} from "./types/gpu";
+import { SceneRenderData } from "./types/rendering";
 
 /**
  * The central rendering engine.
@@ -243,7 +248,11 @@ export class Renderer {
   /**
    * Updates all per-frame uniform and storage buffers.
    */
-  private _updateFrameUniforms(camera: Camera, scene: Scene): void {
+  private _updateFrameUniforms(
+    camera: Camera,
+    lights: Light[],
+    ambientColor: Vec4,
+  ): void {
     // 1. Update camera uniform buffer
     this.device.queue.writeBuffer(
       this.cameraUniformBuffer,
@@ -251,13 +260,13 @@ export class Renderer {
       camera.viewProjectionMatrix as Float32Array,
     );
 
-    // 2. Update scene data buffer (camera position)
-    this.sceneDataArray.set(camera.position, 0); // Write vec3 at offset 0
-    this.sceneDataArray.set(scene.ambientColor, 4); // Write vec4 at offset 4
+    // 2. Update scene data buffer (camera position & ambient color)
+    this.sceneDataArray.set(camera.position, 0);
+    this.sceneDataArray.set(ambientColor, 4);
     this.device.queue.writeBuffer(this.sceneDataBuffer, 0, this.sceneDataArray);
 
     // 3. Update light storage buffer
-    const lightCount = scene.lights.length;
+    const lightCount = lights.length;
     const lightStructSize = 8 * Float32Array.BYTES_PER_ELEMENT; // 2 vec4s
 
     if (lightCount > this.lightStorageBufferCapacity) {
@@ -283,12 +292,11 @@ export class Renderer {
         ],
       });
     }
-
     const lightCountView = new Uint32Array(this.lightDataBuffer, 0, 1);
     const lightDataView = new Float32Array(this.lightDataBuffer, 16);
     lightCountView[0] = lightCount;
     for (let i = 0; i < lightCount; i++) {
-      const light = scene.lights[i];
+      const light = lights[i];
       const offset = i * 8; // Each light is 8 floats (2 vec4s)
       lightDataView.set(light.position, offset);
       lightDataView.set(light.color, offset + 4);
@@ -547,13 +555,13 @@ export class Renderer {
   /**
    * Renders a given Scene from the perspective of a Camera.
    * @param camera The camera providing the view and projection matrices.
-   * @param scene The scene containing the list of objects to render.
+   * @param sceneData A container with all the data needed for this frame's render.
    * @param postSceneDrawCallback An optional callback to execute additional
    *   drawing commands within the main render pass (like for the UI).
    */
   public render(
     camera: Camera,
-    scene: Scene,
+    sceneData: SceneRenderData,
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
   ): void {
     // Abort frame if canvas is not ready
@@ -564,10 +572,10 @@ export class Renderer {
     const textureView = this.context.getCurrentTexture().createView();
 
     // Update all per-frame GPU buffers
-    this._updateFrameUniforms(camera, scene);
+    this._updateFrameUniforms(camera, sceneData.lights, sceneData.ambientColor);
 
     // Prepare scene objects
-    const allRenderables = scene.getRenderables();
+    const allRenderables = sceneData.renderables;
     const opaqueRenderables: Renderable[] = [];
     const transparentRenderables: Renderable[] = [];
     for (const renderable of allRenderables) {
