@@ -115,6 +115,7 @@ try {
 
   const teapotEntity = world.createEntity();
   const teapotTransform = new TransformComponent();
+  teapotTransform.setPosition(0, 0, 0);
   teapotTransform.setScale(teapotScale);
   teapotTransform.rotateX(-Math.PI / 2);
   world.addComponent(teapotEntity, teapotTransform);
@@ -122,6 +123,9 @@ try {
     teapotEntity,
     new MeshRendererComponent(teapotMesh, material1),
   );
+
+  // Force the transform system to run once before starting the loop
+  transformSystem(world);
 
   // Animation Loop
   let lastFrameTime = performance.now();

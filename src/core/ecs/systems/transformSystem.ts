@@ -5,9 +5,6 @@ import { TransformComponent } from "../components/transformComponent";
 import { Entity } from "../entity";
 import { World } from "../world";
 
-// src/core/ecs/systems/transformSystem.ts
-
-// ...
 export function transformSystem(world: World): void {
   const roots: Entity[] = [];
   const entities = world.query([TransformComponent]);
@@ -15,7 +12,7 @@ export function transformSystem(world: World): void {
   // Find all root entities (those without a parent or without a hierarchy component)
   for (const entity of entities) {
     const hierarchy = world.getComponent(entity, HierarchyComponent);
-    if (hierarchy?.parent === null) {
+    if (!hierarchy || hierarchy.parent === null) {
       roots.push(entity);
     }
   }
@@ -26,14 +23,6 @@ export function transformSystem(world: World): void {
   }
 }
 
-/**
- * A recursive helper function to update an entity's transform and its children.
- * @param world The world.
- * @param entity The entity to update.
- * @param parentWorldMatrix The world matrix of the parent.
- * @param parentIsUniformlyScaled Whether the parent has uniform scaling.
- * @param forceUpdate If true, update even if not dirty (e.g., because parent was dirty).
- */
 function updateNodeTransform(
   world: World,
   entity: Entity,
@@ -41,7 +30,12 @@ function updateNodeTransform(
   parentIsUniformlyScaled: boolean,
   forceUpdate: boolean,
 ): void {
-  const transform = world.getComponent(entity, TransformComponent)!;
+  const transform = world.getComponent(entity, TransformComponent);
+
+  if (!transform) {
+    return;
+  }
+
   const hierarchy = world.getComponent(entity, HierarchyComponent);
 
   const needsUpdate = transform.isDirty || forceUpdate;
