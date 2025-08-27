@@ -2,7 +2,7 @@
 
 Learning graphics programming with WebGPU.
 
-[Utah Teapots](https://github.com/user-attachments/assets/11320f22-adb5-439d-8605-81a6aa459d5a)
+[engine-demo.mp4](https://github.com/user-attachments/assets/52bba8f5-a72e-453c-8bca-bdfe5bd06dc7)
 
 ### Setup
 
