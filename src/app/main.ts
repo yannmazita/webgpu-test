@@ -39,16 +39,17 @@ try {
   const camera = new Camera();
   const inputManager = new InputManager(canvas);
   // Define the abstract actions and their default keyboard mappings
+  // using KeyboardEvent.code values for layout independence (WASD on QWERTY is ZQSD on AZERTY)
   const actionMap: ActionMapConfig = {
     move_vertical: {
       type: "axis",
-      positiveKey: "Key_Z", // The actual Z character
-      negativeKey: "Key_S", // The actual S character
+      positiveKey: "KeyW", // Forward
+      negativeKey: "KeyS", // Backward
     },
     move_horizontal: {
       type: "axis",
-      positiveKey: "Key_D", // The actual D character
-      negativeKey: "Key_Q", // The actual Q character (instead of A)
+      positiveKey: "KeyD", // Strafe Right
+      negativeKey: "KeyA", // Strafe Left
     },
     move_y_axis: {
       type: "axis",

@@ -56,20 +56,12 @@ export class InputManager {
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
-    // Store both the physical code and the actual key character
+    // Store the physical key code for layout-independent input.
     this.keys.add(e.code);
-    // Also add the uppercase key character for layout independence
-    if (e.key.length === 1) {
-      this.keys.add(`Key_${e.key.toUpperCase()}`);
-    }
   };
 
   private handleKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
-    // Also remove the key character
-    if (e.key.length === 1) {
-      this.keys.delete(`Key_${e.key.toUpperCase()}`);
-    }
   };
 
   private handleCanvasClick = (): void => {
