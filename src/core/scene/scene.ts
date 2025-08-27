@@ -1,5 +1,5 @@
-// src/core/scene.ts
-import { Light, Renderable } from "./types/gpu";
+// src/core/scene/scene.ts
+import { Light, Renderable } from "@/core/types/gpu";
 import { SceneNode } from "./sceneNode";
 import { vec4, Vec4 } from "wgpu-matrix";
 
@@ -69,7 +69,8 @@ export class Scene {
     const traverse = (node: SceneNode, parentIsUniformlyScaled: boolean) => {
       // Check if the node's own local scale is uniform.
       const isNodeScaleUniform =
-        node.scale[0] === node.scale[1] && node.scale[1] === node.scale[2];
+        node.transform.scale[0] === node.transform.scale[1] &&
+        node.transform.scale[1] === node.transform.scale[2];
 
       // The final world transform is uniform only if the parent's was and this node's is.
       const isWorldScaleUniform = parentIsUniformlyScaled && isNodeScaleUniform;
@@ -79,7 +80,7 @@ export class Scene {
         renderables.push({
           mesh: node.mesh,
           material: node.material,
-          modelMatrix: node.worldMatrix,
+          modelMatrix: node.transform.worldMatrix,
           isUniformlyScaled: isWorldScaleUniform,
         });
       }

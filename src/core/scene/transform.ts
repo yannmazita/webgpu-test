@@ -1,9 +1,13 @@
-// src/core/sceneNode.ts
+// src/core/scene/transform.ts
 import { Mat4, mat4, Quat, quat, Vec3, vec3 } from "wgpu-matrix";
-import { Mesh, Light } from "./types/gpu";
-import { Material } from "./materials/material";
+import { SceneNode } from "./sceneNode";
 
-export class SceneNode {
+/**
+ * Manages the position, rotation, and scale of a SceneNode in 3D space.
+ * It handles the calculation of local and world transformation matrices and
+ * uses a dirty-checking mechanism for optimization.
+ */
+export class Transform {
   // Transformation properties
   public position: Vec3 = vec3.create(0, 0, 0);
   public rotation: Quat = quat.identity();
@@ -13,17 +17,15 @@ export class SceneNode {
   public localMatrix: Mat4 = mat4.identity();
   public worldMatrix: Mat4 = mat4.identity();
 
-  // Graph structure
-  public parent: SceneNode | null = null;
-  public children: SceneNode[] = [];
-
-  // Attached components
-  public mesh?: Mesh;
-  public material?: Material;
-  public light?: Light;
-
   // Dirty flag for optimization
   private _isDirty = true;
+
+  // The SceneNode that owns this transform.
+  private owner: SceneNode;
+
+  constructor(owner: SceneNode) {
+    this.owner = owner;
+  }
 
   // --- Public API for Transformations ---
 
@@ -80,61 +82,26 @@ export class SceneNode {
     this.makeDirty();
   }
 
-  // --- Graph Management ---
-
-  public addChild(node: SceneNode): void {
-    if (node.parent) {
-      node.parent.removeChild(node);
-    }
-    node.parent = this;
-    this.children.push(node);
-  }
-
-  public removeChild(node: SceneNode): void {
-    const index = this.children.indexOf(node);
-    if (index > -1) {
-      node.parent = null;
-      this.children.splice(index, 1);
-    }
-  }
-
-  /**
-   * Recursively destroys this node and all its children, removing them from the scene graph.
-   * This performs the logical removal. For GPU resource cleanup, the corresponding
-   * resources in the ResourceManager must also be destroyed separately.
-   */
-  public destroy(): void {
-    // Destroy children first (depth-first).
-    // We iterate over a copy of the children array because the original array
-    // will be modified by each child's destroy() call as it removes itself.
-    [...this.children].forEach((child) => child.destroy());
-
-    // Remove self from parent.
-    if (this.parent) {
-      this.parent.removeChild(this);
-    }
-  }
-
   // --- Core Update Logic ---
 
   /**
-   * Marks this node and all its descendants as dirty.
-   * This is necessary if, for example, a child is added or removed.
+   * Marks this transform as dirty, forcing a matrix recalculation on the next update.
+   * This is automatically called when a transformation method is used.
    */
-  private makeDirty(): void {
+  public makeDirty(): void {
     this._isDirty = true;
   }
 
   /**
-   * Updates the world matrix of this node and all its children.
-   * @param parentWorldMatrix The world matrix of the parent node.
+   * Updates the world matrix of this transform and recursively updates all its children.
+   * @param parentWorldMatrix The world matrix of the parent transform.
    * @param force - If true, forces a matrix recalculation even if not dirty.
    */
   public updateWorldMatrix(parentWorldMatrix?: Mat4, force = false): void {
     const needsUpdate = this._isDirty || force;
 
     if (needsUpdate) {
-      // Re-compose local matrix from position, rotation, and scale
+      // Recompose local matrix from position, rotation, and scale
       mat4.fromQuat(this.rotation, this.localMatrix);
       mat4.scale(this.localMatrix, this.scale, this.localMatrix);
       mat4.setTranslation(this.localMatrix, this.position, this.localMatrix);
@@ -151,9 +118,9 @@ export class SceneNode {
     }
 
     // Recursively update children.
-    // If this node was updated, its children must also be updated.
-    for (const child of this.children) {
-      child.updateWorldMatrix(this.worldMatrix, needsUpdate);
+    // If this transform was updated, its children must also be updated.
+    for (const childNode of this.owner.children) {
+      childNode.transform.updateWorldMatrix(this.worldMatrix, needsUpdate);
     }
   }
 }

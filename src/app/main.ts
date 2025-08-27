@@ -4,7 +4,7 @@ import "@/style.css";
 import { vec3, vec4 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
-import { Scene } from "@/core/scene";
+import { Scene } from "@/core/scene/scene";
 import { Light } from "@/core/types/gpu";
 import {
   init as initDebugUI,
@@ -12,7 +12,7 @@ import {
   render as renderDebugUI,
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
-import { SceneNode } from "@/core/sceneNode";
+import { SceneNode } from "@/core/scene/sceneNode";
 import { InputManager } from "@/core/inputManager";
 import { CameraController } from "@/core/cameraController";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
@@ -115,9 +115,9 @@ try {
   const teapotNode1 = new SceneNode();
   teapotNode1.mesh = teapotMesh;
   teapotNode1.material = material1;
-  teapotNode1.setScale(teapotScale);
+  teapotNode1.transform.setScale(teapotScale);
   // The teapot model is Z-up. Rotate it -90 degrees around the X-axis to make it Y-up.
-  teapotNode1.rotateX(-Math.PI / 2);
+  teapotNode1.transform.rotateX(-Math.PI / 2);
   scene.add(teapotNode1); // Add node to the scene root
 
   // Animation Loop
