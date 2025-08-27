@@ -1,6 +1,7 @@
 // src/core/ecs/world.ts
 import { ComponentConstructor, IComponent } from "./component";
 import { Entity } from "./entity";
+import { SceneLightingComponent } from "./systems/renderSystem";
 
 /**
  * The World is the container for all entities and components.
@@ -10,6 +11,33 @@ export class World {
   private entities = new Set<Entity>();
   private nextEntityId = 0;
   private recycledEntityIds: Entity[] = [];
+  private globalEntity: Entity = 0;
+
+  constructor() {
+    // Reserve entity 0 for global components/resources
+    this.globalEntity = this.createEntity();
+    if (this.globalEntity !== 0) {
+      throw new Error("World initialization error: global entity is not 0.");
+    }
+  }
+
+  /**
+   * Adds a global, singleton-like component to the world.
+   * @param component The component instance to add.
+   */
+  public addResource<T extends IComponent>(component: T): void {
+    this.addComponent(this.globalEntity, component);
+  }
+
+  /**
+   * Gets a global, singleton-like component from the world.
+   * @param componentType The type of the component to retrieve.
+   */
+  public getResource<T extends IComponent>(
+    componentType: ComponentConstructor<T>,
+  ): T | undefined {
+    return this.getComponent(this.globalEntity, componentType);
+  }
 
   // The core of the ECS: stores components in maps for fast lookups.
   // The outer map is keyed by the component's constructor (its type).
