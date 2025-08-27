@@ -31,6 +31,7 @@ struct CameraUniforms {
 
 struct SceneUniforms {
     cameraPos: vec4<f32>,
+    ambientColor: vec4<f32>,
 };
 
 // Uniforms for material properties.
@@ -173,7 +174,7 @@ fn fs_main(
     }
 
     // Phong ambient component
-    let ambient = vec3<f32>(0.1, 0.1, 0.1);
+    let ambient = scene.ambientColor.rgb;
 
     // Combine Components
     // The final color is the sum of ambient and total diffuse light, modulated by the

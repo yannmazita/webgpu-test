@@ -1,6 +1,7 @@
 // src/core/scene.ts
 import { Light, Renderable } from "./types/gpu";
 import { SceneNode } from "./sceneNode";
+import { vec4, Vec4 } from "wgpu-matrix";
 
 /**
  * Represents a collection of objects and lights to be rendered in the world.
@@ -13,6 +14,8 @@ export class Scene {
   public root: SceneNode = new SceneNode();
   /** Light sources for the scene. */
   public lights: Light[] = [];
+  /** The global ambient light color for the scene. */
+  public ambientColor: Vec4 = vec4.fromValues(0.1, 0.1, 0.1, 1.0);
 
   /**
    * Adds a node to the scene's root.

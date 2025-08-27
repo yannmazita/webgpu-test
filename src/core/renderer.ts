@@ -41,6 +41,8 @@ export class Renderer {
   private cameraUniformBuffer!: GPUBuffer;
   /** Uniform buffer for scene-wide data (camera position). */
   private sceneDataBuffer!: GPUBuffer;
+  /** A temporary array for writing scene data to the GPU buffer. */
+  private sceneDataArray!: Float32Array;
   /** Storage buffer for all light data. */
   private lightStorageBuffer!: GPUBuffer;
   /** A temporary buffer for writing light data. */
@@ -75,6 +77,8 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+    // 4 floats for cameraPos + 4 floats for ambientColor
+    this.sceneDataArray = new Float32Array(8);
   }
 
   /**
@@ -94,9 +98,9 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Scene data buffer: cameraPos (vec3)
-    // Using vec4 alignment: 1*vec4 = 16 bytes
-    const SCENE_DATA_SIZE = 4 * Float32Array.BYTES_PER_ELEMENT;
+    // Scene data buffer: cameraPos (vec4) + ambientColor (vec4)
+    // Using vec4 alignment: 2*vec4 = 32 bytes
+    const SCENE_DATA_SIZE = 8 * Float32Array.BYTES_PER_ELEMENT;
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
       size: SCENE_DATA_SIZE,
@@ -248,11 +252,9 @@ export class Renderer {
     );
 
     // 2. Update scene data buffer (camera position)
-    this.device.queue.writeBuffer(
-      this.sceneDataBuffer,
-      0,
-      camera.position as Float32Array,
-    );
+    this.sceneDataArray.set(camera.position, 0); // Write vec3 at offset 0
+    this.sceneDataArray.set(scene.ambientColor, 4); // Write vec4 at offset 4
+    this.device.queue.writeBuffer(this.sceneDataBuffer, 0, this.sceneDataArray);
 
     // 3. Update light storage buffer
     const lightCount = scene.lights.length;
@@ -421,11 +423,7 @@ export class Renderer {
         b.modelMatrix[13],
         b.modelMatrix[14],
       );
-      const cameraPosVec3 = vec3.fromValues(
-        camera.position[0],
-        camera.position[1],
-        camera.position[2],
-      );
+      const cameraPosVec3 = camera.position;
       const distA = vec3.distanceSq(posA, cameraPosVec3);
       const distB = vec3.distanceSq(posB, cameraPosVec3);
       return distB - distA;

@@ -13,6 +13,10 @@ import {
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
 import { SceneNode } from "@/core/sceneNode";
+import { InputManager } from "@/core/inputManager";
+import { CameraController } from "@/core/cameraController";
+import { ActionManager, ActionMapConfig } from "@/core/actionManager";
+import { getMouseWorldPosition } from "@/core/utils/raycast";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -33,6 +37,30 @@ try {
   const resourceManager = new ResourceManager(renderer);
   const scene = new Scene();
   const camera = new Camera();
+  const inputManager = new InputManager(canvas);
+  // Define the abstract actions and their default keyboard mappings
+  // using KeyboardEvent.code values for layout independence (WASD on QWERTY is ZQSD on AZERTY)
+  const actionMap: ActionMapConfig = {
+    move_vertical: {
+      type: "axis",
+      positiveKey: "KeyW", // Forward
+      negativeKey: "KeyS", // Backward
+    },
+    move_horizontal: {
+      type: "axis",
+      positiveKey: "KeyD", // Strafe Right
+      negativeKey: "KeyA", // Strafe Left
+    },
+    move_y_axis: {
+      type: "axis",
+      positiveKey: "Space",
+      negativeKey: "ShiftLeft",
+    },
+  };
+
+  const actionManager = new ActionManager(inputManager, actionMap);
+
+  const cameraController = new CameraController(camera, actionManager);
 
   // Configure camera projection
   camera.setPerspective(
@@ -44,9 +72,9 @@ try {
 
   // Position the camera to look at the scene
   camera.lookAt(
-    vec3.fromValues(0, 1, 1),
+    vec3.fromValues(0, 1, 3),
     vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 0, 1), // utah_vw_beetle.stl is exported with z-up
+    vec3.fromValues(0, 1, 0),
   );
 
   // Create Scene Lights
@@ -64,6 +92,7 @@ try {
   scene.lights.push(light2);
 
   // ImGui needs plain arrays that it can modify directly
+  const ambientColorUI = [0.1, 0.1, 0.1];
   const light1ColorUI = [1.0, 0.0, 0.0, 1.0]; // Red
   const light2ColorUI = [0.0, 1.0, 0.0, 1.0]; // Green
 
@@ -97,6 +126,8 @@ try {
   teapotNode1.mesh = teapotMesh;
   teapotNode1.material = material1;
   teapotNode1.setScale(teapotScale);
+  // The teapot model is Z-up. Rotate it -90 degrees around the X-axis to make it Y-up.
+  teapotNode1.rotateX(-Math.PI / 2);
   scene.add(teapotNode1); // Add node to the scene root
 
   // Teapot 2 (Child, Semi-Transparent)
@@ -114,16 +145,51 @@ try {
   teapotNode2.addChild(teapotNode3); // Add as a child of teapot 2
 
   // Animation Loop
+  let lastFrameTime = performance.now();
   const animate = (now: number) => {
-    const time = now / 1000; // time in seconds
+    const deltaTime = (now - lastFrameTime) / 1000; // time in seconds
+    lastFrameTime = now;
 
+    // Update camera based on input
+    cameraController.update(deltaTime);
     beginDebugUIFrame();
+
+    // Calculate world position from mouse
+    let worldPosStr = "N/A (off-canvas)";
+    const mousePos = inputManager.mousePosition;
+    if (mousePos.x >= 0 && mousePos.y >= 0) {
+      const worldPos = getMouseWorldPosition(mousePos, canvas, camera);
+      if (worldPos) {
+        worldPosStr = `(${worldPos[0].toFixed(2)}, ${worldPos[1].toFixed(
+          2,
+        )}, ${worldPos[2].toFixed(2)})`;
+      } else {
+        worldPosStr = "N/A (no intersection)";
+      }
+    }
 
     // Create the UI window and its widgets
     ImGui.Begin("Debug Controls");
     ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
+    ImGui.Separator();
+    ImGui.Text(`Mouse Screen: (${mousePos.x}, ${mousePos.y})`);
+    ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
+    ImGui.Separator();
+    ImGui.Text("Camera Controls: Click canvas to lock pointer.");
+    ImGui.Text("Movement: ZQSD/WASD");
+    ImGui.Text("Space: Up, Left Shift: Down");
     ImGui.Text("Light Controls");
+    ImGui.Separator();
+    ImGui.Text("Key Debug:");
+    const pressedKeys = Array.from(inputManager.keys).join(", ");
+    ImGui.Text(`Pressed Keys: ${pressedKeys || "None"}`);
+    ImGui.Separator();
 
+    if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
+      scene.ambientColor[0] = ambientColorUI[0];
+      scene.ambientColor[1] = ambientColorUI[1];
+      scene.ambientColor[2] = ambientColorUI[2];
+    }
     // Edit the UI arrays (not the light colors directly)
     if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
       // When UI changes, copy values to the actual light
@@ -144,6 +210,7 @@ try {
     ImGui.End();
 
     // Animate the lights in circles around the objects
+    const time = now / 1000; // time in seconds
     const radius = 3.0;
     light1.position[0] = Math.sin(time * 0.7) * radius;
     light1.position[1] = 2.0;
@@ -155,22 +222,8 @@ try {
     light2.position[2] = Math.cos(-time * 0.4) * radius;
     light2.position[3] = 1.0; // Keep w=1 for position
 
-    // Rotate the parent teapot. Its children will inherit the transformation.
-    teapotNode1.rotateZ(0.005);
-
-    // Also make the middle teapot orbit its parent (the bottom one)
-    const orbitRadius = 1.5;
-    const orbitSpeed = 1.0;
-    teapotNode2.setPosition(
-      Math.cos(time * orbitSpeed) * orbitRadius,
-      Math.sin(time * orbitSpeed) * orbitRadius,
-      1, // Keep its height relative to parent
-    );
-
-    // also rotate top teapot
-    teapotNode3.rotateZ(0.008);
-
     renderer.render(camera, scene, renderDebugUI);
+    inputManager.lateUpdate(); // Reset input deltas for the next frame
     requestAnimationFrame(animate);
   };
 

@@ -2,7 +2,7 @@
 import { Renderer } from "./renderer";
 import { Material } from "./materials/material";
 import { Mesh, PhongMaterialOptions } from "./types/gpu";
-import { PhongMaterial } from "./materials/phongMaterial";
+import { createPhongMaterial as createPhongMaterialInstance } from "./materials/phongMaterial";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -92,7 +92,7 @@ export class ResourceManager {
       ? await createTextureFromImage(this.renderer.device, textureUrl)
       : this.dummyTexture;
 
-    const material = new PhongMaterial(
+    const material = createPhongMaterialInstance(
       this.renderer.device,
       options,
       texture,
