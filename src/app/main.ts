@@ -97,19 +97,9 @@ try {
   const light2ColorUI = [0.0, 1.0, 0.0, 1.0]; // Green
 
   // Create Material and Mesh
-  const [material1, material2, material3, teapotMesh] = await Promise.all([
+  const [material1, teapotMesh] = await Promise.all([
     resourceManager.createPhongMaterial({
       baseColor: [1, 1, 1, 1.0], // White
-      specularColor: [0.1, 0.1, 0.1], // White highlights
-      shininess: 50.0,
-    }),
-    resourceManager.createPhongMaterial({
-      baseColor: [1, 1, 1, 2 / 3], // White, semi transparent
-      specularColor: [0.1, 0.1, 0.1], // White highlights
-      shininess: 50.0,
-    }),
-    resourceManager.createPhongMaterial({
-      baseColor: [1, 1, 1, 1 / 3], // White, very transparent
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
@@ -129,20 +119,6 @@ try {
   // The teapot model is Z-up. Rotate it -90 degrees around the X-axis to make it Y-up.
   teapotNode1.rotateX(-Math.PI / 2);
   scene.add(teapotNode1); // Add node to the scene root
-
-  // Teapot 2 (Child, Semi-Transparent)
-  const teapotNode2 = new SceneNode();
-  teapotNode2.mesh = teapotMesh;
-  teapotNode2.material = material2;
-  teapotNode2.setPosition(0, 0, 1); // Position is local to the parent
-  teapotNode1.addChild(teapotNode2); // Add as a child of teapot 1
-
-  // Teapot 3 (Grandchild, Very Transparent)
-  const teapotNode3 = new SceneNode();
-  teapotNode3.mesh = teapotMesh;
-  teapotNode3.material = material3;
-  teapotNode3.setPosition(0, 0, 1); // Position is local to its parent (teapot 2)
-  teapotNode2.addChild(teapotNode3); // Add as a child of teapot 2
 
   // Animation Loop
   let lastFrameTime = performance.now();
