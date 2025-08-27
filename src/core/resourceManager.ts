@@ -9,6 +9,7 @@ import { createGPUBuffer } from "./utils/webgpu";
 import { loadSTL } from "@/loaders/stlLoader";
 import { load } from "@loaders.gl/core";
 import { OBJLoader } from "@loaders.gl/obj";
+import { ShaderPreprocessor } from "./shaders/preprocessor";
 
 /**
  * Manages the creation, loading, and caching of GPU resources.
@@ -27,6 +28,8 @@ export class ResourceManager {
   /** A 1x1 white texture for materials with no textures. */
   private dummyTexture!: GPUTexture;
   private defaultSampler!: GPUSampler;
+  /** The shader preprocessor for handling #includes. */
+  private preprocessor: ShaderPreprocessor;
 
   /**
    * @param renderer The renderer used to access the `GPUDevice`
@@ -34,6 +37,7 @@ export class ResourceManager {
    */
   constructor(renderer: Renderer) {
     this.renderer = renderer;
+    this.preprocessor = new ShaderPreprocessor();
     this.createDefaultResources();
   }
 
@@ -92,8 +96,9 @@ export class ResourceManager {
       ? await createTextureFromImage(this.renderer.device, textureUrl)
       : this.dummyTexture;
 
-    const material = createPhongMaterialInstance(
+    const material = await createPhongMaterialInstance(
       this.renderer.device,
+      this.preprocessor,
       options,
       texture,
       this.defaultSampler,

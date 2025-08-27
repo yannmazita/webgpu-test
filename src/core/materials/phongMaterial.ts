@@ -1,16 +1,28 @@
 // src/core/materials/phongMaterial.ts
 import { Material } from "./material";
 import { PhongMaterialOptions } from "@/core/types/gpu";
-import shaderCode from "@/core/shaders/phong.wgsl";
+import shaderUrl from "@/core/shaders/phong.wgsl?url";
 import { createGPUBuffer } from "../utils/webgpu";
 import { Shader } from "@/core/shaders/shader";
+import { ShaderPreprocessor } from "../shaders/preprocessor";
 
 // A cache for the shader module and bind group layout, so we don't recreate them for every material.
 let phongShader: Shader | null = null;
 let materialBindGroupLayout: GPUBindGroupLayout | null = null;
 
-function initializePhongShaderResources(device: GPUDevice) {
-  phongShader ??= new Shader(device, shaderCode, "PHONG_SHADER");
+const initializePhongShaderResources = async (
+  device: GPUDevice,
+  preprocessor: ShaderPreprocessor,
+): Promise<void> => {
+  if (phongShader) return;
+
+  phongShader = await Shader.fromUrl(
+    device,
+    preprocessor,
+    shaderUrl,
+    "PHONG_SHADER",
+  );
+
   materialBindGroupLayout ??= device.createBindGroupLayout({
     label: "PHONG_MATERIAL_BIND_GROUP_LAYOUT",
     entries: [
@@ -23,13 +35,13 @@ function initializePhongShaderResources(device: GPUDevice) {
       },
     ],
   });
-}
+};
 
-function createUniformBuffer(
+const createUniformBuffer = (
   device: GPUDevice,
   options: PhongMaterialOptions,
   hasTexture: boolean,
-): GPUBuffer {
+): GPUBuffer => {
   const baseColor = options.baseColor ?? [1, 1, 1, 1];
   const specularColor = options.specularColor ?? [1, 1, 1];
   const shininess = options.shininess ?? 32.0;
@@ -46,7 +58,7 @@ function createUniformBuffer(
     GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     "PHONG_MATERIAL_UNIFORM_BUFFER",
   );
-}
+};
 
 /**
  * Creates a new Material instance configured for Phong shading.
@@ -56,13 +68,14 @@ function createUniformBuffer(
  * @param sampler The sampler for the texture.
  * @returns A configured Material instance.
  */
-export function createPhongMaterial(
+export const createPhongMaterial = async (
   device: GPUDevice,
+  preprocessor: ShaderPreprocessor,
   options: PhongMaterialOptions,
   texture: GPUTexture,
   sampler: GPUSampler,
-): Material {
-  initializePhongShaderResources(device);
+): Promise<Material> => {
+  await initializePhongShaderResources(device, preprocessor);
 
   const uniformBuffer = createUniformBuffer(
     device,
@@ -90,4 +103,4 @@ export function createPhongMaterial(
     bindGroup,
     isTransparent,
   );
-}
+};

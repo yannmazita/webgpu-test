@@ -1,5 +1,5 @@
 // src/core/shaders/phong.wgsl
-#include utils;
+#include "utils.wgsl"
 
 /*
  * The shader organizes bindings into groups based on update frequency.
