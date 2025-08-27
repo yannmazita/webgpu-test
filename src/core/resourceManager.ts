@@ -2,7 +2,7 @@
 import { Renderer } from "./renderer";
 import { Material } from "./materials/material";
 import { Mesh, PhongMaterialOptions } from "./types/gpu";
-import { createPhongMaterial as createPhongMaterialInstance } from "./materials/phongMaterial";
+import { PhongMaterial } from "./materials/phongMaterial";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -30,6 +30,8 @@ export class ResourceManager {
   private defaultSampler!: GPUSampler;
   /** The shader preprocessor for handling #includes. */
   private preprocessor: ShaderPreprocessor;
+  /** A flag to ensure PhongMaterial static resources are initialized only once. */
+  private phongMaterialInitialized = false;
 
   /**
    * @param renderer The renderer used to access the `GPUDevice`
@@ -91,14 +93,19 @@ export class ResourceManager {
       return this.materials.get(materialKey)!;
     }
 
+    // Ensure the static resources for PhongMaterial are initialized once.
+    if (!this.phongMaterialInitialized) {
+      await PhongMaterial.initialize(this.renderer.device, this.preprocessor);
+      this.phongMaterialInitialized = true;
+    }
+
     // Determine the texture to use
     const texture = textureUrl
       ? await createTextureFromImage(this.renderer.device, textureUrl)
       : this.dummyTexture;
 
-    const material = await createPhongMaterialInstance(
+    const material = new PhongMaterial(
       this.renderer.device,
-      this.preprocessor,
       options,
       texture,
       this.defaultSampler,

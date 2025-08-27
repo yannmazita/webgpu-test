@@ -6,101 +6,111 @@ import { createGPUBuffer } from "../utils/webgpu";
 import { Shader } from "@/core/shaders/shader";
 import { ShaderPreprocessor } from "../shaders/preprocessor";
 
-// A cache for the shader module and bind group layout, so we don't recreate them for every material.
-let phongShader: Shader | null = null;
-let materialBindGroupLayout: GPUBindGroupLayout | null = null;
+export class PhongMaterial extends Material {
+  // Static resources shared across all PhongMaterial instances
+  private static shader: Shader | null = null;
+  private static layout: GPUBindGroupLayout | null = null;
 
-const initializePhongShaderResources = async (
-  device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
-): Promise<void> => {
-  if (phongShader) return;
+  /**
+   * Initializes the shared shader and layout for all Phong materials.
+   * This must be called once before any PhongMaterial is instantiated.
+   * @param device The GPUDevice.
+   * @param preprocessor The shader preprocessor.
+   */
+  public static async initialize(
+    device: GPUDevice,
+    preprocessor: ShaderPreprocessor,
+  ): Promise<void> {
+    if (this.shader) return;
 
-  phongShader = await Shader.fromUrl(
-    device,
-    preprocessor,
-    shaderUrl,
-    "PHONG_SHADER",
-  );
+    this.shader = await Shader.fromUrl(
+      device,
+      preprocessor,
+      shaderUrl,
+      "PHONG_SHADER",
+    );
 
-  materialBindGroupLayout ??= device.createBindGroupLayout({
-    label: "PHONG_MATERIAL_BIND_GROUP_LAYOUT",
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
-      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
-      {
-        binding: 2,
-        visibility: GPUShaderStage.FRAGMENT,
-        buffer: { type: "uniform" },
-      },
-    ],
-  });
-};
+    this.layout = device.createBindGroupLayout({
+      label: "PHONG_MATERIAL_BIND_GROUP_LAYOUT",
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+  }
 
-const createUniformBuffer = (
-  device: GPUDevice,
-  options: PhongMaterialOptions,
-  hasTexture: boolean,
-): GPUBuffer => {
-  const baseColor = options.baseColor ?? [1, 1, 1, 1];
-  const specularColor = options.specularColor ?? [1, 1, 1];
-  const shininess = options.shininess ?? 32.0;
+  /**
+   * Creates a new Material instance configured for Phong shading.
+   * @param device The GPUDevice.
+   * @param options The material properties.
+   * @param texture The texture to apply.
+   * @param sampler The sampler for the texture.
+   */
+  constructor(
+    device: GPUDevice,
+    options: PhongMaterialOptions,
+    texture: GPUTexture,
+    sampler: GPUSampler,
+  ) {
+    if (!PhongMaterial.shader || !PhongMaterial.layout) {
+      throw new Error(
+        "PhongMaterial not initialized. Call PhongMaterial.initialize() first.",
+      );
+    }
 
-  const uniformData = new Float32Array(12);
-  uniformData.set(baseColor, 0);
-  uniformData.set(specularColor, 4);
-  uniformData[8] = shininess;
-  uniformData[9] = hasTexture ? 1.0 : 0.0;
+    const uniformBuffer = PhongMaterial.createUniformBuffer(
+      device,
+      options,
+      !!options.textureUrl,
+    );
 
-  return createGPUBuffer(
-    device,
-    uniformData,
-    GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    "PHONG_MATERIAL_UNIFORM_BUFFER",
-  );
-};
+    const bindGroup = device.createBindGroup({
+      label: "PHONG_MATERIAL_BIND_GROUP",
+      layout: PhongMaterial.layout,
+      entries: [
+        { binding: 0, resource: texture.createView() },
+        { binding: 1, resource: sampler },
+        { binding: 2, resource: { buffer: uniformBuffer } },
+      ],
+    });
 
-/**
- * Creates a new Material instance configured for Phong shading.
- * @param device The GPUDevice.
- * @param options The material properties.
- * @param texture The texture to apply.
- * @param sampler The sampler for the texture.
- * @returns A configured Material instance.
- */
-export const createPhongMaterial = async (
-  device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
-  options: PhongMaterialOptions,
-  texture: GPUTexture,
-  sampler: GPUSampler,
-): Promise<Material> => {
-  await initializePhongShaderResources(device, preprocessor);
+    const baseColor = options.baseColor ?? [1, 1, 1, 1];
+    const isTransparent = baseColor[3] < 1.0;
 
-  const uniformBuffer = createUniformBuffer(
-    device,
-    options,
-    !!options.textureUrl,
-  );
+    super(
+      device,
+      PhongMaterial.shader,
+      PhongMaterial.layout,
+      bindGroup,
+      isTransparent,
+    );
+  }
 
-  const bindGroup = device.createBindGroup({
-    label: "PHONG_MATERIAL_BIND_GROUP",
-    layout: materialBindGroupLayout!,
-    entries: [
-      { binding: 0, resource: texture.createView() },
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: { buffer: uniformBuffer } },
-    ],
-  });
+  private static createUniformBuffer(
+    device: GPUDevice,
+    options: PhongMaterialOptions,
+    hasTexture: boolean,
+  ): GPUBuffer {
+    const baseColor = options.baseColor ?? [1, 1, 1, 1];
+    const specularColor = options.specularColor ?? [1, 1, 1];
+    const shininess = options.shininess ?? 32.0;
 
-  const baseColor = options.baseColor ?? [1, 1, 1, 1];
-  const isTransparent = baseColor[3] < 1.0;
+    const uniformData = new Float32Array(12);
+    uniformData.set(baseColor, 0);
+    uniformData.set(specularColor, 4);
+    uniformData[8] = shininess;
+    uniformData[9] = hasTexture ? 1.0 : 0.0;
 
-  return new Material(
-    device,
-    phongShader!,
-    materialBindGroupLayout!,
-    bindGroup,
-    isTransparent,
-  );
-};
+    return createGPUBuffer(
+      device,
+      uniformData,
+      GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      "PHONG_MATERIAL_UNIFORM_BUFFER",
+    );
+  }
+}
