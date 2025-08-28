@@ -1,6 +1,6 @@
 // src/core/renderer.ts
 import { Camera } from "@/core/camera";
-import { vec3, Vec4 } from "wgpu-matrix";
+import { Vec3, vec3, Vec4 } from "wgpu-matrix";
 import {
   InstanceData,
   Light,
@@ -9,6 +9,7 @@ import {
   Renderable,
 } from "./types/gpu";
 import { SceneRenderData } from "./types/rendering";
+import { CameraComponent } from "./ecs/components/cameraComponent";
 
 /**
  * The central rendering engine.
@@ -212,7 +213,7 @@ export class Renderer {
    * Handles canvas resizing and resource synchronization.
    * @returns `true` if the frame should be skipped, `false` otherwise.
    */
-  private _handleResize(camera: Camera): boolean {
+  private _handleResize(camera: CameraComponent): boolean {
     const newWidth = this.canvas.clientWidth;
     const newHeight = this.canvas.clientHeight;
 
@@ -249,7 +250,7 @@ export class Renderer {
    * Updates all per-frame uniform and storage buffers.
    */
   private _updateFrameUniforms(
-    camera: Camera,
+    camera: CameraComponent,
     lights: Light[],
     ambientColor: Vec4,
   ): void {
@@ -261,7 +262,8 @@ export class Renderer {
     );
 
     // 2. Update scene data buffer (camera position & ambient color)
-    this.sceneDataArray.set(camera.position, 0);
+    // Camera position is the translation part of its inverse view matrix (world matrix)
+    this.sceneDataArray.set(camera.inverseViewMatrix.slice(12, 15), 0);
     this.sceneDataArray.set(ambientColor, 4);
     this.device.queue.writeBuffer(this.sceneDataBuffer, 0, this.sceneDataArray);
 
@@ -436,7 +438,7 @@ export class Renderer {
   private _renderTransparentPass(
     passEncoder: GPURenderPassEncoder,
     renderables: Renderable[],
-    camera: Camera,
+    camera: CameraComponent,
     instanceBufferOffset: number,
   ): void {
     if (renderables.length === 0) return;
@@ -453,7 +455,7 @@ export class Renderer {
         b.modelMatrix[13],
         b.modelMatrix[14],
       );
-      const cameraPosVec3 = camera.position;
+      const cameraPosVec3 = camera.inverseViewMatrix.slice(12, 15) as Vec3;
       const distA = vec3.distanceSq(posA, cameraPosVec3);
       const distB = vec3.distanceSq(posB, cameraPosVec3);
       return distB - distA;
@@ -560,7 +562,7 @@ export class Renderer {
    *   drawing commands within the main render pass (like for the UI).
    */
   public render(
-    camera: Camera,
+    camera: CameraComponent,
     sceneData: SceneRenderData,
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
   ): void {

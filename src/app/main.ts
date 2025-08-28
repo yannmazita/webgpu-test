@@ -4,7 +4,6 @@ import "@/style.css";
 import { vec3, Vec4, vec4 } from "wgpu-matrix";
 import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
-import { Light } from "@/core/types/gpu";
 import {
   init as initDebugUI,
   beginFrame as beginDebugUIFrame,
@@ -12,7 +11,6 @@ import {
 } from "@/core/debugUI";
 import { ImGui } from "@mori2003/jsimgui";
 import { InputManager } from "@/core/inputManager";
-import { CameraController } from "@/core/cameraController";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
 import { getMouseWorldPosition } from "@/core/utils/raycast";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
@@ -27,6 +25,7 @@ import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSyste
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { LightComponent } from "@/core/ecs/components/lightComponent";
+import { cameraSystem } from "@/core/ecs/systems/cameraSystem";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -71,23 +70,14 @@ try {
   const cameraControllerSystem = new CameraControllerSystem(actionManager);
 
   // Create the main camera entity
-  const camera = new Camera();
-  // Configure camera projection
-  camera.setPerspective(
-    (90 * Math.PI) / 180, // 90 degrees field of view
-    canvas.width / canvas.height,
-    0.1,
-    100.0,
-  );
-
-  // Position the camera to look at the scene
-  camera.lookAt(
-    vec3.fromValues(0, 1, 3),
-    vec3.fromValues(0, 0, 0),
-    vec3.fromValues(0, 1, 0),
-  );
   const cameraEntity = world.createEntity();
-  world.addComponent(cameraEntity, new CameraComponent(camera));
+  const cameraTransform = new TransformComponent();
+  cameraTransform.setPosition(0, 1, 3);
+  world.addComponent(cameraEntity, cameraTransform);
+  world.addComponent(
+    cameraEntity,
+    new CameraComponent(90, canvas.width / canvas.height, 0.1, 100.0),
+  );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
   // Create Scene Lighting Resource & Light Entities
@@ -96,10 +86,12 @@ try {
 
   const light1Entity = world.createEntity();
   const light1Comp = new LightComponent([1, 0, 0, 1]);
+  world.addComponent(light1Entity, new TransformComponent());
   world.addComponent(light1Entity, light1Comp);
 
   const light2Entity = world.createEntity();
   const light2Comp = new LightComponent([0, 1, 0, 1]);
+  world.addComponent(light2Entity, new TransformComponent());
   world.addComponent(light2Entity, light2Comp);
 
   // ImGui state
@@ -145,7 +137,15 @@ try {
     let worldPosStr = "N/A (off-canvas)";
     const mousePos = inputManager.mousePosition;
     if (mousePos.x >= 0 && mousePos.y >= 0) {
-      const worldPos = getMouseWorldPosition(mousePos, canvas, camera);
+      // We need the camera components to do the raycast
+      const camComp = world.getComponent(cameraEntity, CameraComponent)!;
+      const camTrans = world.getComponent(cameraEntity, TransformComponent)!;
+      const worldPos = getMouseWorldPosition(
+        mousePos,
+        canvas,
+        camComp,
+        camTrans,
+      );
       if (worldPos) {
         worldPosStr = `(${worldPos[0].toFixed(2)}, ${worldPos[1].toFixed(
           2,
@@ -188,26 +188,35 @@ try {
     }
     ImGui.End();
 
-    // Animate the lights in circles around the objects
+    // Animate the lights in circles by updating their transforms
     const time = now / 1000; // time in seconds
     const radius = 3.0;
-    vec4.set(
+    const light1Transform = world.getComponent(
+      light1Entity,
+      TransformComponent,
+    )!;
+    light1Transform.setPosition(
       Math.sin(time * 0.7) * radius,
       2.0,
       Math.cos(time * 0.7) * radius,
-      1.0,
-      light1Comp.light.position,
     );
-    vec4.set(
+    const light2Transform = world.getComponent(
+      light2Entity,
+      TransformComponent,
+    )!;
+    light2Transform.setPosition(
       Math.sin(-time * 0.4) * radius,
       2.0,
       Math.cos(-time * 0.4) * radius,
-      1.0,
-      light2Comp.light.position,
     );
 
     // --- CORE LOGIC & RENDER SYSTEMS ---
+    // The order of these systems is critical!
+    // 1. Update local and world matrices for all transforms.
     transformSystem(world);
+    // 2. Update camera view/projection matrices based on its transform.
+    cameraSystem(world);
+    // 3. Collect all data and render the scene.
     renderSystem(world, renderer, renderDebugUI);
 
     // --- FRAME END ---

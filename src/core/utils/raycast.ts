@@ -1,5 +1,6 @@
 // src/core/utils/raycast.ts
-import { Camera } from "@/core/camera";
+import { CameraComponent } from "@/core/ecs/components/cameraComponent";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3, vec4, Vec3 } from "wgpu-matrix";
 
 /**
@@ -8,7 +9,8 @@ import { vec3, vec4, Vec3 } from "wgpu-matrix";
  *
  * @param mouseCoords The (x, y) coordinates of the mouse inside the canvas.
  * @param canvas The HTML canvas element.
- * @param camera The scene camera.
+ * @param cameraComp The scene camera's component.
+ * @param cameraTransform The scene camera's transform.
  * @param planeNormal The normal vector of the virtual plane to intersect with.
  * @param planePoint A point on the virtual plane.
  * @returns The 3D intersection point in world space, or null if no intersection occurs.
@@ -16,7 +18,8 @@ import { vec3, vec4, Vec3 } from "wgpu-matrix";
 export function getMouseWorldPosition(
   mouseCoords: { x: number; y: number },
   canvas: HTMLCanvasElement,
-  camera: Camera,
+  cameraComp: CameraComponent,
+  cameraTransform: TransformComponent,
   planeNormal: Vec3 = vec3.fromValues(0, 1, 0), // Default to XZ plane at Y=0
   planePoint: Vec3 = vec3.fromValues(0, 0, 0),
 ): Vec3 | null {
@@ -30,7 +33,7 @@ export function getMouseWorldPosition(
   const clipCoords = vec4.fromValues(ndc_x, ndc_y, -1.0, 1.0);
   const viewCoords = vec4.transformMat4(
     clipCoords,
-    camera.inverseProjectionMatrix,
+    cameraComp.inverseProjectionMatrix,
   );
 
   // 3. Create a direction vector in View Space
@@ -43,9 +46,10 @@ export function getMouseWorldPosition(
   );
 
   // 4. Unproject direction from View Space to World Space
+  // The camera's world matrix is its transform's world matrix.
   const worldDirectionVec4 = vec4.transformMat4(
     viewDirection,
-    camera.inverseViewMatrix,
+    cameraTransform.worldMatrix,
   );
   const worldDirection = vec3.normalize(
     vec3.fromValues(
@@ -56,8 +60,8 @@ export function getMouseWorldPosition(
   );
 
   // 5. Perform Ray-Plane Intersection
-  //    Ray origin is the camera's position
-  const rayOrigin = camera.position;
+  //    Ray origin is the camera's position from its transform
+  const rayOrigin = cameraTransform.position;
 
   const denominator = vec3.dot(planeNormal, worldDirection);
 

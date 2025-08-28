@@ -32,19 +32,26 @@ export function renderSystem(
     console.warn("RenderSystem: No main camera found. Skipping render.");
     return;
   }
-  const camera = world.getComponent(cameraQuery[0], CameraComponent)!.camera;
+  const cameraComponent = world.getComponent(cameraQuery[0], CameraComponent)!;
 
   // Collect all lights
   const lights: Light[] = [];
-  const lightQuery = world.query([LightComponent]);
+  const lightQuery = world.query([LightComponent, TransformComponent]);
   for (const entity of lightQuery) {
-    lights.push(world.getComponent(entity, LightComponent)!.light);
+    const lightComp = world.getComponent(entity, LightComponent)!;
+    const transform = world.getComponent(entity, TransformComponent)!;
+
+    // Update light position from its transform's world matrix
+    lightComp.light.position[0] = transform.worldMatrix[12];
+    lightComp.light.position[1] = transform.worldMatrix[13];
+    lightComp.light.position[2] = transform.worldMatrix[14];
+
+    lights.push(lightComp.light);
   }
 
   // Get ambient color
   const sceneLighting =
-    world.getComponent(0, SceneLightingComponent) ??
-    new SceneLightingComponent();
+    world.getResource(SceneLightingComponent) ?? new SceneLightingComponent();
 
   // Collect all renderables
   const renderables: Renderable[] = [];
@@ -71,5 +78,5 @@ export function renderSystem(
     ambientColor: sceneLighting.ambientColor,
   };
 
-  renderer.render(camera, sceneData, postSceneDrawCallback);
+  renderer.render(cameraComponent, sceneData, postSceneDrawCallback);
 }
