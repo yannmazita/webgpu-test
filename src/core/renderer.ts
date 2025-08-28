@@ -1,5 +1,4 @@
 // src/core/renderer.ts
-import { Camera } from "@/core/camera";
 import { Vec3, vec3, Vec4 } from "wgpu-matrix";
 import {
   InstanceData,

@@ -2,7 +2,6 @@
 import { Renderer } from "@/core/renderer";
 import "@/style.css";
 import { vec3, Vec4, vec4 } from "wgpu-matrix";
-import { Camera } from "@/core/camera";
 import { ResourceManager } from "@/core/resourceManager";
 import {
   init as initDebugUI,
