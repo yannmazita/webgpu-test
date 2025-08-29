@@ -7,8 +7,7 @@ import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
 import { loadSTL } from "@/loaders/stlLoader";
-import { load } from "@loaders.gl/core";
-import { OBJLoader } from "@loaders.gl/obj";
+import { loadOBJ } from "@/loaders/objLoader";
 import { ShaderPreprocessor } from "./shaders/preprocessor";
 
 /**
@@ -216,20 +215,17 @@ export class ResourceManager {
    * @returns A promise that resolves to the created or cached Mesh.
    */
   public async loadMeshFromOBJ(url: string): Promise<Mesh> {
-    const meshKey = `OBJ:${url}`;
+    const meshKey = `STL:${url}`;
     if (this.meshes.has(meshKey)) {
       return this.meshes.get(meshKey)!;
     }
 
-    const data = await load(url, OBJLoader);
-
+    const objGeometry = await loadOBJ(url);
     const meshData: MeshData = {
-      positions: data.attributes.POSITION.value as Float32Array,
-      normals: data.attributes.NORMAL?.value as Float32Array,
-      texCoords: data.attributes.TEXCOORD_0?.value as Float32Array,
-      indices: (data.indices?.value ?? new Uint32Array()) as
-        | Uint16Array
-        | Uint32Array,
+      positions: objGeometry.vertices,
+      normals: objGeometry.normals,
+      indices: objGeometry.indices,
+      texCoords: objGeometry.uvs,
     };
 
     return this.createMesh(meshKey, meshData);

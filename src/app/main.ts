@@ -106,7 +106,7 @@ try {
       specularColor: [0.1, 0.1, 0.1], // White highlights
       shininess: 50.0,
     }),
-    resourceManager.loadMeshFromSTL("/assets/models/utah_teapot.stl"),
+    resourceManager.loadMeshFromOBJ("/assets/models/teapot.obj"),
   ]);
 
   // Create teapot entity
@@ -114,7 +114,6 @@ try {
   const teapotEntity = world.createEntity();
   const teapotTransform = new TransformComponent();
   teapotTransform.setScale(teapotScale);
-  teapotTransform.rotateX(-Math.PI / 2);
   world.addComponent(teapotEntity, teapotTransform);
   world.addComponent(
     teapotEntity,
