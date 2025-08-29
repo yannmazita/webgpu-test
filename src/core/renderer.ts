@@ -208,10 +208,6 @@ export class Renderer {
     });
   }
 
-  /**
-   * Handles canvas resizing and resource synchronization.
-   * @returns `true` if the frame should be skipped, `false` otherwise.
-   */
   private _handleResize(camera: CameraComponent): boolean {
     const newWidth = this.canvas.clientWidth;
     const newHeight = this.canvas.clientHeight;
@@ -225,15 +221,31 @@ export class Renderer {
       this.canvas.width !== newPhysicalWidth ||
       this.canvas.height !== newPhysicalHeight
     ) {
-      if (newWidth > 0 && newHeight > 0) {
+      if (newPhysicalWidth > 0 && newPhysicalHeight > 0) {
         this.canvas.width = newPhysicalWidth;
         this.canvas.height = newPhysicalHeight;
       }
       return true; // Skip this frame
     }
-    return false;
-  }
 
+    // Stage 2: Synchronize other resources to the current texture size.
+    // This will trigger on the frame after the resize in Stage 1.
+    const currentTexture = this.context.getCurrentTexture();
+    if (
+      this.depthTexture.width !== currentTexture.width ||
+      this.depthTexture.height !== currentTexture.height
+    ) {
+      this.createDepthTexture();
+      const aspectRatio = currentTexture.width / currentTexture.height;
+      camera.setPerspective(
+        camera.fovYRadians,
+        aspectRatio,
+        camera.near,
+        camera.far,
+      );
+    }
+    return false; // Continue with rendering
+  }
   /**
    * Updates all per-frame uniform and storage buffers.
    */
