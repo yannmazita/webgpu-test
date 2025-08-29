@@ -129,6 +129,7 @@ export class ResourceManager {
         this.renderer.device,
         data.positions,
         GPUBufferUsage.VERTEX,
+        `${key}-positions`,
       ),
     );
     layouts.push({
@@ -145,7 +146,12 @@ export class ResourceManager {
       normals = new Float32Array(vertexCount * 3);
     }
     buffers.push(
-      createGPUBuffer(this.renderer.device, normals, GPUBufferUsage.VERTEX),
+      createGPUBuffer(
+        this.renderer.device,
+        normals,
+        GPUBufferUsage.VERTEX,
+        `${key}-normals`,
+      ),
     );
     layouts.push({
       arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT, // vec3<f32>
@@ -160,7 +166,12 @@ export class ResourceManager {
       texCoords = new Float32Array(vertexCount * 2); // Filled with zeros
     }
     buffers.push(
-      createGPUBuffer(this.renderer.device, texCoords, GPUBufferUsage.VERTEX),
+      createGPUBuffer(
+        this.renderer.device,
+        texCoords,
+        GPUBufferUsage.VERTEX,
+        `${key}-uvs`,
+      ),
     );
     layouts.push({
       arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT, // vec2<f32>
@@ -172,6 +183,7 @@ export class ResourceManager {
       this.renderer.device,
       data.indices,
       GPUBufferUsage.INDEX,
+      `${key}-indices`,
     );
 
     const mesh: Mesh = {
@@ -215,7 +227,7 @@ export class ResourceManager {
    * @returns A promise that resolves to the created or cached Mesh.
    */
   public async loadMeshFromOBJ(url: string): Promise<Mesh> {
-    const meshKey = `STL:${url}`;
+    const meshKey = `OBJ:${url}`;
     if (this.meshes.has(meshKey)) {
       return this.meshes.get(meshKey)!;
     }
