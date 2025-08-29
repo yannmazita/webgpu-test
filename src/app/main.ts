@@ -35,8 +35,9 @@ try {
   // Synchronize canvas bitmap size with its display size.
   // This must be done before the Renderer is initialized so that the
   // first depth texture it creates has the correct dimensions.
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
   const renderer = new Renderer(canvas);
   await renderer.init();
 
@@ -129,7 +130,7 @@ try {
     // --- INPUT & LOGIC SYSTEMS ---
     // Update camera based on input
     cameraControllerSystem.update(world, deltaTime);
-    beginDebugUIFrame();
+    beginDebugUIFrame(canvas);
 
     // --- UI & DEBUG ---
     // Calculate world position from mouse

@@ -22,8 +22,18 @@ export async function init(
 /**
  * Starts a new ImGui frame. This should be called once at the beginning
  * of each animation frame, before any ImGui widgets are declared.
+ * @param canvas The canvas element, used to update ImGui's display size.
  */
-export function beginFrame(): void {
+export function beginFrame(canvas: HTMLCanvasElement): void {
+  const io = ImGui.GetIO();
+  // Update display size and pixel ratio for correct scaling
+  io.DisplaySize.x = canvas.clientWidth;
+  io.DisplaySize.y = canvas.clientHeight;
+  // The backend should handle devicePixelRatio automatically, but setting it
+  // explicitly ensures correctness if it doesn't.
+  io.DisplayFramebufferScale.x = window.devicePixelRatio || 1;
+  io.DisplayFramebufferScale.y = window.devicePixelRatio || 1;
+
   ImGuiImplWeb.BeginRender();
 }
 

@@ -215,34 +215,23 @@ export class Renderer {
   private _handleResize(camera: CameraComponent): boolean {
     const newWidth = this.canvas.clientWidth;
     const newHeight = this.canvas.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    const newPhysicalWidth = Math.round(newWidth * dpr);
+    const newPhysicalHeight = Math.round(newHeight * dpr);
 
     // Stage 1: If canvas display size has changed, update the
     // drawing buffer size and skip the rest of the frame.
-    if (this.canvas.width !== newWidth || this.canvas.height !== newHeight) {
+    if (
+      this.canvas.width !== newPhysicalWidth ||
+      this.canvas.height !== newPhysicalHeight
+    ) {
       if (newWidth > 0 && newHeight > 0) {
-        this.canvas.width = newWidth;
-        this.canvas.height = newHeight;
+        this.canvas.width = newPhysicalWidth;
+        this.canvas.height = newPhysicalHeight;
       }
       return true; // Skip this frame
     }
-
-    // Stage 2: Synchronize other resources to the current texture size.
-    // This will trigger on the frame after the resize in Stage 1.
-    const currentTexture = this.context.getCurrentTexture();
-    if (
-      this.depthTexture.width !== currentTexture.width ||
-      this.depthTexture.height !== currentTexture.height
-    ) {
-      this.createDepthTexture();
-      const aspectRatio = currentTexture.width / currentTexture.height;
-      camera.setPerspective(
-        camera.fovYRadians,
-        aspectRatio,
-        camera.near,
-        camera.far,
-      );
-    }
-    return false; // Continue with rendering
+    return false;
   }
 
   /**
@@ -544,11 +533,23 @@ export class Renderer {
       colorAttachments: [
         {
           view: textureView,
-          loadOp: "load",
-          storeOp: "store",
+          loadOp: "load", // Load the contents of the 3D scene
+          storeOp: "store", // Store the results of the UI drawing
         },
       ],
     });
+
+    // Set the viewport for the UI pass to match the canvas dimensions.
+    // This is crucial for correct UI scaling and mouse input.
+    uiPassEncoder.setViewport(
+      0,
+      0,
+      this.canvas.width,
+      this.canvas.height,
+      0,
+      1,
+    );
+
     callback(uiPassEncoder);
     uiPassEncoder.end();
   }
@@ -560,89 +561,111 @@ export class Renderer {
    * @param postSceneDrawCallback An optional callback to execute additional
    *   drawing commands within the main render pass (like for the UI).
    */
+  /**
+   * Renders a given Scene from the perspective of a Camera.
+   * @param camera The camera providing the view and projection matrices.
+   * @param sceneData A container with all the data needed for this frame's render.
+   * @param postSceneDrawCallback An optional callback to execute additional
+   *   drawing commands in a separate pass after the main scene (like for UI).
+   */
   public render(
     camera: CameraComponent,
     sceneData: SceneRenderData,
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
   ): void {
-    // Abort frame if canvas is not ready
-    if (this._handleResize(camera)) {
+    const sceneRenderSkipped = this._handleResize(camera);
+
+    // Guard against a 0-sized canvas, which would cause getCurrentTexture to throw.
+    if (this.canvas.width === 0 || this.canvas.height === 0) {
       return;
     }
 
     const textureView = this.context.getCurrentTexture().createView();
-
-    // Update all per-frame GPU buffers
-    this._updateFrameUniforms(camera, sceneData.lights, sceneData.ambientColor);
-
-    // Prepare scene objects
-    const allRenderables = sceneData.renderables;
-    const opaqueRenderables: Renderable[] = [];
-    const transparentRenderables: Renderable[] = [];
-    for (const renderable of allRenderables) {
-      if (renderable.material.isTransparent) {
-        transparentRenderables.push(renderable);
-      } else {
-        opaqueRenderables.push(renderable);
-      }
-    }
-
-    // Ensure instance buffer is large enough for all objects
-    this._prepareInstanceBuffer(allRenderables.length);
-
-    // Begin encoding commands
     const commandEncoder = this.device.createCommandEncoder({
       label: "MAIN_COMMAND_ENCODER",
     });
 
-    // Main scene render pass
-    const scenePassEncoder = commandEncoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: textureView,
-          clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
-          loadOp: "clear",
-          storeOp: "store",
+    // If the canvas was resized, we skip rendering the scene for this frame.
+    // Instead, we just clear the screen. The UI will be rendered over the cleared background.
+    if (sceneRenderSkipped) {
+      const passEncoder = commandEncoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: textureView,
+            clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+            loadOp: "clear",
+            storeOp: "store",
+          },
+        ],
+      });
+      passEncoder.end();
+    } else {
+      // This is the normal render path for the 3D scene.
+      this._updateFrameUniforms(
+        camera,
+        sceneData.lights,
+        sceneData.ambientColor,
+      );
+
+      const allRenderables = sceneData.renderables;
+      const opaqueRenderables: Renderable[] = [];
+      const transparentRenderables: Renderable[] = [];
+      for (const renderable of allRenderables) {
+        if (renderable.material.isTransparent) {
+          transparentRenderables.push(renderable);
+        } else {
+          opaqueRenderables.push(renderable);
+        }
+      }
+
+      this._prepareInstanceBuffer(allRenderables.length);
+
+      const scenePassEncoder = commandEncoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: textureView,
+            clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+            loadOp: "clear",
+            storeOp: "store",
+          },
+        ],
+        depthStencilAttachment: {
+          view: this.depthTexture.createView(),
+          depthClearValue: 1,
+          depthLoadOp: "clear",
+          depthStoreOp: "store",
+          stencilClearValue: 0,
+          stencilLoadOp: "clear",
+          stencilStoreOp: "store",
         },
-      ],
-      depthStencilAttachment: {
-        view: this.depthTexture.createView(),
-        depthClearValue: 1,
-        depthLoadOp: "clear",
-        depthStoreOp: "store",
-        stencilClearValue: 0,
-        stencilLoadOp: "clear",
-        stencilStoreOp: "store",
-      },
-    });
+      });
 
-    scenePassEncoder.setViewport(
-      0,
-      0,
-      this.canvas.width,
-      this.canvas.height,
-      0,
-      1,
-    );
-    scenePassEncoder.setBindGroup(0, this.frameBindGroup);
+      scenePassEncoder.setViewport(
+        0,
+        0,
+        this.canvas.width,
+        this.canvas.height,
+        0,
+        1,
+      );
+      scenePassEncoder.setBindGroup(0, this.frameBindGroup);
 
-    // Opaque objects pass
-    const opaqueBytesWritten = this._renderOpaquePass(
-      scenePassEncoder,
-      opaqueRenderables,
-    );
+      const opaqueBytesWritten = this._renderOpaquePass(
+        scenePassEncoder,
+        opaqueRenderables,
+      );
 
-    // Transparent objects pass
-    this._renderTransparentPass(
-      scenePassEncoder,
-      transparentRenderables,
-      camera,
-      opaqueBytesWritten,
-    );
+      this._renderTransparentPass(
+        scenePassEncoder,
+        transparentRenderables,
+        camera,
+        opaqueBytesWritten,
+      );
 
-    scenePassEncoder.end();
+      scenePassEncoder.end();
+    }
 
-    // UI render pass
+    // UI render pass is always executed to ensure ImGui's frame is completed.
     if (postSceneDrawCallback) {
       this._renderUIPass(commandEncoder, textureView, postSceneDrawCallback);
     }
