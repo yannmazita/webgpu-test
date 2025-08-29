@@ -35,9 +35,9 @@ try {
   // Synchronize canvas bitmap size with its display size.
   // This must be done before the Renderer is initialized so that the
   // first depth texture it creates has the correct dimensions.
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(canvas.clientWidth * dpr);
-  canvas.height = Math.round(canvas.clientHeight * dpr);
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
   const renderer = new Renderer(canvas);
   await renderer.init();
 
@@ -123,14 +123,31 @@ try {
 
   // Animation Loop
   let lastFrameTime = performance.now();
+  let fps = 0;
+  let fpsAccum = 0;
+  let fpsFrames = 0;
+  const FPS_UPDATE_INTERVAL = 0.25; // seconds (smooths the display)
+  const MAX_PAUSE = 0.5; // clamp crazy dt after tab switches
   const animate = (now: number) => {
-    const deltaTime = (now - lastFrameTime) / 1000; // time in seconds
+    let deltaTime = (now - lastFrameTime) / 1000; // time in seconds
     lastFrameTime = now;
+
+    // clamp giant delta time when tab is backgrounded so it doesn't tank fps display
+    if (deltaTime > MAX_PAUSE) deltaTime = MAX_PAUSE;
 
     // --- INPUT & LOGIC SYSTEMS ---
     // Update camera based on input
     cameraControllerSystem.update(world, deltaTime);
     beginDebugUIFrame(canvas);
+
+    // update smoothed FPS
+    fpsAccum += deltaTime;
+    fpsFrames++;
+    if (fpsAccum >= FPS_UPDATE_INTERVAL) {
+      fps = fpsFrames / fpsAccum;
+      fpsAccum = 0;
+      fpsFrames = 0;
+    }
 
     // --- UI & DEBUG ---
     // Calculate world position from mouse
@@ -156,7 +173,9 @@ try {
     }
 
     ImGui.Begin("Debug Controls");
-    ImGui.Text(`FPS: ${ImGui.GetIO().Framerate.toFixed(2)}`);
+    ImGui.Text(
+      `FPS: ${fps.toFixed(1)}  (${(fps > 0 ? 1000 / fps : 0).toFixed(1)} ms)`,
+    );
     ImGui.Separator();
     ImGui.Text(`Mouse Screen: (${mousePos.x}, ${mousePos.y})`);
     ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
