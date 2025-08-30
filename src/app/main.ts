@@ -25,6 +25,9 @@ import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { LightComponent } from "@/core/ecs/components/lightComponent";
 import { cameraSystem } from "@/core/ecs/systems/cameraSystem";
+import { Profiler } from "@/core/utils/profiler";
+import { createCubeMeshData } from "@/core/utils/primitives";
+import { SceneRenderData } from "@/core/types/rendering";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) {
@@ -45,6 +48,7 @@ try {
 
   const resourceManager = new ResourceManager(renderer);
   const world = new World();
+  const sceneRenderData = new SceneRenderData();
   const inputManager = new InputManager(canvas);
   // Define the abstract actions and their default keyboard mappings
   // using KeyboardEvent.code values for layout independence (WASD on QWERTY is ZQSD on AZERTY)
@@ -99,6 +103,7 @@ try {
   const light1ColorUI = [1.0, 0.0, 0.0, 1.0];
   const light2ColorUI = [0.0, 1.0, 0.0, 1.0];
 
+  /*
   // Create Material and Mesh
   const [material1, teapotMesh] = await Promise.all([
     resourceManager.createPhongMaterial({
@@ -119,6 +124,26 @@ try {
     teapotEntity,
     new MeshRendererComponent(teapotMesh, material1),
   );
+  */
+
+  // Create Material and Mesh
+  const material1 = await resourceManager.createPhongMaterial({
+    baseColor: [1, 0.5, 0.2, 1.0], // Orange
+    specularColor: [1.0, 1.0, 1.0],
+    shininess: 100.0,
+  });
+
+  const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
+
+  // Create cube entity
+  const cubeEntity = world.createEntity();
+  const cubeTransform = new TransformComponent();
+  // cubeTransform.setScale(vec3.fromValues(0.5, 0.5, 0.5)); // Optional scale
+  world.addComponent(cubeEntity, cubeTransform);
+  world.addComponent(
+    cubeEntity,
+    new MeshRendererComponent(cubeMesh, material1), // Use cubeMesh here
+  );
 
   // Animation Loop
   let lastFrameTime = performance.now();
@@ -127,7 +152,12 @@ try {
   let fpsFrames = 0;
   const FPS_UPDATE_INTERVAL = 0.25; // seconds (smooths the display)
   const MAX_PAUSE = 0.5; // clamp crazy dt after tab switches
+  let frameCounter = 0; // For profiler logging
+
   const animate = (now: number) => {
+    frameCounter++;
+    Profiler.begin("Frame");
+
     let deltaTime = (now - lastFrameTime) / 1000; // time in seconds
     lastFrameTime = now;
 
@@ -135,9 +165,19 @@ try {
     if (deltaTime > MAX_PAUSE) deltaTime = MAX_PAUSE;
 
     // --- INPUT & LOGIC SYSTEMS ---
+    Profiler.begin("Input");
     // Update camera based on input
     cameraControllerSystem.update(world, deltaTime);
-    beginDebugUIFrame(canvas);
+    Profiler.end("Input");
+
+    // --- TEMPORARILY DISABLE IMGUI TO TEST PERFORMANCE ---
+    const IMGUI_ENABLED = false;
+
+    if (IMGUI_ENABLED) {
+      Profiler.begin("ImGui.Begin");
+      beginDebugUIFrame(canvas);
+      Profiler.end("ImGui.Begin");
+    }
 
     // update smoothed FPS
     fpsAccum += deltaTime;
@@ -146,67 +186,74 @@ try {
       fps = fpsFrames / fpsAccum;
       fpsAccum = 0;
       fpsFrames = 0;
-    }
-
-    // --- UI & DEBUG ---
-    // Calculate world position from mouse
-    let worldPosStr = "N/A (off-canvas)";
-    const mousePos = inputManager.mousePosition;
-    if (mousePos.x >= 0 && mousePos.y >= 0) {
-      // We need the camera components to do the raycast
-      const camComp = world.getComponent(cameraEntity, CameraComponent)!;
-      const camTrans = world.getComponent(cameraEntity, TransformComponent)!;
-      const worldPos = getMouseWorldPosition(
-        mousePos,
-        canvas,
-        camComp,
-        camTrans,
-      );
-      if (worldPos) {
-        worldPosStr = `(${worldPos[0].toFixed(2)}, ${worldPos[1].toFixed(
-          2,
-        )}, ${worldPos[2].toFixed(2)})`;
-      } else {
-        worldPosStr = "N/A (no intersection)";
+      if (Profiler.isEnabled()) {
+        console.log(`FPS: ${fps.toFixed(1)}`);
       }
     }
 
-    ImGui.Begin("Debug Controls");
-    ImGui.Text(
-      `FPS: ${fps.toFixed(1)}  (${(fps > 0 ? 1000 / fps : 0).toFixed(1)} ms)`,
-    );
-    ImGui.Separator();
-    ImGui.Text(`Mouse Screen: (${mousePos.x}, ${mousePos.y})`);
-    ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
-    ImGui.Separator();
-    ImGui.Text("Camera Controls: Click canvas to lock pointer.");
-    ImGui.Text("Movement: ZQSD/WASD");
-    ImGui.Text("Space: Up, Left Shift: Down");
-    ImGui.Text("Light Controls");
-    ImGui.Separator();
-    ImGui.Text("Key Debug:");
-    const pressedKeys = Array.from(inputManager.keys).join(", ");
-    ImGui.Text(`Pressed Keys: ${pressedKeys || "None"}`);
-    ImGui.Separator();
+    // --- UI & DEBUG (ALL DISABLED) ---
+    if (IMGUI_ENABLED) {
+      Profiler.begin("ImGui.Draw");
+      // Calculate world position from mouse
+      let worldPosStr = "N/A (off-canvas)";
+      const mousePos = inputManager.mousePosition;
+      if (mousePos.x >= 0 && mousePos.y >= 0) {
+        const camComp = world.getComponent(cameraEntity, CameraComponent)!;
+        const camTrans = world.getComponent(cameraEntity, TransformComponent)!;
+        const worldPos = getMouseWorldPosition(
+          mousePos,
+          canvas,
+          camComp,
+          camTrans,
+        );
+        if (worldPos) {
+          worldPosStr = `(${worldPos[0].toFixed(2)}, ${worldPos[1].toFixed(
+            2,
+          )}, ${worldPos[2].toFixed(2)})`;
+        } else {
+          worldPosStr = "N/A (no intersection)";
+        }
+      }
 
-    if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
-      vec4.set(
-        ambientColorUI[0],
-        ambientColorUI[1],
-        ambientColorUI[2],
-        1.0,
-        sceneLighting.ambientColor,
+      ImGui.Begin("Debug Controls");
+      ImGui.Text(
+        `FPS: ${fps.toFixed(1)}  (${(fps > 0 ? 1000 / fps : 0).toFixed(1)} ms)`,
       );
+      ImGui.Separator();
+      ImGui.Text(`Mouse Screen: (${mousePos.x}, ${mousePos.y})`);
+      ImGui.Text(`Mouse World (on Y=0 plane): ${worldPosStr}`);
+      ImGui.Separator();
+      ImGui.Text("Camera Controls: Click canvas to lock pointer.");
+      ImGui.Text("Movement: ZQSD/WASD");
+      ImGui.Text("Space: Up, Left Shift: Down");
+      ImGui.Text("Light Controls");
+      ImGui.Separator();
+      ImGui.Text("Key Debug:");
+      const pressedKeys = Array.from(inputManager.keys).join(", ");
+      ImGui.Text(`Pressed Keys: ${pressedKeys || "None"}`);
+      ImGui.Separator();
+
+      if (ImGui.ColorEdit3("Ambient Color", ambientColorUI)) {
+        vec4.set(
+          ambientColorUI[0],
+          ambientColorUI[1],
+          ambientColorUI[2],
+          1.0,
+          sceneLighting.ambientColor,
+        );
+      }
+      if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
+        vec4.copy(light1ColorUI as Vec4, light1Comp.light.color);
+      }
+      if (ImGui.ColorEdit4("Light 2 Color", light2ColorUI)) {
+        vec4.copy(light2ColorUI as Vec4, light2Comp.light.color);
+      }
+      ImGui.End();
+      Profiler.end("ImGui.Draw");
     }
-    if (ImGui.ColorEdit4("Light 1 Color", light1ColorUI)) {
-      vec4.copy(light1ColorUI as Vec4, light1Comp.light.color);
-    }
-    if (ImGui.ColorEdit4("Light 2 Color", light2ColorUI)) {
-      vec4.copy(light2ColorUI as Vec4, light2Comp.light.color);
-    }
-    ImGui.End();
 
     // Animate the lights in circles by updating their transforms
+    Profiler.begin("LightAnimation");
     const time = now / 1000; // time in seconds
     const radius = 3.0;
     const light1Transform = world.getComponent(
@@ -227,18 +274,38 @@ try {
       2.0,
       Math.cos(-time * 0.4) * radius,
     );
+    Profiler.end("LightAnimation");
 
     // --- CORE LOGIC & RENDER SYSTEMS ---
-    // The order of these systems is critical!
-    // 1. Update local and world matrices for all transforms.
+    Profiler.begin("TransformSystem");
     transformSystem(world);
-    // 2. Update camera view/projection matrices based on its transform.
+    Profiler.end("TransformSystem");
+
+    Profiler.begin("CameraSystem");
     cameraSystem(world);
-    // 3. Collect all data and render the scene.
-    renderSystem(world, renderer, renderDebugUI);
+    Profiler.end("CameraSystem");
+
+    Profiler.begin("RenderSystem");
+    renderSystem(
+      world,
+      renderer,
+      sceneRenderData,
+      IMGUI_ENABLED ? renderDebugUI : undefined,
+    );
+    Profiler.end("RenderSystem");
 
     // --- FRAME END ---
+    Profiler.begin("InputLateUpdate");
     inputManager.lateUpdate(); // Reset input deltas for the next frame
+    Profiler.end("InputLateUpdate");
+
+    Profiler.end("Frame");
+
+    // Log profiling report every 60 frames (roughly 1 second)
+    if (frameCounter % 60 === 0) {
+      Profiler.logReport();
+    }
+
     requestAnimationFrame(animate);
   };
 

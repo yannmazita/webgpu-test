@@ -3,6 +3,8 @@ import { getLayoutKey } from "@/core/utils/layout";
 import { Shader } from "@/core/shaders/shader";
 
 export class Material {
+  private static nextId = 0;
+  public readonly id: number;
   /** A cache for pipelines, keyed by mesh layouts. */
   protected pipelineCache = new Map<string, GPURenderPipeline>();
   /** The bind group containing resources specific to this material (textures, uniforms). */
@@ -21,6 +23,7 @@ export class Material {
     bindGroup: GPUBindGroup,
     isTransparent = false,
   ) {
+    this.id = Material.nextId++;
     this.device = device;
     this.shader = shader;
     this.materialBindGroupLayout = layout;

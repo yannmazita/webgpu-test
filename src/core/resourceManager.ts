@@ -18,6 +18,7 @@ import { ShaderPreprocessor } from "./shaders/preprocessor";
  * and texture loading, improving performance and simplifying resource access.
  */
 export class ResourceManager {
+  private static nextMeshId = 0;
   /** A reference to the main renderer instance. */
   private renderer: Renderer;
   /** A cache for Material objects keyed by their properties. */
@@ -194,6 +195,9 @@ export class ResourceManager {
       indexCount: data.indices.length,
       indexFormat: data.indices instanceof Uint16Array ? "uint16" : "uint32",
     };
+
+    // unique ID for caching
+    (mesh as any).id = ResourceManager.nextMeshId++;
 
     this.meshes.set(key, mesh);
     return mesh;
