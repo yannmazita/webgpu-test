@@ -36,7 +36,7 @@ export class Renderer {
   public depthFormat!: GPUTextureFormat;
 
   // Internal state management
-  private canvas: HTMLCanvasElement;
+  private canvas: HTMLCanvasElement | OffscreenCanvas;
   private context!: GPUCanvasContext;
   private adapter!: GPUAdapter;
   private instanceBuffer!: GPUBuffer;
@@ -102,23 +102,38 @@ export class Renderer {
       { shaderLocation: 10, offset: 92, format: "float32x3" },
     ],
   };
+  public static RENDER_SCALE = 1.0;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     this.canvas = canvas;
   }
 
   public async init(): Promise<void> {
     await this.setupDevice();
     this.setupContext();
-    this.currentDPR = window.devicePixelRatio || 1;
-    this._setupResizeObserver();
-    // Initialize CSS size cache and mark pending
-    const rect = this.canvas.getBoundingClientRect();
-    this.cssWidth = Math.max(0, Math.floor(rect.width));
-    this.cssHeight = Math.max(0, Math.floor(rect.height));
-    this.resizePending = true;
 
-    this.depthFormat = "depth24plus-stencil8";
+    // Determine environment (DOM canvas vs OffscreenCanvas)
+    const isHTMLCanvas =
+      typeof (this.canvas as any).getBoundingClientRect === "function";
+
+    if (isHTMLCanvas) {
+      // Main thread: safe to access window and observe DOM canvas
+      this.currentDPR =
+        typeof window !== "undefined" && (window as any)
+          ? window.devicePixelRatio || 1
+          : 1;
+      this._setupResizeObserver();
+      const rect = (this.canvas as HTMLCanvasElement).getBoundingClientRect();
+      this.cssWidth = Math.max(0, Math.floor(rect.width));
+      this.cssHeight = Math.max(0, Math.floor(rect.height));
+      this.resizePending = true;
+    } else {
+      // Worker with OffscreenCanvas: main thread will send RESIZE messages
+      this.currentDPR = 1;
+      this.resizePending = false;
+    }
+
+    this.depthFormat = "depth24plus";
     this.createDepthTexture();
 
     this.cameraUniformBuffer = this.device.createBuffer({
@@ -185,7 +200,7 @@ export class Renderer {
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
-          if (entry.target === this.canvas) {
+          if (entry.target === (this.canvas as any)) {
             const cr = entry.contentRect;
             this.cssWidth = Math.max(0, Math.floor(cr.width));
             this.cssHeight = Math.max(0, Math.floor(cr.height));
@@ -193,30 +208,84 @@ export class Renderer {
           }
         }
       });
-      this.resizeObserver.observe(this.canvas);
+      // Only observe if DOM canvas
+      if (typeof (this.canvas as any).getBoundingClientRect === "function") {
+        this.resizeObserver.observe(this.canvas as HTMLCanvasElement);
+      }
     }
-    // Fallback/also catch DPR changes and window resizes
-    window.addEventListener("resize", () => {
-      this.currentDPR = window.devicePixelRatio || 1;
-      // Re-read CSS size quickly without forcing sync layout; contentRect will arrive too
-      const rect = this.canvas.getBoundingClientRect();
-      this.cssWidth = Math.max(0, Math.floor(rect.width));
-      this.cssHeight = Math.max(0, Math.floor(rect.height));
-      this.resizePending = true;
-    });
+    // Only attach window listener in main thread
+    if (typeof window !== "undefined" && window && window.addEventListener) {
+      window.addEventListener("resize", () => {
+        this.currentDPR = window.devicePixelRatio || 1;
+        const rect =
+          typeof (this.canvas as any).getBoundingClientRect === "function"
+            ? (this.canvas as HTMLCanvasElement).getBoundingClientRect()
+            : { width: this.cssWidth, height: this.cssHeight };
+        this.cssWidth = Math.max(0, Math.floor(rect.width));
+        this.cssHeight = Math.max(0, Math.floor(rect.height));
+        this.resizePending = true;
+      });
+    }
+  }
+
+  /**
+   * External resize hook for worker-driven sizing. Computes physical size,
+   * updates canvas, depth texture, and camera aspect immediately.
+   */
+  public requestResize(
+    cssWidth: number,
+    cssHeight: number,
+    devicePixelRatio: number,
+    camera: CameraComponent,
+  ): void {
+    // Apply render scale to DPR
+    this.currentDPR = (devicePixelRatio || 1) * Renderer.RENDER_SCALE;
+    this.cssWidth = Math.max(0, Math.floor(cssWidth));
+    this.cssHeight = Math.max(0, Math.floor(cssHeight));
+    const physW = Math.max(1, Math.round(this.cssWidth * this.currentDPR));
+    const physH = Math.max(1, Math.round(this.cssHeight * this.currentDPR));
+    if (
+      (this.canvas as any).width !== physW ||
+      (this.canvas as any).height !== physH
+    ) {
+      (this.canvas as any).width = physW;
+      (this.canvas as any).height = physH;
+      this.createDepthTexture();
+      camera.setPerspective(
+        camera.fovYRadians,
+        physW / physH,
+        camera.near,
+        camera.far,
+      );
+    }
+    this.resizePending = false;
   }
 
   private async setupDevice(): Promise<void> {
     if (!navigator.gpu)
       throw new Error("WebGPU is not supported by this browser.");
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter({
+      powerPreference: "high-performance",
+    });
+
     if (!adapter) throw new Error("Failed to get GPU adapter.");
     this.adapter = adapter;
     this.device = await this.adapter.requestDevice();
+
+    // Diagnostics: detect software fallback
+    // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
+    const anyAdapter = this.adapter as any;
+    if (typeof anyAdapter.isFallbackAdapter === "boolean") {
+      console.warn("WebGPU Adapter fallback:", anyAdapter.isFallbackAdapter);
+    } else {
+      console.warn("WebGPU Adapter fallback: unknown (property not available)");
+    }
   }
 
   private setupContext(): void {
-    this.context = this.canvas.getContext("webgpu") as GPUCanvasContext;
+    // OffscreenCanvas also supports 'webgpu' context in workers; use a safe cast.
+    const canvasAny = this.canvas as any;
+    this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
     this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
     this.context.configure({
       device: this.device,
@@ -339,31 +408,27 @@ export class Renderer {
     renderable: Renderable,
     camera: CameraComponent,
   ): boolean {
-    // Quick sphere test - avoid vec3 allocations
     const mx = renderable.modelMatrix[12];
     const my = renderable.modelMatrix[13];
     const mz = renderable.modelMatrix[14];
 
     // Approximate radius from scale
-    const radius =
-      Math.max(
-        renderable.modelMatrix[0],
-        renderable.modelMatrix[5],
-        renderable.modelMatrix[10],
-      ) * 2.0;
+    const sx = renderable.modelMatrix[0];
+    const sy = renderable.modelMatrix[5];
+    const sz = renderable.modelMatrix[10];
+    const radius = Math.max(sx, sy, sz) * 2.0;
 
-    // Camera position from matrix (avoid slice)
     const cx = camera.inverseViewMatrix[12];
     const cy = camera.inverseViewMatrix[13];
     const cz = camera.inverseViewMatrix[14];
 
-    // Inline distance calculation (avoid vec3.distance)
     const dx = mx - cx;
     const dy = my - cy;
     const dz = mz - cz;
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const distSq = dx * dx + dy * dy + dz * dz;
 
-    return distance - radius < camera.far;
+    const farPlusR = camera.far + radius;
+    return distSq < farPlusR * farPlusR;
   }
 
   private _renderOpaquePass(
@@ -420,50 +485,46 @@ export class Renderer {
     passEncoder: GPURenderPassEncoder,
     renderables: Renderable[],
     camera: CameraComponent,
-    instanceBufferOffset: number,
+    instanceBufferOffset: number, // bytes
   ): void {
     if (renderables.length === 0) return;
 
-    // Get camera position once, without allocating a new vector
+    // Camera position
     this.tempCameraPos[0] = camera.inverseViewMatrix[12];
     this.tempCameraPos[1] = camera.inverseViewMatrix[13];
     this.tempCameraPos[2] = camera.inverseViewMatrix[14];
 
-    // Sort back-to-front without allocating memory in the sort function
+    // Sort back-to-front
     renderables.sort((a, b) => {
-      // Extract positions into pre-allocated vectors
-      vec3.set(
-        a.modelMatrix[12],
-        a.modelMatrix[13],
-        a.modelMatrix[14],
-        this.tempVec3A,
-      );
-      vec3.set(
-        b.modelMatrix[12],
-        b.modelMatrix[13],
-        b.modelMatrix[14],
-        this.tempVec3B,
-      );
-
-      const distSqA = vec3.distanceSq(this.tempVec3A, this.tempCameraPos);
-      const distSqB = vec3.distanceSq(this.tempVec3B, this.tempCameraPos);
-
-      return distSqB - distSqA;
+      this.tempVec3A[0] = a.modelMatrix[12];
+      this.tempVec3A[1] = a.modelMatrix[13];
+      this.tempVec3A[2] = a.modelMatrix[14];
+      this.tempVec3B[0] = b.modelMatrix[12];
+      this.tempVec3B[1] = b.modelMatrix[13];
+      this.tempVec3B[2] = b.modelMatrix[14];
+      const da = vec3.distanceSq(this.tempVec3A, this.tempCameraPos);
+      const db = vec3.distanceSq(this.tempVec3B, this.tempCameraPos);
+      return db - da;
     });
 
-    const instanceData = new Float32Array(
-      renderables.length * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
+    const instanceDataView = new Float32Array(
+      this.frameInstanceData.buffer,
+      instanceBufferOffset,
+      renderables.length * floatsPerInstance,
     );
+
     for (let i = 0; i < renderables.length; i++) {
       const { modelMatrix, isUniformlyScaled } = renderables[i];
-      const offsetInFloats = i * Renderer.INSTANCE_STRIDE_IN_FLOATS;
-      instanceData.set(modelMatrix, offsetInFloats);
-      instanceData[offsetInFloats + 16] = isUniformlyScaled ? 1.0 : 0.0;
+      const off = i * floatsPerInstance;
+      instanceDataView.set(modelMatrix, off);
+      instanceDataView[off + 16] = isUniformlyScaled ? 1.0 : 0.0;
     }
+
     this.device.queue.writeBuffer(
       this.instanceBuffer,
       instanceBufferOffset,
-      instanceData,
+      instanceDataView,
     );
 
     let i = 0;
@@ -485,7 +546,7 @@ export class Renderer {
         mesh.buffers.length,
         this.instanceBuffer,
         instanceBufferOffset,
-        instanceData.byteLength,
+        instanceDataView.byteLength,
       );
       if (mesh.indexBuffer)
         passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);

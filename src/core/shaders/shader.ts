@@ -26,7 +26,12 @@ export class Shader {
     vertexEntryPoint = "vs_main",
     fragmentEntryPoint = "fs_main",
   ): Promise<Shader> {
-    const absoluteUrl = new URL(url, window.location.href).href;
+    // Use module URL when available; fallback to globalThis.location if present
+    const baseUrl =
+      (typeof import.meta !== "undefined" && (import.meta as any).url) ||
+      ((globalThis as any).location?.href ?? undefined);
+    const absoluteUrl = baseUrl ? new URL(url, baseUrl).href : url;
+
     const processedCode = await preprocessor.process(absoluteUrl);
     return new Shader(
       device,
