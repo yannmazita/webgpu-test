@@ -111,7 +111,7 @@ async function initWorker(
   const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
   const cubeEntity = world.createEntity();
   const cubeXform = new TransformComponent();
-  cubeXform.setScale(1.0, 2.0, 0.5); // non-uniform scaling test
+  //cubeXform.setScale(1.0, 2.0, 0.5); // non-uniform scaling test
   world.addComponent(cubeEntity, cubeXform);
   world.addComponent(
     cubeEntity,
