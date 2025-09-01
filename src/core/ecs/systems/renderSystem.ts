@@ -1,6 +1,5 @@
 // src/core/ecs/systems/renderSystem.ts
 import { Renderer } from "@/core/renderer";
-import { Light, Renderable } from "@/core/types/gpu";
 import { SceneRenderData } from "@/core/types/rendering";
 import { vec4, Vec4 } from "wgpu-matrix";
 import { CameraComponent } from "../components/cameraComponent";
@@ -71,8 +70,8 @@ export function renderSystem(
       mesh: meshRenderer.mesh,
       material: meshRenderer.material,
       modelMatrix: transform.worldMatrix,
-      // Pass the pre-computed normal matrix and isUniformlyScaled flag
       isUniformlyScaled: transform.isUniformlyScaled,
+      normalMatrix: transform.normalMatrix,
     });
   }
 

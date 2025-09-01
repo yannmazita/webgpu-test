@@ -85,21 +85,22 @@ export class Renderer {
   // Constants
   private static readonly MATRIX_BYTE_SIZE =
     4 * 4 * Float32Array.BYTES_PER_ELEMENT;
-  private static readonly INSTANCE_STRIDE_IN_FLOATS = 20;
+  private static readonly INSTANCE_STRIDE_IN_FLOATS = 26; // mat4(16) + flag(1) + mat3(9)
   private static readonly INSTANCE_BYTE_STRIDE =
     Renderer.INSTANCE_STRIDE_IN_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
-    arrayStride: 116,
+    arrayStride: 104, // 26 floats * 4 bytes
     stepMode: "instance",
     attributes: [
       { shaderLocation: 3, offset: 0, format: "float32x4" },
       { shaderLocation: 4, offset: 16, format: "float32x4" },
       { shaderLocation: 5, offset: 32, format: "float32x4" },
       { shaderLocation: 6, offset: 48, format: "float32x4" },
-      { shaderLocation: 7, offset: 64, format: "float32" },
-      { shaderLocation: 8, offset: 68, format: "float32x3" },
-      { shaderLocation: 9, offset: 80, format: "float32x3" },
-      { shaderLocation: 10, offset: 92, format: "float32x3" },
+      { shaderLocation: 7, offset: 64, format: "float32" }, // is_uniformly_scaled
+      { shaderLocation: 8, offset: 68, format: "float32x3" }, // normal_mat_col_0
+      { shaderLocation: 9, offset: 80, format: "float32x3" }, // normal_mat_col_1
+      { shaderLocation: 10, offset: 92, format: "float32x3" }, // normal_mat_col_2
     ],
   };
   public static RENDER_SCALE = 1.0;
@@ -437,9 +438,6 @@ export class Renderer {
   ): void {
     if (batches.length === 0) return;
 
-    const instanceBufferSlot = 3;
-    passEncoder.setVertexBuffer(instanceBufferSlot, this.instanceBuffer);
-
     let lastMaterial: Material | null = null;
     let lastMesh: Mesh | null = null;
 
@@ -453,6 +451,11 @@ export class Renderer {
         for (let i = 0; i < batch.mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, batch.mesh.buffers[i]);
         }
+        // Bind instance buffer at the slot immediately after mesh buffers
+        passEncoder.setVertexBuffer(
+          batch.mesh.buffers.length,
+          this.instanceBuffer,
+        );
         if (batch.mesh.indexBuffer) {
           passEncoder.setIndexBuffer(
             batch.mesh.indexBuffer,
@@ -489,12 +492,12 @@ export class Renderer {
   ): void {
     if (renderables.length === 0) return;
 
-    // Camera position
+    // Camera position (from inverse view)
     this.tempCameraPos[0] = camera.inverseViewMatrix[12];
     this.tempCameraPos[1] = camera.inverseViewMatrix[13];
     this.tempCameraPos[2] = camera.inverseViewMatrix[14];
 
-    // Sort back-to-front
+    // Sort back-to-front (greater distance first)
     renderables.sort((a, b) => {
       this.tempVec3A[0] = a.modelMatrix[12];
       this.tempVec3A[1] = a.modelMatrix[13];
@@ -507,26 +510,62 @@ export class Renderer {
       return db - da;
     });
 
-    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS; // 26
     const instanceDataView = new Float32Array(
       this.frameInstanceData.buffer,
       instanceBufferOffset,
       renderables.length * floatsPerInstance,
     );
 
+    // Pack instance data: mat4 (16), flag (1), normal mat3 columns (9)
     for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const { modelMatrix, isUniformlyScaled, normalMatrix } = renderables[i];
       const off = i * floatsPerInstance;
+
+      // Model matrix
       instanceDataView.set(modelMatrix, off);
+
+      // is_uniformly_scaled flag
       instanceDataView[off + 16] = isUniformlyScaled ? 1.0 : 0.0;
+
+      // Normal matrix columns (3x vec3)
+      if (isUniformlyScaled) {
+        // Derive from model matrix upper 3x3 (column-major)
+        instanceDataView[off + 17] = modelMatrix[0];
+        instanceDataView[off + 18] = modelMatrix[1];
+        instanceDataView[off + 19] = modelMatrix[2];
+
+        instanceDataView[off + 20] = modelMatrix[4];
+        instanceDataView[off + 21] = modelMatrix[5];
+        instanceDataView[off + 22] = modelMatrix[6];
+
+        instanceDataView[off + 23] = modelMatrix[8];
+        instanceDataView[off + 24] = modelMatrix[9];
+        instanceDataView[off + 25] = modelMatrix[10];
+      } else {
+        // Use precomputed normal matrix (column-major)
+        instanceDataView[off + 17] = normalMatrix[0];
+        instanceDataView[off + 18] = normalMatrix[1];
+        instanceDataView[off + 19] = normalMatrix[2];
+
+        instanceDataView[off + 20] = normalMatrix[3];
+        instanceDataView[off + 21] = normalMatrix[4];
+        instanceDataView[off + 22] = normalMatrix[5];
+
+        instanceDataView[off + 23] = normalMatrix[6];
+        instanceDataView[off + 24] = normalMatrix[7];
+        instanceDataView[off + 25] = normalMatrix[8];
+      }
     }
 
+    // Upload instance data for transparent objects at the given GPU offset
     this.device.queue.writeBuffer(
       this.instanceBuffer,
       instanceBufferOffset,
       instanceDataView,
     );
 
+    // Draw, batching consecutive renderables with same mesh and material
     let i = 0;
     while (i < renderables.length) {
       const { mesh, material } = renderables[i];
@@ -537,20 +576,28 @@ export class Renderer {
         this.canvasFormat,
         this.depthFormat,
       );
+
       passEncoder.setPipeline(pipeline);
       passEncoder.setBindGroup(1, material.bindGroup);
+
+      // Bind mesh vertex buffers
       for (let j = 0; j < mesh.buffers.length; j++) {
         passEncoder.setVertexBuffer(j, mesh.buffers[j]);
       }
+
+      // Bind instance buffer immediately after mesh buffers
       passEncoder.setVertexBuffer(
         mesh.buffers.length,
         this.instanceBuffer,
         instanceBufferOffset,
         instanceDataView.byteLength,
       );
-      if (mesh.indexBuffer)
-        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
 
+      if (mesh.indexBuffer) {
+        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+      }
+
+      // Count consecutive instances with same mesh and material
       let count = 1;
       while (
         i + count < renderables.length &&
@@ -559,11 +606,13 @@ export class Renderer {
       ) {
         count++;
       }
+
       if (mesh.indexBuffer) {
         passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, i);
       } else {
         passEncoder.draw(mesh.vertexCount, count, 0, i);
       }
+
       i += count;
     }
   }
@@ -663,10 +712,48 @@ export class Renderer {
         // Write instance data to the CPU-side buffer
         for (const instance of instances) {
           const offset = totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+
+          // modelMatrix (16 floats)
           this.frameInstanceData.set(instance.modelMatrix, offset);
+
+          // is_uniformly_scaled flag (1 float)
           this.frameInstanceData[offset + 16] = instance.isUniformlyScaled
             ? 1.0
             : 0.0;
+
+          // normal matrix columns (3x vec3 = 9 floats) at offsets 17..25
+          if (instance.isUniformlyScaled) {
+            // Fast path: derive from upper 3x3 of model matrix
+            const m = instance.modelMatrix;
+            // col 0 -> indices 0,1,2
+            this.frameInstanceData[offset + 17] = m[0];
+            this.frameInstanceData[offset + 18] = m[1];
+            this.frameInstanceData[offset + 19] = m[2];
+            // col 1 -> indices 4,5,6
+            this.frameInstanceData[offset + 20] = m[4];
+            this.frameInstanceData[offset + 21] = m[5];
+            this.frameInstanceData[offset + 22] = m[6];
+            // col 2 -> indices 8,9,10
+            this.frameInstanceData[offset + 23] = m[8];
+            this.frameInstanceData[offset + 24] = m[9];
+            this.frameInstanceData[offset + 25] = m[10];
+          } else {
+            // Use precomputed normal matrix
+            const n = instance.normalMatrix;
+            // col 0
+            this.frameInstanceData[offset + 17] = n[0];
+            this.frameInstanceData[offset + 18] = n[1];
+            this.frameInstanceData[offset + 19] = n[2];
+            // col 1
+            this.frameInstanceData[offset + 20] = n[3];
+            this.frameInstanceData[offset + 21] = n[4];
+            this.frameInstanceData[offset + 22] = n[5];
+            // col 2
+            this.frameInstanceData[offset + 23] = n[6];
+            this.frameInstanceData[offset + 24] = n[7];
+            this.frameInstanceData[offset + 25] = n[8];
+          }
+
           totalInstances++;
         }
       }

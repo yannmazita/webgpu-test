@@ -78,7 +78,8 @@ export class BatchManager {
     this.opaqueBatches.clear();
 
     for (const renderable of renderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
+        renderable;
       const pipeline = getPipeline(material, mesh);
 
       if (!this.opaqueBatches.has(pipeline)) {
@@ -96,6 +97,7 @@ export class BatchManager {
       pipelineBatch.meshMap.get(mesh)!.push({
         modelMatrix,
         isUniformlyScaled,
+        normalMatrix,
       });
     }
 
@@ -119,7 +121,8 @@ export class BatchManager {
 
     // Repopulate with current frame data
     for (const renderable of renderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
+        renderable;
 
       // Find the matching batch
       for (const batch of batches.values()) {
@@ -127,6 +130,7 @@ export class BatchManager {
           batch.meshMap.get(mesh)!.push({
             modelMatrix,
             isUniformlyScaled,
+            normalMatrix,
           });
           break;
         }
