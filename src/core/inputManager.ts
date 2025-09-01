@@ -79,9 +79,11 @@ export class InputManager {
     if (this.isPointerLocked) {
       this.mouseDelta.x += e.movementX;
       this.mouseDelta.y += e.movementY;
+      // Skip absolute position to avoid layout work during pointer lock
+      return;
     }
 
-    // Update absolute position regardless of lock state
+    // Update absolute position only when not pointer-locked
     const rect = this.canvas.getBoundingClientRect();
     this.mousePosition.x = e.clientX - rect.left;
     this.mousePosition.y = e.clientY - rect.top;

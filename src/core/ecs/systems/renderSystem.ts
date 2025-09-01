@@ -24,6 +24,7 @@ export class SceneLightingComponent {
 export function renderSystem(
   world: World,
   renderer: Renderer,
+  sceneData: SceneRenderData,
   postSceneDrawCallback?: (passEncoder: GPURenderPassEncoder) => void,
 ): void {
   // Find the main camera
@@ -34,8 +35,10 @@ export function renderSystem(
   }
   const cameraComponent = world.getComponent(cameraQuery[0], CameraComponent)!;
 
+  // Clear the reusable data container for the new frame's data
+  sceneData.clear();
+
   // Collect all lights
-  const lights: Light[] = [];
   const lightQuery = world.query([LightComponent, TransformComponent]);
   for (const entity of lightQuery) {
     const lightComp = world.getComponent(entity, LightComponent)!;
@@ -46,15 +49,15 @@ export function renderSystem(
     lightComp.light.position[1] = transform.worldMatrix[13];
     lightComp.light.position[2] = transform.worldMatrix[14];
 
-    lights.push(lightComp.light);
+    sceneData.lights.push(lightComp.light);
   }
 
   // Get ambient color
   const sceneLighting =
     world.getResource(SceneLightingComponent) ?? new SceneLightingComponent();
+  vec4.copy(sceneLighting.ambientColor, sceneData.ambientColor);
 
   // Collect all renderables
-  const renderables: Renderable[] = [];
   const renderableQuery = world.query([
     TransformComponent,
     MeshRendererComponent,
@@ -64,19 +67,14 @@ export function renderSystem(
     const transform = world.getComponent(entity, TransformComponent)!;
     const meshRenderer = world.getComponent(entity, MeshRendererComponent)!;
 
-    renderables.push({
+    sceneData.renderables.push({
       mesh: meshRenderer.mesh,
       material: meshRenderer.material,
       modelMatrix: transform.worldMatrix,
+      // Pass the pre-computed normal matrix and isUniformlyScaled flag
       isUniformlyScaled: transform.isUniformlyScaled,
     });
   }
-
-  const sceneData: SceneRenderData = {
-    renderables,
-    lights,
-    ambientColor: sceneLighting.ambientColor,
-  };
 
   renderer.render(cameraComponent, sceneData, postSceneDrawCallback);
 }

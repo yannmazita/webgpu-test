@@ -97,39 +97,44 @@ fn vs_main(
     @location(5) model_mat_col_2: vec4<f32>,
     @location(6) model_mat_col_3: vec4<f32>,
     @location(7) is_uniformly_scaled: f32,
+    // Pre-computed normal matrix (only for non-uniform scales)
+    @location(8) normal_mat_col_0: vec3<f32>,
+    @location(9) normal_mat_col_1: vec3<f32>,
+    @location(10) normal_mat_col_2: vec3<f32>,
 ) -> VertexOutput {
     var out: VertexOutput;
 
     let modelMatrix = mat4x4<f32>(
       model_mat_col_0, model_mat_col_1, model_mat_col_2, model_mat_col_3
     );
-    // Create the normal matrix on the GPU.
-    // We only need the upper 3x3 part for transforming normals.
-    let modelMatrix3x3 = mat3x3<f32>(
-        modelMatrix[0].xyz,
-        modelMatrix[1].xyz,
-        modelMatrix[2].xyz
-    );
 
-    var normalMatrix: mat3x3<f32>;
-    // If scaling is uniform, we can use the model matrix directly.
-    // This avoids a very expensive inverse-transpose calculation.
-    // Otherwise, we must compute the full normal matrix for correctness.
+    // Use pre-computed normal matrix or fast path for uniform scale
+    var worldNormal: vec3<f32>;
     if (is_uniformly_scaled > 0.5) {
-      normalMatrix = modelMatrix3x3;
+      // Fast path: just use upper 3x3 of model matrix
+      let modelMatrix3x3 = mat3x3<f32>(
+          modelMatrix[0].xyz,
+          modelMatrix[1].xyz,
+          modelMatrix[2].xyz
+      );
+      worldNormal = normalize(modelMatrix3x3 * inNormal);
     } else {
-      normalMatrix = transpose(mat3_inverse(modelMatrix3x3));
+      // Use pre-computed normal matrix from CPU
+      let normalMatrix = mat3x3<f32>(
+          normal_mat_col_0,
+          normal_mat_col_1,
+          normal_mat_col_2
+      );
+      worldNormal = normalize(normalMatrix * inNormal);
     }
 
-    // Transform vertex position and normal to world space
+    // Transform vertex position to world space
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
     out.worldPosition = worldPos4.xyz;
-    out.worldNormal = normalize(normalMatrix * inNormal);
+    out.worldNormal = worldNormal;
 
     // Transform vertex to clip space
     out.clip_position = camera.viewProjectionMatrix * worldPos4;
-
-    // Pass texture coordinates through
     out.tex_coords = inTexCoords;
 
     return out;

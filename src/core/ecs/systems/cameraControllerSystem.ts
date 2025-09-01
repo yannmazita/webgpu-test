@@ -1,20 +1,26 @@
 // src/core/ecs/systems/cameraControllerSystem.ts
 import { ActionManager } from "@/core/actionManager";
-import { vec3, quat } from "wgpu-matrix";
 import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
+import { vec3, quat, mat4, Mat4 } from "wgpu-matrix";
 
 export class CameraControllerSystem {
-  // Configurable settings
-  public moveSpeed = 5.0; // units per second
+  public moveSpeed = 5.0;
   public mouseSensitivity = 0.002;
 
-  // Internal state for rotation
   private pitch = 0;
   private yaw = 0;
 
   private actions: ActionManager;
+
+  // Reusable temporaries
+  private tmpForward = vec3.create();
+  private tmpRight = vec3.create();
+  private tmpMoveDir = vec3.create();
+  private tmpScaled = vec3.create();
+  private tmpQuat = quat.identity();
+  private tmpRotMat: Mat4 = mat4.identity();
 
   constructor(actions: ActionManager) {
     this.actions = actions;
@@ -22,67 +28,79 @@ export class CameraControllerSystem {
 
   public update(world: World, deltaTime: number): void {
     const query = world.query([MainCameraTagComponent, TransformComponent]);
-    if (query.length === 0) {
-      return; // No main camera found
-    }
+    if (query.length === 0) return;
+
     const mainCameraEntity = query[0];
     const transform = world.getComponent(mainCameraEntity, TransformComponent)!;
 
-    // --- Rotation (Mouse Look) ---
+    // Mouse look
     if (this.actions.isPointerLocked()) {
       const mouseDelta = this.actions.getMouseDelta();
-
-      // Update yaw and pitch based on mouse movement
       this.yaw -= mouseDelta.x * this.mouseSensitivity;
       this.pitch -= mouseDelta.y * this.mouseSensitivity;
 
-      // Clamp pitch to prevent flipping
       const pitchLimit = Math.PI / 2 - 0.01;
-      this.pitch = Math.max(-pitchLimit, Math.min(pitchLimit, this.pitch));
+      if (this.pitch > pitchLimit) this.pitch = pitchLimit;
+      else if (this.pitch < -pitchLimit) this.pitch = -pitchLimit;
 
-      // Combine yaw and pitch into a single quaternion
-      const yawQuat = quat.fromAxisAngle([0, 1, 0], this.yaw);
-      const pitchQuat = quat.fromAxisAngle([1, 0, 0], this.pitch);
-      const finalRotation = quat.multiply(yawQuat, pitchQuat);
-      quat.normalize(finalRotation, finalRotation);
-
-      transform.setRotation(finalRotation);
+      quat.identity(this.tmpQuat);
+      quat.rotateY(this.tmpQuat, this.yaw, this.tmpQuat);
+      quat.rotateX(this.tmpQuat, this.pitch, this.tmpQuat);
+      transform.setRotation(this.tmpQuat);
     }
 
-    // --- Movement (Keyboard) ---
-    const move_vertical = this.actions.getAxis("move_vertical");
-    const move_horizontal = this.actions.getAxis("move_horizontal");
-    const move_y_axis = this.actions.getAxis("move_y_axis");
+    // Movement input
+    const mv = this.actions.getAxis("move_vertical");
+    const mh = this.actions.getAxis("move_horizontal");
+    const my = this.actions.getAxis("move_y_axis");
+    if (mv === 0 && mh === 0 && my === 0) return;
 
-    if (move_vertical === 0 && move_horizontal === 0 && move_y_axis === 0) {
-      // No movement input, so we might not need to dirty the transform.
-      // We return here because the rotation logic above already dirties the transform if needed.
-      return;
+    // Derive axes from rotation matrix to match worldMatrix convention:
+    // right = column 0, forward = -column 2
+    mat4.fromQuat(transform.rotation, this.tmpRotMat);
+
+    // Right (+X)
+    this.tmpRight[0] = this.tmpRotMat[0];
+    this.tmpRight[1] = this.tmpRotMat[1];
+    this.tmpRight[2] = this.tmpRotMat[2];
+
+    // Forward (-Z)
+    this.tmpForward[0] = -this.tmpRotMat[8];
+    this.tmpForward[1] = -this.tmpRotMat[9];
+    this.tmpForward[2] = -this.tmpRotMat[10];
+
+    // tmpMoveDir = forward*mv + right*mh + worldUp*my
+    this.tmpMoveDir[0] = 0;
+    this.tmpMoveDir[1] = 0;
+    this.tmpMoveDir[2] = 0;
+
+    if (mv !== 0) {
+      vec3.scale(this.tmpForward, mv, this.tmpScaled);
+      vec3.add(this.tmpMoveDir, this.tmpScaled, this.tmpMoveDir);
+    }
+    if (mh !== 0) {
+      vec3.scale(this.tmpRight, mh, this.tmpScaled);
+      vec3.add(this.tmpMoveDir, this.tmpScaled, this.tmpMoveDir);
+    }
+    if (my !== 0) {
+      this.tmpScaled[0] = 0;
+      this.tmpScaled[1] = my;
+      this.tmpScaled[2] = 0;
+      vec3.add(this.tmpMoveDir, this.tmpScaled, this.tmpMoveDir);
     }
 
-    // Get camera's local axes from its world matrix.
-    // The camera looks down its local -Z axis.
-    const forward = vec3.fromValues(
-      -transform.worldMatrix[8],
-      -transform.worldMatrix[9],
-      -transform.worldMatrix[10],
-    );
-    const right = vec3.fromValues(
-      transform.worldMatrix[0],
-      transform.worldMatrix[1],
-      transform.worldMatrix[2],
-    );
-
-    const moveDirection = vec3.create(0, 0, 0);
-    vec3.add(moveDirection, vec3.scale(forward, move_vertical), moveDirection);
-    vec3.add(moveDirection, vec3.scale(right, move_horizontal), moveDirection);
-    // Use world's up vector for vertical movement to prevent strange drift
-    vec3.add(moveDirection, vec3.scale([0, 1, 0], move_y_axis), moveDirection);
-
-    if (vec3.lengthSq(moveDirection) > 0) {
-      vec3.normalize(moveDirection, moveDirection);
-      const moveVector = vec3.scale(moveDirection, this.moveSpeed * deltaTime);
-      transform.translate(moveVector);
+    // Proper float check: move if length^2 > epsilon (avoid allocations)
+    const lenSq =
+      this.tmpMoveDir[0] * this.tmpMoveDir[0] +
+      this.tmpMoveDir[1] * this.tmpMoveDir[1] +
+      this.tmpMoveDir[2] * this.tmpMoveDir[2];
+    if (lenSq > 1e-12) {
+      vec3.normalize(this.tmpMoveDir, this.tmpMoveDir);
+      const s = this.moveSpeed * deltaTime;
+      this.tmpScaled[0] = this.tmpMoveDir[0] * s;
+      this.tmpScaled[1] = this.tmpMoveDir[1] * s;
+      this.tmpScaled[2] = this.tmpMoveDir[2] * s;
+      transform.translate(this.tmpScaled);
     }
   }
 }

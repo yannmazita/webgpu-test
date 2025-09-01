@@ -1,5 +1,5 @@
 // src/core/ecs/components/transformComponent.ts
-import { Mat4, mat4, Quat, quat, Vec3, vec3 } from "wgpu-matrix";
+import { mat3, Mat3, Mat4, mat4, Quat, quat, Vec3, vec3 } from "wgpu-matrix";
 import { IComponent } from "../component";
 
 export class TransformComponent implements IComponent {
@@ -9,6 +9,8 @@ export class TransformComponent implements IComponent {
 
   public localMatrix: Mat4 = mat4.identity();
   public worldMatrix: Mat4 = mat4.identity();
+
+  public normalMatrix: Mat3 = mat3.identity(); // precomputed normal matrix
 
   /** True if the local transform has changed and matrices need recalculation. */
   public isDirty = true;

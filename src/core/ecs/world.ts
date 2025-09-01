@@ -1,7 +1,6 @@
 // src/core/ecs/world.ts
 import { ComponentConstructor, IComponent } from "./component";
 import { Entity } from "./entity";
-import { SceneLightingComponent } from "./systems/renderSystem";
 
 /**
  * The World is the container for all entities and components.
@@ -12,6 +11,8 @@ export class World {
   private nextEntityId = 0;
   private recycledEntityIds: Entity[] = [];
   private globalEntity: Entity = 0;
+  private queryCache = new Map<string, Entity[]>();
+  private queryCacheDirty = true;
 
   constructor() {
     // Reserve entity 0 for global components/resources
@@ -74,6 +75,7 @@ export class World {
 
     this.entities.delete(entity);
     this.recycledEntityIds.push(entity);
+    this.queryCacheDirty = true;
   }
 
   /**
@@ -90,6 +92,7 @@ export class World {
       this.componentStores.set(componentType, new Map());
     }
     this.componentStores.get(componentType)!.set(entity, component);
+    this.queryCacheDirty = true;
   }
 
   /**
@@ -130,6 +133,7 @@ export class World {
     componentType: ComponentConstructor<T>,
   ): void {
     this.componentStores.get(componentType)?.delete(entity);
+    this.queryCacheDirty = true;
   }
 
   /**
@@ -138,8 +142,21 @@ export class World {
    * @returns An array of entity IDs that match the query.
    */
   public query(componentTypes: ComponentConstructor[]): Entity[] {
+    // Generate cache key (use component constructor names)
+    const cacheKey = componentTypes
+      .map((t) => t.name)
+      .sort()
+      .join(",");
+
+    // Return cached result if valid
+    if (!this.queryCacheDirty && this.queryCache.has(cacheKey)) {
+      return this.queryCache.get(cacheKey)!;
+    }
+
     if (componentTypes.length === 0) {
-      return Array.from(this.entities);
+      const result = Array.from(this.entities);
+      this.queryCache.set(cacheKey, result);
+      return result;
     }
 
     // Find the smallest component store to iterate over for efficiency
@@ -155,7 +172,9 @@ export class World {
     }
 
     if (!smallestStoreType || smallestStoreSize === 0) {
-      return []; // No entities can match if one of the required stores is empty
+      const emptyResult: Entity[] = [];
+      this.queryCache.set(cacheKey, emptyResult);
+      return emptyResult;
     }
 
     const potentialEntities = Array.from(
@@ -165,9 +184,17 @@ export class World {
       (t) => t !== smallestStoreType,
     );
 
-    // Filter the candidates by checking for the other required components
-    return potentialEntities.filter((entity) =>
+    const result = potentialEntities.filter((entity) =>
       otherComponentTypes.every((type) => this.hasComponent(entity, type)),
     );
+
+    this.queryCache.set(cacheKey, result);
+
+    // Clear dirty flag after rebuilding all caches
+    if (this.queryCacheDirty) {
+      this.queryCacheDirty = false;
+    }
+
+    return result;
   }
 }
