@@ -18,18 +18,18 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import { SceneRenderData } from "@/core/types/rendering";
 import { createCubeMeshData } from "@/core/utils/primitives";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
-import { RemoteInputSource } from "@/core/remoteInputSource";
+import { SharedInputSource } from "@/core/sharedInputSource";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 
 // Message constants
 const MSG_INIT = "INIT";
 const MSG_RESIZE = "RESIZE";
-const MSG_INPUT = "INPUT";
 const MSG_FRAME = "FRAME";
 
 interface InitMsg {
   type: typeof MSG_INIT;
   canvas: OffscreenCanvas;
+  sharedInputBuffer: SharedArrayBuffer;
 }
 interface ResizeMsg {
   type: typeof MSG_RESIZE;
@@ -37,21 +37,9 @@ interface ResizeMsg {
   cssHeight: number;
   devicePixelRatio: number;
 }
-interface InputMsg {
-  type: typeof MSG_INPUT;
-  keys: string[];
-  mouseDeltaX: number;
-  mouseDeltaY: number;
-  isPointerLocked: boolean;
-}
 interface FrameMsg {
   type: typeof MSG_FRAME;
   now: number;
-  // bundled input (optional)
-  keys?: string[];
-  mouseDeltaX?: number;
-  mouseDeltaY?: number;
-  isPointerLocked?: boolean;
 }
 
 let renderer: Renderer | null = null;
@@ -63,25 +51,33 @@ let cameraEntity = -1;
 let light1Entity = -1;
 let light2Entity = -1;
 
-const inputSource = new RemoteInputSource();
-const actionMap: ActionMapConfig = {
-  move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
-  move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
-  move_y_axis: { type: "axis", positiveKey: "Space", negativeKey: "ShiftLeft" },
-};
-const actionManager = new ActionManager(
-  // Structural typing: RemoteInputSource is compatible
-  inputSource as any,
-  actionMap,
-);
-const cameraControllerSystem = new CameraControllerSystem(actionManager);
+let inputSource: SharedInputSource | null = null;
+let actionManager: ActionManager | null = null;
+let cameraControllerSystem: CameraControllerSystem | null = null;
 
 // State for dt
 let lastFrameTime = 0;
 
-async function initWorker(offscreen: OffscreenCanvas) {
+async function initWorker(
+  offscreen: OffscreenCanvas,
+  sharedInputBuffer: SharedArrayBuffer,
+) {
   renderer = new Renderer(offscreen);
   await renderer.init();
+
+  // Setup input source and action manager using the shared buffer
+  inputSource = new SharedInputSource(sharedInputBuffer);
+  const actionMap: ActionMapConfig = {
+    move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
+    move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
+    move_y_axis: {
+      type: "axis",
+      positiveKey: "Space",
+      negativeKey: "ShiftLeft",
+    },
+  };
+  actionManager = new ActionManager(inputSource, actionMap);
+  cameraControllerSystem = new CameraControllerSystem(actionManager);
 
   resourceManager = new ResourceManager(renderer);
   world = new World();
@@ -124,7 +120,8 @@ async function initWorker(offscreen: OffscreenCanvas) {
 }
 
 function frame(now: number) {
-  if (!renderer || !world || !sceneRenderData) return;
+  if (!renderer || !world || !sceneRenderData || !cameraControllerSystem)
+    return;
 
   // dt in seconds; clamp long pauses
   const MAX_PAUSE = 0.5;
@@ -148,23 +145,21 @@ function frame(now: number) {
   cameraSystem(world);
 
   // Render
-  const cam = world.getComponent(cameraEntity, CameraComponent)!;
   renderSystem(world, renderer, sceneRenderData);
 
-  // Reset input for next frame (main also resets, but safe to clear here)
-  inputSource.lateUpdate();
+  // This is a no-op on the worker side, which is correct. The main thread
+  // is responsible for resetting the mouse delta in the shared buffer.
+  inputSource!.lateUpdate();
 
   // Acknowledge frame completion to main thread
   (self as any).postMessage({ type: "FRAME_DONE" });
 }
 
-self.onmessage = async (
-  ev: MessageEvent<InitMsg | ResizeMsg | InputMsg | FrameMsg>,
-) => {
+self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
   const msg = ev.data;
 
   if (msg.type === MSG_INIT) {
-    await initWorker(msg.canvas);
+    await initWorker(msg.canvas, msg.sharedInputBuffer);
     return;
   }
 
@@ -187,29 +182,7 @@ self.onmessage = async (
       );
       break;
     }
-    case MSG_INPUT: {
-      inputSource.applyInput(
-        msg.keys,
-        msg.mouseDeltaX,
-        msg.mouseDeltaY,
-        msg.isPointerLocked,
-      );
-      break;
-    }
     case MSG_FRAME: {
-      // Apply bundled input if present
-      if (
-        typeof msg.mouseDeltaX === "number" &&
-        typeof msg.mouseDeltaY === "number" &&
-        Array.isArray(msg.keys)
-      ) {
-        inputSource.applyInput(
-          msg.keys,
-          msg.mouseDeltaX!,
-          msg.mouseDeltaY!,
-          !!msg.isPointerLocked,
-        );
-      }
       frame(msg.now);
       break;
     }

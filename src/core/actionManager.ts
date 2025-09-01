@@ -1,5 +1,5 @@
 // src/core/actionManager.ts
-import { InputManager } from "./inputManager";
+import { IInputSource } from "./iinputSource";
 
 /**
  * Defines a mapping for a single button action.
@@ -34,15 +34,15 @@ export type ActionMapConfig = Record<string, ActionBinding>;
 
 /**
  * Manages abstract actions and maps them to physical inputs.
- * This class translates raw input from an InputManager into named,
+ * This class translates raw input from an IInputSource into named,
  * gameplay-relevant actions like "move_forward" or "jump".
  */
 export class ActionManager {
-  private inputManager: InputManager;
+  private inputSource: IInputSource;
   private actionMap: ActionMapConfig;
 
-  constructor(inputManager: InputManager, actionMap: ActionMapConfig) {
-    this.inputManager = inputManager;
+  constructor(inputSource: IInputSource, actionMap: ActionMapConfig) {
+    this.inputSource = inputSource;
     this.actionMap = actionMap;
   }
 
@@ -58,7 +58,7 @@ export class ActionManager {
       return false;
     }
 
-    return binding.keys.some((key) => this.inputManager.keys.has(key));
+    return binding.keys.some((key) => this.inputSource.isKeyDown(key));
   }
 
   /**
@@ -75,10 +75,10 @@ export class ActionManager {
     }
 
     let value = 0;
-    if (this.inputManager.keys.has(binding.positiveKey)) {
+    if (this.inputSource.isKeyDown(binding.positiveKey)) {
       value += 1;
     }
-    if (this.inputManager.keys.has(binding.negativeKey)) {
+    if (this.inputSource.isKeyDown(binding.negativeKey)) {
       value -= 1;
     }
     return value;
@@ -86,17 +86,17 @@ export class ActionManager {
 
   /**
    * Gets the mouse delta for the current frame.
-   * This is a pass-through to the InputManager for convenience.
+   * This is a pass-through to the InputSource for convenience.
    */
   public getMouseDelta(): { x: number; y: number } {
-    return this.inputManager.mouseDelta;
+    return this.inputSource.getMouseDelta();
   }
 
   /**
    * Checks if the pointer is currently locked.
-   * This is a pass-through to the InputManager.
+   * This is a pass-through to the InputSource.
    */
   public isPointerLocked(): boolean {
-    return this.inputManager.isPointerLocked;
+    return this.inputSource.isPointerLocked();
   }
 }

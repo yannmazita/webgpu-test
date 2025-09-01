@@ -5,17 +5,25 @@ import { InputManager } from "@/core/inputManager";
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
 
-// Create worker and transfer canvas
+// Setup input on main thread. This now creates the SharedArrayBuffer.
+const input = new InputManager(canvas);
+
+// Create worker and transfer canvas and the shared buffer.
+// The buffer is NOT in the transferable list, as it's meant to be shared.
 const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 const offscreen = (
   canvas as any
 ).transferControlToOffscreen() as OffscreenCanvas;
-worker.postMessage({ type: "INIT", canvas: offscreen }, [offscreen as any]);
-
-// Setup input on main thread and forward to worker
-const input = new InputManager(canvas);
+worker.postMessage(
+  {
+    type: "INIT",
+    canvas: offscreen,
+    sharedInputBuffer: input.sharedBuffer,
+  },
+  [offscreen as any],
+);
 
 // Event-driven resize messages
 let lastCssW = 0;
@@ -69,15 +77,13 @@ worker.addEventListener("message", (ev) => {
 const tick = (now: number) => {
   if (canSendFrame) {
     canSendFrame = false;
+    // The FRAME message is now just a timing signal.
+    // All input data is read directly by the worker from shared memory.
     worker.postMessage({
       type: "FRAME",
       now,
-      // bundled input snapshot
-      keys: Array.from(input.keys),
-      mouseDeltaX: input.mouseDelta.x,
-      mouseDeltaY: input.mouseDelta.y,
-      isPointerLocked: input.isPointerLocked,
     });
+    // Reset mouse delta in the shared buffer for the next frame.
     input.lateUpdate();
   }
 
