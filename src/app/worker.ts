@@ -149,8 +149,6 @@ function frame(now: number) {
   // Render
   renderSystem(world, renderer, sceneRenderData);
 
-  // This is a no-op on the worker side, which is correct. The main thread
-  // is responsible for resetting the mouse delta in the shared buffer.
   inputSource!.lateUpdate();
 
   // Acknowledge frame completion to main thread
