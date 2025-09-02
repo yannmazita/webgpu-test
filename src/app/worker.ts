@@ -17,7 +17,6 @@ import {
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { SceneRenderData } from "@/core/types/rendering";
 import { createCubeMeshData } from "@/core/utils/primitives";
-import { ActionManager, ActionMapConfig } from "@/core/actionManager";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
 import { quat } from "wgpu-matrix";
@@ -37,6 +36,7 @@ import {
   publishMetrics,
 } from "@/core/metrics";
 import {
+  ActionMapConfig,
   getAxisValue,
   IActionController,
   isActionPressed,
