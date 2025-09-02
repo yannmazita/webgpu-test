@@ -10,7 +10,12 @@ Learning graphics programming with WebGPU.
 
 Simply install dependencies then run vite server:
 
-`bash npm install npm run dev `
+```bash 
+npm install
+```
+```bash 
+npm run dev
+```
 
 # WebGPU Engine - Compatibility Guide
 
