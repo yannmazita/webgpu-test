@@ -18,10 +18,24 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import { SceneRenderData } from "@/core/types/rendering";
 import { createCubeMeshData } from "@/core/utils/primitives";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
-import { SharedInputSource } from "@/core/sharedInputSource";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
 import { quat } from "wgpu-matrix";
+import { IInputSource } from "@/core/iinputSource";
+import {
+  createInputContext,
+  InputContext,
+  isKeyDown,
+  getAndResetMouseDelta,
+  getMousePosition,
+  isPointerLocked,
+} from "@/core/input";
+import {
+  createMetricsContext,
+  initializeMetrics,
+  MetricsContext,
+  publishMetrics,
+} from "@/core/metrics";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -32,6 +46,7 @@ interface InitMsg {
   type: typeof MSG_INIT;
   canvas: OffscreenCanvas;
   sharedInputBuffer: SharedArrayBuffer;
+  sharedMetricsBuffer: SharedArrayBuffer;
 }
 interface ResizeMsg {
   type: typeof MSG_RESIZE;
@@ -54,9 +69,12 @@ let light1Entity = -1;
 let light2Entity = -1;
 let markerEntity = -1;
 
-let inputSource: SharedInputSource | null = null;
+let inputContext: InputContext | null = null;
 let actionManager: ActionManager | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
+
+let metricsContext: MetricsContext | null = null;
+let metricsFrameId = 0;
 
 // State for dt
 let lastFrameTime = 0;
@@ -64,12 +82,25 @@ let lastFrameTime = 0;
 async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
+  sharedMetricsBuffer: SharedArrayBuffer,
 ) {
   renderer = new Renderer(offscreen);
   await renderer.init();
 
-  // Setup input source and action manager using the shared buffer
-  inputSource = new SharedInputSource(sharedInputBuffer);
+  // Metrics setup
+  metricsContext = createMetricsContext(sharedMetricsBuffer);
+  initializeMetrics(metricsContext);
+
+  // Input setup
+  inputContext = createInputContext(sharedInputBuffer);
+  const inputReader: IInputSource = {
+    isKeyDown: (code: string) => isKeyDown(inputContext!, code),
+    getMouseDelta: () => getAndResetMouseDelta(inputContext!),
+    getMousePosition: () => getMousePosition(inputContext!),
+    isPointerLocked: () => isPointerLocked(inputContext!),
+    lateUpdate: () => {}, // No-op for worker reader
+  };
+
   const actionMap: ActionMapConfig = {
     move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
     move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
@@ -79,7 +110,7 @@ async function initWorker(
       negativeKey: "ShiftLeft",
     },
   };
-  actionManager = new ActionManager(inputSource, actionMap);
+  actionManager = new ActionManager(inputReader, actionMap);
   cameraControllerSystem = new CameraControllerSystem(actionManager);
 
   resourceManager = new ResourceManager(renderer);
@@ -195,7 +226,7 @@ function frame(now: number) {
     let mx = Math.floor(vpW * 0.5);
     let my = Math.floor(vpH * 0.5);
     if (!actionManager!.isPointerLocked()) {
-      const mp = inputSource!.getMousePosition();
+      const mp = getMousePosition(inputContext!);
       // Clamp to viewport
       mx = Math.min(Math.max(mp.x, 0), Math.max(0, vpW - 1));
       my = Math.min(Math.max(mp.y, 0), Math.max(0, vpH - 1));
@@ -222,7 +253,10 @@ function frame(now: number) {
   // Render
   renderSystem(world, renderer, sceneRenderData);
 
-  inputSource!.lateUpdate();
+  // Publish per-frame metrics
+  if (metricsContext && renderer) {
+    publishMetrics(metricsContext, renderer.getStats(), dt, ++metricsFrameId);
+  }
 
   // Acknowledge frame completion to main thread
   (self as any).postMessage({ type: "FRAME_DONE" });
@@ -232,7 +266,11 @@ self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
   const msg = ev.data;
 
   if (msg.type === MSG_INIT) {
-    await initWorker(msg.canvas, msg.sharedInputBuffer);
+    await initWorker(
+      msg.canvas,
+      msg.sharedInputBuffer,
+      msg.sharedMetricsBuffer,
+    );
     return;
   }
 
