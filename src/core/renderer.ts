@@ -109,25 +109,53 @@ export class Renderer {
   private cssHeight = 0;
   private currentDPR = 1;
 
-  // Constants
-  private static readonly MATRIX_BYTE_SIZE =
-    4 * 4 * Float32Array.BYTES_PER_ELEMENT;
-  private static readonly INSTANCE_STRIDE_IN_FLOATS = 26; // mat4(16) + flag(1) + mat3(9)
+  // Constants for instance buffer layout
+  private static readonly MAT4_FLOAT_COUNT = 16;
+  private static readonly MAT3_FLOAT_COUNT = 9;
+  private static readonly SCALAR_FLOAT_COUNT = 1;
+
+  // The number of f32 values for a single instance.
+  // mat4(16) + flag(1) + mat3(9)
+  private static readonly INSTANCE_STRIDE_IN_FLOATS =
+    Renderer.MAT4_FLOAT_COUNT +
+    Renderer.SCALAR_FLOAT_COUNT +
+    Renderer.MAT3_FLOAT_COUNT;
+
+  // The byte size for a single instance.
   private static readonly INSTANCE_BYTE_STRIDE =
     Renderer.INSTANCE_STRIDE_IN_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
-    arrayStride: 104, // 26 floats * 4 bytes
+    arrayStride: Renderer.INSTANCE_BYTE_STRIDE,
     stepMode: "instance",
     attributes: [
+      // Model Matrix (mat4x4<f32>) - 16 floats
       { shaderLocation: 3, offset: 0, format: "float32x4" },
       { shaderLocation: 4, offset: 16, format: "float32x4" },
       { shaderLocation: 5, offset: 32, format: "float32x4" },
       { shaderLocation: 6, offset: 48, format: "float32x4" },
-      { shaderLocation: 7, offset: 64, format: "float32" }, // is_uniformly_scaled
-      { shaderLocation: 8, offset: 68, format: "float32x3" }, // normal_mat_col_0
-      { shaderLocation: 9, offset: 80, format: "float32x3" }, // normal_mat_col_1
-      { shaderLocation: 10, offset: 92, format: "float32x3" }, // normal_mat_col_2
+      // is_uniformly_scaled (f32) - 1 float
+      {
+        shaderLocation: 7,
+        offset: Renderer.MAT4_FLOAT_COUNT * 4,
+        format: "float32",
+      },
+      // Normal Matrix (mat3x3<f32>) - 9 floats
+      {
+        shaderLocation: 8,
+        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT) * 4,
+        format: "float32x3",
+      },
+      {
+        shaderLocation: 9,
+        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
+        format: "float32x3",
+      },
+      {
+        shaderLocation: 10,
+        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
+        format: "float32x3",
+      },
     ],
   };
   public static RENDER_SCALE = 1.0;
