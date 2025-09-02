@@ -88,7 +88,7 @@ async function initWorker(
   const camXform = new TransformComponent();
   camXform.setPosition(0, 1, 3);
   world.addComponent(cameraEntity, camXform);
-  world.addComponent(cameraEntity, new CameraComponent(90, 16 / 9, 0.1, 100.0));
+  world.addComponent(cameraEntity, new CameraComponent(74, 16 / 9, 0.1, 100.0));
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
   // Lights (and scene lighting resource)

@@ -7,79 +7,150 @@ import { vec3, vec4, Vec3 } from "wgpu-matrix";
  * Calculates the 3D world position corresponding to a 2D mouse coordinate,
  * by intersecting a ray with a virtual plane.
  *
- * @param mouseCoords The (x, y) coordinates of the mouse inside the canvas.
- * @param canvas The HTML canvas element.
- * @param cameraComp The scene camera's component.
- * @param cameraTransform The scene camera's transform.
- * @param planeNormal The normal vector of the virtual plane to intersect with.
- * @param planePoint A point on the virtual plane.
- * @returns The 3D intersection point in world space, or null if no intersection occurs.
+ * This version uses the canvas client size. For worker/OffscreenCanvas, prefer
+ * getMouseWorldPositionWithViewport to pass numeric dimensions.
  */
 export function getMouseWorldPosition(
   mouseCoords: { x: number; y: number },
   canvas: HTMLCanvasElement,
   cameraComp: CameraComponent,
-  cameraTransform: TransformComponent,
-  planeNormal: Vec3 = vec3.fromValues(0, 1, 0), // Default to XZ plane at Y=0
+  _cameraTransform: TransformComponent, // kept for compatibility; no longer required
+  planeNormal: Vec3 = vec3.fromValues(0, 1, 0),
   planePoint: Vec3 = vec3.fromValues(0, 0, 0),
 ): Vec3 | null {
-  // 1. Convert mouse coordinates to Normalized Device Coordinates (NDC)
-  //    x: -1 to +1, y: -1 to +1
-  const ndc_x = (mouseCoords.x / canvas.clientWidth) * 2 - 1;
-  const ndc_y = 1 - (mouseCoords.y / canvas.clientHeight) * 2; // Y is inverted
+  const width = canvas.clientWidth || canvas.width || 0;
+  const height = canvas.clientHeight || canvas.height || 0;
+  return getMouseWorldPositionWithViewport(
+    mouseCoords,
+    width,
+    height,
+    cameraComp,
+    planeNormal,
+    planePoint,
+  );
+}
 
-  // 2. Unproject from NDC (clip space) to View Space
-  //    We start at the near plane (z = -1) in clip space
-  const clipCoords = vec4.fromValues(ndc_x, ndc_y, -1.0, 1.0);
-  const viewCoords = vec4.transformMat4(
-    clipCoords,
+/**
+ * Builds a world-space pick ray from a 2D mouse coordinate using the camera's inverse matrices.
+ *
+ * @param mouseCoords Mouse position in CSS pixels relative to the viewport (0..width, 0..height)
+ * @param viewportWidth Viewport width in CSS pixels
+ * @param viewportHeight Viewport height in CSS pixels
+ * @param cameraComp Camera component providing inverseViewMatrix and inverseProjectionMatrix
+ * @returns { origin, direction } where origin is camera position and direction is normalized
+ */
+export function getPickRay(
+  mouseCoords: { x: number; y: number },
+  viewportWidth: number,
+  viewportHeight: number,
+  cameraComp: CameraComponent,
+): { origin: Vec3; direction: Vec3 } {
+  if (viewportWidth <= 0 || viewportHeight <= 0) {
+    // Degenerate viewport; return a benign ray
+    return {
+      origin: vec3.fromValues(
+        cameraComp.inverseViewMatrix[12],
+        cameraComp.inverseViewMatrix[13],
+        cameraComp.inverseViewMatrix[14],
+      ),
+      direction: vec3.fromValues(0, 0, -1),
+    };
+  }
+
+  // 1) NDC
+  const ndcX = (mouseCoords.x / viewportWidth) * 2 - 1;
+  const ndcY = 1 - (mouseCoords.y / viewportHeight) * 2;
+
+  // 2) Clip-space points at near and far
+  const nearClip = vec4.fromValues(ndcX, ndcY, -1.0, 1.0);
+  const farClip = vec4.fromValues(ndcX, ndcY, 1.0, 1.0);
+
+  // 3) Inverse View-Projection = inverseView * inverseProjection
+  const invVP = mat4.multiply(
+    cameraComp.inverseViewMatrix,
     cameraComp.inverseProjectionMatrix,
   );
 
-  // 3. Create a direction vector in View Space
-  //    Set z to -1 (forward direction in view space) and w to 0 to make it a direction
-  const viewDirection = vec4.fromValues(
-    viewCoords[0],
-    viewCoords[1],
-    -1.0,
-    0.0,
+  // 4) Unproject and perspective divide
+  const worldNear4 = vec4.transformMat4(nearClip, invVP);
+  const worldFar4 = vec4.transformMat4(farClip, invVP);
+
+  const invWN = worldNear4[3] !== 0 ? 1.0 / worldNear4[3] : 1.0;
+  const invWF = worldFar4[3] !== 0 ? 1.0 / worldFar4[3] : 1.0;
+
+  const worldNear = vec3.fromValues(
+    worldNear4[0] * invWN,
+    worldNear4[1] * invWN,
+    worldNear4[2] * invWN,
+  );
+  const worldFar = vec3.fromValues(
+    worldFar4[0] * invWF,
+    worldFar4[1] * invWF,
+    worldFar4[2] * invWF,
   );
 
-  // 4. Unproject direction from View Space to World Space
-  // The camera's world matrix is its transform's world matrix.
-  const worldDirectionVec4 = vec4.transformMat4(
-    viewDirection,
-    cameraTransform.worldMatrix,
-  );
-  const worldDirection = vec3.normalize(
-    vec3.fromValues(
-      worldDirectionVec4[0],
-      worldDirectionVec4[1],
-      worldDirectionVec4[2],
-    ),
+  // 5) Origin at camera position; direction toward far point
+  const origin = vec3.fromValues(
+    cameraComp.inverseViewMatrix[12],
+    cameraComp.inverseViewMatrix[13],
+    cameraComp.inverseViewMatrix[14],
   );
 
-  // 5. Perform Ray-Plane Intersection
-  //    Ray origin is the camera's position from its transform
-  const rayOrigin = cameraTransform.position;
+  const dir = vec3.normalize(vec3.subtract(worldFar, origin));
 
-  const denominator = vec3.dot(planeNormal, worldDirection);
+  return { origin, direction: dir };
+}
 
-  // If the denominator is close to zero, the ray is parallel to the plane
-  if (Math.abs(denominator) < 0.0001) {
-    return null;
-  }
+/**
+ * Intersects a ray with a plane.
+ * @param origin Ray origin
+ * @param direction Ray direction (normalized recommended)
+ * @param planePoint A point on the plane
+ * @param planeNormal Plane normal (does not need to be normalized)
+ * @returns Intersection point or null if parallel or behind origin
+ */
+export function intersectRayWithPlane(
+  origin: Vec3,
+  direction: Vec3,
+  planePoint: Vec3,
+  planeNormal: Vec3,
+): Vec3 | null {
+  const denom = vec3.dot(planeNormal, direction);
+  if (Math.abs(denom) < 1e-6) return null;
 
-  const t =
-    vec3.dot(vec3.subtract(planePoint, rayOrigin), planeNormal) / denominator;
+  const t = vec3.dot(vec3.subtract(planePoint, origin), planeNormal) / denom;
+  if (t < 0) return null;
 
-  // If t is negative, the intersection point is behind the camera
-  if (t < 0) {
-    return null;
-  }
+  return vec3.fromValues(
+    origin[0] + direction[0] * t,
+    origin[1] + direction[1] * t,
+    origin[2] + direction[2] * t,
+  );
+}
 
-  // Calculate the intersection point
-  const intersectionPoint = vec3.add(rayOrigin, vec3.scale(worldDirection, t));
-
-  return intersectionPoint;
+/**
+ * Worker/OffscreenCanvas-friendly helper: uses numeric viewport dimensions.
+ *
+ * @param mouseCoords Mouse position in CSS pixels relative to the viewport
+ * @param viewportWidth CSS width
+ * @param viewportHeight CSS height
+ * @param cameraComp Camera component
+ * @param planeNormal Plane normal (default Y-up)
+ * @param planePoint A point on the plane (default origin)
+ */
+export function getMouseWorldPositionWithViewport(
+  mouseCoords: { x: number; y: number },
+  viewportWidth: number,
+  viewportHeight: number,
+  cameraComp: CameraComponent,
+  planeNormal: Vec3 = vec3.fromValues(0, 1, 0),
+  planePoint: Vec3 = vec3.fromValues(0, 0, 0),
+): Vec3 | null {
+  const { origin, direction } = getPickRay(
+    mouseCoords,
+    viewportWidth,
+    viewportHeight,
+    cameraComp,
+  );
+  return intersectRayWithPlane(origin, direction, planePoint, planeNormal);
 }
