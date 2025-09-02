@@ -2,9 +2,8 @@
 
 Learning graphics programming with WebGPU.
 
-<img width="2550" height="1406" alt="1000 cubes with random transforms" src="https://github.com/user-attachments/assets/ebffe743-24a9-44aa-9db9-96699cdc3e1c" />
+<img width="2528" height="1309" alt="Engine capture" src="https://github.com/user-attachments/assets/0606b7da-5587-4172-81a4-d76a02d41624" />
 
-[engine-demo.mp4](https://github.com/user-attachments/assets/52bba8f5-a72e-453c-8bca-bdfe5bd06dc7)
 
 # Setup
 
