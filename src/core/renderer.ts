@@ -433,6 +433,18 @@ export class Renderer {
     return distSq < farPlusR * farPlusR;
   }
 
+  private ensureCpuInstanceCapacity(requiredInstances: number): void {
+    if (requiredInstances <= this.frameInstanceCapacity) return;
+
+    // Grow capacity with a 1.5x factor to reduce reallocations
+    this.frameInstanceCapacity = Math.ceil(requiredInstances * 1.5);
+
+    // We repack per frame, so we don't need to copy old contents
+    this.frameInstanceData = new Float32Array(
+      this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+    );
+  }
+
   private _renderOpaquePass(
     passEncoder: GPURenderPassEncoder,
     batches: DrawBatch[],
@@ -679,10 +691,9 @@ export class Renderer {
     }
     Profiler.end("Render.FrustumCullAndSeparate");
 
-    let totalInstances = 0;
-
     Profiler.begin("Render.Batching");
-    // Use the BatchManager to get cached batches instead of rebuilding every frame.
+
+    // 1) Build/retrieve opaque batches structure (no writes yet)
     const getPipelineCallback = (material: Material, mesh: Mesh) =>
       material.getPipeline(
         mesh.layouts,
@@ -697,10 +708,26 @@ export class Renderer {
       getPipelineCallback,
     );
 
-    // Clear the pre-allocated draw batch array
+    // 2) Compute total instance counts first (opaque + transparent)
+    let opaqueInstanceTotal = 0;
+    for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
+      for (const instances of pipelineBatch.meshMap.values()) {
+        opaqueInstanceTotal += instances.length;
+      }
+    }
+    const transparentInstanceTotal = this.transparentRenderables.length;
+    const totalRequiredInstances =
+      opaqueInstanceTotal + transparentInstanceTotal;
+
+    // 3) Ensure CPU and GPU capacities for the whole frame
+    this.ensureCpuInstanceCapacity(totalRequiredInstances);
+    this._prepareInstanceBuffer(totalRequiredInstances);
+
+    // 4) Clear the pre-allocated draw batch array (we'll fill it next)
     this.opaqueBatches.length = 0;
 
-    // Process the batches from the BatchManager to create draw calls and instance data
+    // 5) Now fill opaque instance data and draw-batch metadata
+    let totalInstances = 0;
     for (const [pipeline, pipelineBatch] of opaquePipelineBatches.entries()) {
       for (const [mesh, instances] of pipelineBatch.meshMap.entries()) {
         if (instances.length === 0) continue;
@@ -766,14 +793,14 @@ export class Renderer {
     Profiler.end("Render.Batching");
 
     Profiler.begin("Render.WriteInstanceBuffer");
-    this._prepareInstanceBuffer(totalInstances);
-    if (totalInstances > 0) {
+    // Upload only the opaque region at offset 0
+    if (opaqueInstanceTotal > 0) {
       this.device.queue.writeBuffer(
         this.instanceBuffer,
         0,
         this.frameInstanceData.buffer,
         0,
-        totalInstances * Renderer.INSTANCE_BYTE_STRIDE,
+        opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE,
       );
     }
     Profiler.end("Render.WriteInstanceBuffer");
@@ -826,15 +853,15 @@ export class Renderer {
     this._renderOpaquePass(scenePassEncoder, this.opaqueBatches);
     Profiler.end("Render.OpaquePass");
 
+    // When calling the transparent pass, change the offset to use the opaque count
     Profiler.begin("Render.TransparentPass");
     this._renderTransparentPass(
       scenePassEncoder,
       this.transparentRenderables,
       camera,
-      totalInstances * Renderer.INSTANCE_BYTE_STRIDE,
+      opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE, // start after opaque
     );
     Profiler.end("Render.TransparentPass");
-
     scenePassEncoder.end();
 
     if (postSceneDrawCallback) {
