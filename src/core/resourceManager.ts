@@ -1,8 +1,7 @@
 // src/core/resourceManager.ts
 import { Renderer } from "./renderer";
 import { Material } from "./materials/material";
-import { AABB, Mesh, PhongMaterialOptions } from "./types/gpu";
-import { PhongMaterial } from "./materials/phongMaterial";
+import { AABB, Mesh, PBRMaterialOptions } from "./types/gpu";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -10,6 +9,7 @@ import { loadSTL } from "@/loaders/stlLoader";
 import { loadOBJ } from "@/loaders/objLoader";
 import { ShaderPreprocessor } from "./shaders/preprocessor";
 import { vec3 } from "wgpu-matrix";
+import { PBRMaterial } from "./materials/pbrMaterial";
 
 /**
  * Computes the axis-aligned bounding box from vertex positions.
@@ -72,8 +72,8 @@ export class ResourceManager {
   private defaultSampler!: GPUSampler;
   /** The shader preprocessor for handling #includes. */
   private preprocessor: ShaderPreprocessor;
-  /** A flag to ensure PhongMaterial static resources are initialized only once. */
-  private phongMaterialInitialized = false;
+  /** A flag to ensure PbrMaterial static resources are initialized only once. */
+  private pbrMaterialInitialized = false;
 
   /**
    * @param renderer The renderer used to access the `GPUDevice`
@@ -107,49 +107,68 @@ export class ResourceManager {
   }
 
   /**
-   * Creates a new Phong-lit material or retrieves it from the cache.
-   *
-   * This method configures a material with properties for the Phong lighting
-   * model. If any options are omitted, the material will be created with
-   * sensible default values.
-   *
-   * @param options - An object specifying the material properties.
-   *   See the `PhongMaterialOptions` interface for details on each property
-   *   and its corresponding default value.
-   * @returns A promise that resolves to the created or cached `PhongMaterial`.
+   * Creates a new PBR material or retrieves it from the cache.
    */
-  public async createPhongMaterial(
-    options: PhongMaterialOptions = {},
+  public async createPBRMaterial(
+    options: PBRMaterialOptions = {},
   ): Promise<Material> {
-    // Set default values for any undefined options
-    const baseColor = options.baseColor ?? [1, 1, 1, 1];
-    const specularColor = options.specularColor ?? [1, 1, 1];
-    const shininess = options.shininess ?? 32.0;
-    const textureUrl = options.textureUrl;
+    // Set default values
+    const albedo = options.albedo ?? [1, 1, 1, 1];
+    const metallic = options.metallic ?? 0.0;
+    const roughness = options.roughness ?? 0.5;
+    const normalIntensity = options.normalIntensity ?? 1.0;
+    const emissive = options.emissive ?? [0, 0, 0];
+    const occlusionStrength = options.occlusionStrength ?? 1.0;
 
-    // unique key for caching based on all properties
-    const materialKey = `PHONG:${baseColor.join()}:${specularColor.join()}:${shininess}:${
-      textureUrl ?? ""
-    }`;
+    // Create unique cache key
+    const materialKey = `PBR:${albedo.join()}:${metallic}:${roughness}:${normalIntensity}:${emissive.join()}:${occlusionStrength}:${
+      options.albedoMap ?? ""
+    }:${options.metallicRoughnessMap ?? ""}:${options.normalMap ?? ""}:${
+      options.emissiveMap ?? ""
+    }:${options.occlusionMap ?? ""}`;
+
     if (this.materials.has(materialKey)) {
       return this.materials.get(materialKey)!;
     }
 
-    // Ensure the static resources for PhongMaterial are initialized once.
-    if (!this.phongMaterialInitialized) {
-      await PhongMaterial.initialize(this.renderer.device, this.preprocessor);
-      this.phongMaterialInitialized = true;
+    // Initialize PBR material system once
+    if (!this.pbrMaterialInitialized) {
+      await PBRMaterial.initialize(this.renderer.device, this.preprocessor);
+      this.pbrMaterialInitialized = true;
     }
 
-    // Determine the texture to use
-    const texture = textureUrl
-      ? await createTextureFromImage(this.renderer.device, textureUrl)
+    // Load textures or use dummy texture
+    const albedoTexture = options.albedoMap
+      ? await createTextureFromImage(this.renderer.device, options.albedoMap)
       : this.dummyTexture;
 
-    const material = new PhongMaterial(
+    const metallicRoughnessTexture = options.metallicRoughnessMap
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.metallicRoughnessMap,
+        )
+      : this.dummyTexture;
+
+    const normalTexture = options.normalMap
+      ? await createTextureFromImage(this.renderer.device, options.normalMap)
+      : this.dummyTexture;
+
+    const emissiveTexture = options.emissiveMap
+      ? await createTextureFromImage(this.renderer.device, options.emissiveMap)
+      : this.dummyTexture;
+
+    const occlusionTexture = options.occlusionMap
+      ? await createTextureFromImage(this.renderer.device, options.occlusionMap)
+      : this.dummyTexture;
+
+    const material = new PBRMaterial(
       this.renderer.device,
       options,
-      texture,
+      albedoTexture,
+      metallicRoughnessTexture,
+      normalTexture,
+      emissiveTexture,
+      occlusionTexture,
       this.defaultSampler,
     );
 

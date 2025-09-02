@@ -148,49 +148,79 @@ async function initWorker(
   world.addComponent(light2Entity, new TransformComponent());
   world.addComponent(light2Entity, new LightComponent([0, 1, 0, 1]));
 
-  // 1000 cubes with randomized transforms
-  const material1 = await resourceManager.createPhongMaterial({
-    baseColor: [1, 0.5, 0.2, 1.0],
-    specularColor: [1.0, 1.0, 1.0],
-    shininess: 100.0,
-  });
+  // Create multiple materials for variety
+  const materials = await Promise.all([
+    // Metallic materials
+    resourceManager.createPBRMaterial({
+      albedo: [0.8, 0.6, 0.2, 1.0], // Gold-ish
+      metallic: 0.9,
+      roughness: 0.1,
+    }),
+    resourceManager.createPBRMaterial({
+      albedo: [0.7, 0.7, 0.8, 1.0], // Steel-ish
+      metallic: 1.0,
+      roughness: 0.3,
+    }),
+    // Dielectric materials
+    resourceManager.createPBRMaterial({
+      albedo: [0.8, 0.2, 0.2, 1.0], // Red plastic
+      metallic: 0.0,
+      roughness: 0.7,
+    }),
+    resourceManager.createPBRMaterial({
+      albedo: [0.2, 0.8, 0.3, 1.0], // Green plastic
+      metallic: 0.0,
+      roughness: 0.4,
+    }),
+    resourceManager.createPBRMaterial({
+      albedo: [0.1, 0.1, 0.8, 1.0], // Blue ceramic
+      metallic: 0.0,
+      roughness: 0.1,
+    }),
+  ]);
+
   const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
 
-  // Spawn 1000 cubes with randomized transforms
+  // Spawn 1000 cubes with randomized transforms and materials
   const NUM_CUBES = 1000;
   for (let i = 0; i < NUM_CUBES; i++) {
     const cubeEntity = world.createEntity();
     const cubeXform = new TransformComponent();
 
-    // Random position in a cube of size 50 around origin
+    // Random position
     const px = (Math.random() - 0.5) * 50;
     const py = (Math.random() - 0.5) * 50;
     const pz = (Math.random() - 0.5) * 50;
     cubeXform.setPosition(px, py, pz);
 
-    // Random rotation using Euler → Quaternion
+    // Random rotation
     const rx = Math.random() * Math.PI * 2;
     const ry = Math.random() * Math.PI * 2;
     const rz = Math.random() * Math.PI * 2;
     const q = quat.fromEuler(rx, ry, rz, "xyz");
     cubeXform.setRotation(q);
 
-    // Random uniform scale between 0.5 and 2.0
+    // Random scale
     const s = 0.5 + Math.random() * 1.5;
     cubeXform.setScale(s, s, s);
+
+    // Pick random material
+    const randomMaterial =
+      materials[Math.floor(Math.random() * materials.length)];
 
     world.addComponent(cubeEntity, cubeXform);
     world.addComponent(
       cubeEntity,
-      new MeshRendererComponent(cubeMesh, material1),
+      new MeshRendererComponent(cubeMesh, randomMaterial),
     );
   }
 
   // Small debug marker cube to visualize raycast hit
-  const markerMaterial = await resourceManager.createPhongMaterial({
-    baseColor: [1.0, 1.0, 0.2, 1.0], // yellow-ish
-    specularColor: [0.2, 0.2, 0.2],
-    shininess: 16.0,
+  const markerMaterial = await resourceManager.createPBRMaterial({
+    albedo: [1.0, 1.0, 0.2, 1.0],
+    metallic: 0.0,
+    roughness: 0.3,
+    emissive: [0.5, 0.5, 0.1], // Bright yellow glow
   });
   const markerEntityLocal = world.createEntity();
   const markerXform = new TransformComponent();

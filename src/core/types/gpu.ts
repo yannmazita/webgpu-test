@@ -16,40 +16,6 @@ export type TypedArray =
   | Uint8Array;
 
 /**
- * Options for creating a Phong material.
- * All properties are optional, with sensible defaults.
- */
-export interface PhongMaterialOptions {
-  /**
-   * The base RGBA color of the material. Each component should be in the
-   * normalized [0.0, 1.0] range. This color acts as a tint when a texture
-   * is present. default: [1, 1, 1, 1] (white)
-   */
-  baseColor?: [number, number, number, number];
-
-  /**
-   * The RGB color of the specular highlight. Each component should be in the
-   * normalized [0.0, 1.0] range. default: [1, 1, 1] (white)
-   */
-  specularColor?: [number, number, number];
-
-  /**
-   * The shininess factor, which controls the size and intensity of the
-   * specular highlight. It's the exponent in the Phong specular calculation.
-   * Higher values result in smaller, sharper highlights (like plastic), while
-   * lower values create larger, softer highlights (like rubber).
-   * default: 32.0
-   */
-  shininess?: number;
-
-  /**
-   * An optional URL for a diffuse texture map. If provided, its color will be
-   * multiplied by the `baseColor`.
-   */
-  textureUrl?: string;
-}
-
-/**
  * Represents a light source in the scene.
  *
  */
@@ -117,4 +83,83 @@ export interface InstanceData {
 export interface PipelineBatch {
   material: Material;
   meshMap: Map<Mesh, InstanceData[]>;
+}
+
+/**
+ * Options for creating a PBR material following glTF 2.0 standard.
+ * All properties are optional with sensible defaults.
+ */
+export interface PBRMaterialOptions {
+  /**
+   * Base color (albedo) in linear space [R, G, B, A].
+   * Acts as diffuse color for dielectrics, tint for metals.
+   * Default: [1, 1, 1, 1] (white)
+   */
+  albedo?: [number, number, number, number];
+
+  /**
+   * Metallic factor [0.0 - 1.0].
+   * 0.0 = dielectric (plastic, wood, etc.)
+   * 1.0 = metallic (iron, gold, etc.)
+   * Default: 0.0
+   */
+  metallic?: number;
+
+  /**
+   * Roughness factor [0.0 - 1.0].
+   * 0.0 = perfectly smooth (mirror)
+   * 1.0 = completely rough (chalk)
+   * Default: 0.5
+   */
+  roughness?: number;
+
+  /**
+   * Normal map intensity [0.0 - 2.0].
+   * 1.0 = normal intensity, 0.0 = flat surface
+   * Default: 1.0
+   */
+  normalIntensity?: number;
+
+  /**
+   * Emissive color in linear space [R, G, B].
+   * Self-illuminating surfaces (screens, lights, etc.)
+   * Default: [0, 0, 0] (no emission)
+   */
+  emissive?: [number, number, number];
+
+  /**
+   * Ambient occlusion strength [0.0 - 1.0].
+   * Default: 1.0
+   */
+  occlusionStrength?: number;
+
+  // Texture Maps (glTF 2.0 standard)
+  /**
+   * Base color (albedo) texture map URL.
+   */
+  albedoMap?: string;
+
+  /**
+   * Metallic-Roughness texture map URL.
+   * R channel: unused
+   * G channel: roughness
+   * B channel: metallic
+   * Standard glTF 2.0 format
+   */
+  metallicRoughnessMap?: string;
+
+  /**
+   * Normal map texture URL (tangent space).
+   */
+  normalMap?: string;
+
+  /**
+   * Emissive texture map URL.
+   */
+  emissiveMap?: string;
+
+  /**
+   * Ambient occlusion texture map URL.
+   */
+  occlusionMap?: string;
 }
