@@ -451,11 +451,15 @@ export class Renderer {
         for (let i = 0; i < batch.mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, batch.mesh.buffers[i]);
         }
-        // Bind instance buffer at the slot immediately after mesh buffers
+        // bind instance buffer at the byte offset for this batch's first instance
+        const instanceByteOffset =
+          batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
         passEncoder.setVertexBuffer(
           batch.mesh.buffers.length,
           this.instanceBuffer,
+          instanceByteOffset,
         );
+
         if (batch.mesh.indexBuffer) {
           passEncoder.setIndexBuffer(
             batch.mesh.indexBuffer,
