@@ -1,5 +1,5 @@
 // src/core/types/gpu.ts
-import { Mat4, Vec4 } from "wgpu-matrix";
+import { Mat3, Mat4, Vec4 } from "wgpu-matrix";
 import { Material } from "@/core/materials/material";
 
 /**
@@ -88,6 +88,7 @@ export interface Renderable {
   modelMatrix: Mat4;
   material: Material;
   isUniformlyScaled: boolean;
+  normalMatrix: Mat3; // precomputed normal matrix for non-uniform scales
 }
 
 /**
@@ -96,6 +97,7 @@ export interface Renderable {
 export interface InstanceData {
   modelMatrix: Mat4;
   isUniformlyScaled: boolean;
+  normalMatrix: Mat3; // carry normal matrix into batching
 }
 
 /**

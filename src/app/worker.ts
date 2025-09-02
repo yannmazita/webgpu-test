@@ -88,7 +88,7 @@ async function initWorker(
   const camXform = new TransformComponent();
   camXform.setPosition(0, 1, 3);
   world.addComponent(cameraEntity, camXform);
-  world.addComponent(cameraEntity, new CameraComponent(90, 16 / 9, 0.1, 100.0));
+  world.addComponent(cameraEntity, new CameraComponent(74, 16 / 9, 0.1, 100.0));
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
   // Lights (and scene lighting resource)
@@ -110,7 +110,9 @@ async function initWorker(
   });
   const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
   const cubeEntity = world.createEntity();
-  world.addComponent(cubeEntity, new TransformComponent());
+  const cubeXform = new TransformComponent();
+  //cubeXform.setScale(1.0, 2.0, 0.5); // non-uniform scaling test
+  world.addComponent(cubeEntity, cubeXform);
   world.addComponent(
     cubeEntity,
     new MeshRendererComponent(cubeMesh, material1),
@@ -147,8 +149,6 @@ function frame(now: number) {
   // Render
   renderSystem(world, renderer, sceneRenderData);
 
-  // This is a no-op on the worker side, which is correct. The main thread
-  // is responsible for resetting the mouse delta in the shared buffer.
   inputSource!.lateUpdate();
 
   // Acknowledge frame completion to main thread

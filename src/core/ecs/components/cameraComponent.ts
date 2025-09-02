@@ -16,8 +16,8 @@ export class CameraComponent implements IComponent {
   public inverseViewMatrix: Mat4 = mat4.identity(); // World matrix of the camera
   public inverseProjectionMatrix: Mat4 = mat4.identity();
 
-  constructor(fovYDegrees = 75, aspectRatio = 16 / 9, near = 0.1, far = 100.0) {
-    this.fovYRadians = (fovYDegrees * Math.PI) / 180;
+  constructor(fovYDegrees = 74, aspectRatio = 16 / 9, near = 0.1, far = 100.0) {
+    this.fovYRadians = (fovYDegrees * Math.PI) / 180; // 74° vertical fov is 106 horizontal @ 16/9
     this.aspectRatio = aspectRatio;
     this.near = near;
     this.far = far;

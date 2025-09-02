@@ -34,22 +34,25 @@ export class BatchManager {
    * Checks if renderables have changed since last frame
    */
   public checkIfDirty(renderables: Renderable[]): void {
-    if (renderables.length !== this.lastRenderableCount) {
-      this.batchesDirty = true;
-      this.lastRenderableCount = renderables.length;
-      return;
-    }
+    const lengthChanged = renderables.length !== this.lastRenderableCount;
+    let anyChanged = false;
 
-    // Quick hash check for changes
+    // Update hashes for all renderables in this pass to avoid multi-frame churn
     for (const renderable of renderables) {
       const hash = this.computeRenderableHash(renderable);
       const lastHash = this.renderableHashes.get(renderable);
       if (lastHash !== hash) {
-        this.batchesDirty = true;
+        anyChanged = true;
         this.renderableHashes.set(renderable, hash);
-        return;
       }
     }
+
+    // Mark dirty if structure changed (count) or any renderable’s (mesh/material) changed
+    this.batchesDirty =
+      lengthChanged || anyChanged || this.opaqueBatches.size === 0;
+
+    // Update count for next frame comparison
+    this.lastRenderableCount = renderables.length;
   }
 
   private computeRenderableHash(renderable: Renderable): number {
@@ -78,7 +81,8 @@ export class BatchManager {
     this.opaqueBatches.clear();
 
     for (const renderable of renderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
+        renderable;
       const pipeline = getPipeline(material, mesh);
 
       if (!this.opaqueBatches.has(pipeline)) {
@@ -96,6 +100,7 @@ export class BatchManager {
       pipelineBatch.meshMap.get(mesh)!.push({
         modelMatrix,
         isUniformlyScaled,
+        normalMatrix,
       });
     }
 
@@ -119,7 +124,8 @@ export class BatchManager {
 
     // Repopulate with current frame data
     for (const renderable of renderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled } = renderable;
+      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
+        renderable;
 
       // Find the matching batch
       for (const batch of batches.values()) {
@@ -127,6 +133,7 @@ export class BatchManager {
           batch.meshMap.get(mesh)!.push({
             modelMatrix,
             isUniformlyScaled,
+            normalMatrix,
           });
           break;
         }

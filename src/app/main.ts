@@ -83,7 +83,6 @@ const tick = (now: number) => {
       type: "FRAME",
       now,
     });
-    // Reset mouse delta in the shared buffer for the next frame.
     input.lateUpdate();
   }
 

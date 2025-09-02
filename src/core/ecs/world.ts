@@ -11,8 +11,9 @@ export class World {
   private nextEntityId = 0;
   private recycledEntityIds: Entity[] = [];
   private globalEntity: Entity = 0;
-  private queryCache = new Map<string, Entity[]>();
-  private queryCacheDirty = true;
+  // Versioned query cache: each cached entry is valid only for the worldVersion it was built on
+  private queryCache = new Map<string, { version: number; result: Entity[] }>();
+  private worldVersion = 0;
 
   constructor() {
     // Reserve entity 0 for global components/resources
@@ -55,6 +56,7 @@ export class World {
   public createEntity(): Entity {
     const entityId = this.recycledEntityIds.pop() ?? this.nextEntityId++;
     this.entities.add(entityId);
+    this.worldVersion++; // Any entity set change invalidates cached query results
     return entityId;
   }
 
@@ -75,7 +77,7 @@ export class World {
 
     this.entities.delete(entity);
     this.recycledEntityIds.push(entity);
-    this.queryCacheDirty = true;
+    this.worldVersion++; // Invalidate caches by version bump
   }
 
   /**
@@ -92,7 +94,7 @@ export class World {
       this.componentStores.set(componentType, new Map());
     }
     this.componentStores.get(componentType)!.set(entity, component);
-    this.queryCacheDirty = true;
+    this.worldVersion++; // Invalidate caches by version bump
   }
 
   /**
@@ -133,7 +135,7 @@ export class World {
     componentType: ComponentConstructor<T>,
   ): void {
     this.componentStores.get(componentType)?.delete(entity);
-    this.queryCacheDirty = true;
+    this.worldVersion++; // Invalidate caches by version bump
   }
 
   /**
@@ -148,14 +150,15 @@ export class World {
       .sort()
       .join(",");
 
-    // Return cached result if valid
-    if (!this.queryCacheDirty && this.queryCache.has(cacheKey)) {
-      return this.queryCache.get(cacheKey)!;
+    // Versioned cache lookup: only valid if versions match
+    const cached = this.queryCache.get(cacheKey);
+    if (cached && cached.version === this.worldVersion) {
+      return cached.result;
     }
 
     if (componentTypes.length === 0) {
       const result = Array.from(this.entities);
-      this.queryCache.set(cacheKey, result);
+      this.queryCache.set(cacheKey, { version: this.worldVersion, result });
       return result;
     }
 
@@ -172,9 +175,9 @@ export class World {
     }
 
     if (!smallestStoreType || smallestStoreSize === 0) {
-      const emptyResult: Entity[] = [];
-      this.queryCache.set(cacheKey, emptyResult);
-      return emptyResult;
+      const result: Entity[] = [];
+      this.queryCache.set(cacheKey, { version: this.worldVersion, result });
+      return result;
     }
 
     const potentialEntities = Array.from(
@@ -188,13 +191,7 @@ export class World {
       otherComponentTypes.every((type) => this.hasComponent(entity, type)),
     );
 
-    this.queryCache.set(cacheKey, result);
-
-    // Clear dirty flag after rebuilding all caches
-    if (this.queryCacheDirty) {
-      this.queryCacheDirty = false;
-    }
-
+    this.queryCache.set(cacheKey, { version: this.worldVersion, result });
     return result;
   }
 }
