@@ -17,12 +17,15 @@ export class BatchManager {
   // Pre-allocated arrays for instance data to avoid per-frame allocations
   private instanceDataPool: Float32Array;
   private instanceDataPoolSize: number;
-  private readonly INSTANCE_STRIDE_IN_FLOATS = 20;
+  private readonly INSTANCE_STRIDE_IN_FLOATS = 26; // stride to match renderer
 
   // Track if batches need rebuilding
   private batchesDirty = true;
-  private lastRenderableCount = 0;
-  private renderableHashes = new WeakMap<Renderable, number>();
+  private lastOpaqueSignature: [number, number][] = [];
+
+  // --- Debugging ---
+  private readonly DEBUG_BATCHING = false; // Set to true to log rebuilds
+  private debugRebuildCounter = 0;
 
   constructor(initialCapacity = 100) {
     this.instanceDataPoolSize =
@@ -31,56 +34,86 @@ export class BatchManager {
   }
 
   /**
-   * Checks if renderables have changed since last frame
+   * Generates a stable numeric key from material and mesh IDs.
    */
-  public checkIfDirty(renderables: Renderable[]): void {
-    const lengthChanged = renderables.length !== this.lastRenderableCount;
-    let anyChanged = false;
-
-    // Update hashes for all renderables in this pass to avoid multi-frame churn
-    for (const renderable of renderables) {
-      const hash = this.computeRenderableHash(renderable);
-      const lastHash = this.renderableHashes.get(renderable);
-      if (lastHash !== hash) {
-        anyChanged = true;
-        this.renderableHashes.set(renderable, hash);
-      }
-    }
-
-    // Mark dirty if structure changed (count) or any renderable’s (mesh/material) changed
-    this.batchesDirty =
-      lengthChanged || anyChanged || this.opaqueBatches.size === 0;
-
-    // Update count for next frame comparison
-    this.lastRenderableCount = renderables.length;
-  }
-
-  private computeRenderableHash(renderable: Renderable): number {
-    const mid = ((renderable.material as any).id ?? 0) >>> 0;
-    const aid = ((renderable.mesh as any).id ?? 0) >>> 0;
-    // Simple mix to reduce collisions; still very cheap
-    return ((mid * 2654435761) ^ (aid * 97531)) >>> 0;
+  private _combineIds(materialId: number, meshId: number): number {
+    // Combine two 26-bit safe numbers into one 52-bit safe number.
+    // Assumes materialId and meshId are well under 2^26 (67 million).
+    return materialId * 67108864 + meshId; // 67108864 = 2^26
   }
 
   /**
-   * Gets or creates batches for opaque objects
+   * Computes a canonical signature of the scene's opaque renderable structure.
+   * The signature is a sorted list of [structure_key, count] pairs.
+   */
+  private _computeOpaqueSignature(
+    renderables: Renderable[],
+  ): [number, number][] {
+    const counts = new Map<number, number>();
+    for (const r of renderables) {
+      // The `id` property is added dynamically in ResourceManager.
+      const key = this._combineIds((r.material as any).id, (r.mesh as any).id);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    // Sort by key for a canonical representation that is easy to compare.
+    return Array.from(counts.entries()).sort((a, b) => a[0] - b[0]);
+  }
+
+  /**
+   * Checks if the structure of opaque renderables has changed since last frame.
+   */
+  public checkIfDirty(opaqueRenderables: Renderable[]): void {
+    const newSignature = this._computeOpaqueSignature(opaqueRenderables);
+
+    if (newSignature.length !== this.lastOpaqueSignature.length) {
+      this.batchesDirty = true;
+    } else {
+      let areEqual = true;
+      for (let i = 0; i < newSignature.length; i++) {
+        if (
+          newSignature[i][0] !== this.lastOpaqueSignature[i][0] ||
+          newSignature[i][1] !== this.lastOpaqueSignature[i][1]
+        ) {
+          areEqual = false;
+          break;
+        }
+      }
+      this.batchesDirty = !areEqual;
+    }
+
+    if (this.batchesDirty) {
+      this.lastOpaqueSignature = newSignature;
+      if (this.DEBUG_BATCHING) {
+        this.debugRebuildCounter++;
+        console.log(
+          `BatchManager: Rebuilding batches. Count: ${this.debugRebuildCounter}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Gets or creates batches for opaque objects.
    */
   public getOpaqueBatches(
-    renderables: Renderable[],
+    allRenderables: Renderable[],
     getPipeline: (material: Material, mesh: Mesh) => GPURenderPipeline,
   ): Map<GPURenderPipeline, PipelineBatch> {
-    this.checkIfDirty(renderables);
+    const opaqueRenderables = allRenderables.filter(
+      (r) => !r.material.isTransparent,
+    );
+    this.checkIfDirty(opaqueRenderables);
 
     if (!this.batchesDirty && this.opaqueBatches.size > 0) {
-      // Just update instance data without recreating batch structure
-      this.updateInstanceData(this.opaqueBatches, renderables);
+      // Fast path: Just update instance data without recreating batch structure
+      this.updateInstanceData(opaqueRenderables);
       return this.opaqueBatches;
     }
 
-    // Clear and rebuild batches only when necessary
+    // Slow path: Clear and rebuild batches from scratch
     this.opaqueBatches.clear();
 
-    for (const renderable of renderables) {
+    for (const renderable of opaqueRenderables) {
       const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
         renderable;
       const pipeline = getPipeline(material, mesh);
@@ -109,40 +142,39 @@ export class BatchManager {
   }
 
   /**
-   * Updates only the instance data without recreating batch structures
+   * Updates only the instance data without recreating batch structures.
+   * This is the fast path for when only transforms have changed.
    */
-  private updateInstanceData(
-    batches: Map<GPURenderPipeline, PipelineBatch>,
-    renderables: Renderable[],
-  ): void {
-    // Clear existing instance data
-    for (const batch of batches.values()) {
-      for (const instances of batch.meshMap.values()) {
-        instances.length = 0;
+  private updateInstanceData(opaqueRenderables: Renderable[]): void {
+    // Build a lookup map for O(1) instance placement
+    const instanceLookup = new Map<number, InstanceData[]>();
+    for (const batch of this.opaqueBatches.values()) {
+      for (const [mesh, instances] of batch.meshMap.entries()) {
+        instances.length = 0; // Clear for repopulation
+        const key = this._combineIds(
+          (batch.material as any).id,
+          (mesh as any).id,
+        );
+        instanceLookup.set(key, instances);
       }
     }
 
-    // Repopulate with current frame data
-    for (const renderable of renderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
-        renderable;
-
-      // Find the matching batch
-      for (const batch of batches.values()) {
-        if (batch.material === material && batch.meshMap.has(mesh)) {
-          batch.meshMap.get(mesh)!.push({
-            modelMatrix,
-            isUniformlyScaled,
-            normalMatrix,
-          });
-          break;
-        }
+    // Repopulate with current frame data using the lookup
+    for (const r of opaqueRenderables) {
+      const key = this._combineIds((r.material as any).id, (r.mesh as any).id);
+      const instances = instanceLookup.get(key);
+      if (instances) {
+        instances.push({
+          modelMatrix: r.modelMatrix,
+          isUniformlyScaled: r.isUniformlyScaled,
+          normalMatrix: r.normalMatrix,
+        });
       }
     }
   }
 
   /**
-   * Gets a pre-allocated Float32Array for instance data
+   * Gets a pre-allocated Float32Array for instance data.
    */
   public getInstanceDataArray(size: number): Float32Array {
     const requiredSize = size * this.INSTANCE_STRIDE_IN_FLOATS;
@@ -158,7 +190,7 @@ export class BatchManager {
   }
 
   /**
-   * Mark batches as needing rebuild
+   * Mark batches as needing rebuild.
    */
   public invalidate(): void {
     this.batchesDirty = true;
