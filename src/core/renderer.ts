@@ -308,9 +308,10 @@ export class Renderer {
   private _handleResize(camera: CameraComponent): boolean {
     if (!this.resizePending) return false;
 
-    const dpr = this.currentDPR || 1;
-    const physW = Math.max(1, Math.round(this.cssWidth * dpr));
-    const physH = Math.max(1, Math.round(this.cssHeight * dpr));
+    // Apply dynamic resolution scaling consistently on the DOM canvas path
+    const effectiveDpr = (this.currentDPR || 1) * Renderer.RENDER_SCALE;
+    const physW = Math.max(1, Math.round(this.cssWidth * effectiveDpr));
+    const physH = Math.max(1, Math.round(this.cssHeight * effectiveDpr));
 
     if (this.canvas.width !== physW || this.canvas.height !== physH) {
       this.canvas.width = physW;
