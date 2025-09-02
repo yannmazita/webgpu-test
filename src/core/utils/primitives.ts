@@ -79,7 +79,7 @@ export function createPlaneMeshData(size = 1.0): MeshData {
   return { positions, normals, texCoords, indices };
 }
 
-export function createSphereMeshData(
+export function createUvSphereMeshData(
   radius = 0.5,
   subdivisions = 16,
 ): MeshData {
@@ -101,12 +101,7 @@ export function createSphereMeshData(
       const pz = radius * Math.sin(phi) * Math.sin(theta);
 
       positions.push(px, py, pz);
-
-      const nx = px / radius;
-      const ny = py / radius;
-      const nz = pz / radius;
-      normals.push(nx, ny, nz);
-
+      normals.push(px / radius, py / radius, pz / radius);
       texCoords.push(u, v);
     }
   }
@@ -120,6 +115,124 @@ export function createSphereMeshData(
 
       indices.push(i0, i2, i1, i1, i2, i3);
     }
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    texCoords: new Float32Array(texCoords),
+    indices: new Uint16Array(indices),
+  };
+}
+
+export function createIcosphereMeshData(
+  radius = 0.5,
+  subdivisions = 2,
+): MeshData {
+  const t = (1 + Math.sqrt(5)) / 2;
+
+  // Initial icosahedron vertices
+  const verts: [number, number, number][] = [
+    [-1, t, 0],
+    [1, t, 0],
+    [-1, -t, 0],
+    [1, -t, 0],
+    [0, -1, t],
+    [0, 1, t],
+    [0, -1, -t],
+    [0, 1, -t],
+    [t, 0, -1],
+    [t, 0, 1],
+    [-t, 0, -1],
+    [-t, 0, 1],
+  ];
+
+  // Normalize to unit sphere
+  function normalize(v: [number, number, number]): [number, number, number] {
+    const len = Math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2);
+    return [v[0] / len, v[1] / len, v[2] / len];
+  }
+
+  const vertices = verts.map((v) => normalize(v));
+
+  // Initial icosahedron faces
+  let faces: [number, number, number][] = [
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
+  ];
+
+  // Midpoint cache to avoid duplicate vertices
+  const midpointCache = new Map<string, number>();
+  function getMidpoint(a: number, b: number): number {
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    if (midpointCache.has(key)) return midpointCache.get(key)!;
+
+    const va = vertices[a];
+    const vb = vertices[b];
+    const mid: [number, number, number] = normalize([
+      (va[0] + vb[0]) / 2,
+      (va[1] + vb[1]) / 2,
+      (va[2] + vb[2]) / 2,
+    ]);
+
+    const index = vertices.length;
+    vertices.push(mid);
+    midpointCache.set(key, index);
+    return index;
+  }
+
+  // Subdivide faces
+  for (let i = 0; i < subdivisions; i++) {
+    const newFaces: [number, number, number][] = [];
+    for (const [a, b, c] of faces) {
+      const ab = getMidpoint(a, b);
+      const bc = getMidpoint(b, c);
+      const ca = getMidpoint(c, a);
+
+      newFaces.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+    }
+    faces = newFaces;
+  }
+
+  // Build mesh data
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const texCoords: number[] = [];
+  const indices: number[] = [];
+
+  for (const v of vertices) {
+    const nx = v[0],
+      ny = v[1],
+      nz = v[2];
+    positions.push(nx * radius, ny * radius, nz * radius);
+    normals.push(nx, ny, nz);
+
+    // crude spherical UV projection
+    const u = 0.5 + Math.atan2(nz, nx) / (2 * Math.PI);
+    const vTex = 0.5 - Math.asin(ny) / Math.PI;
+    texCoords.push(u, vTex);
+  }
+
+  for (const [a, b, c] of faces) {
+    indices.push(a, b, c);
   }
 
   return {

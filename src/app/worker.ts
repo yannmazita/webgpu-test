@@ -18,7 +18,7 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import { SceneRenderData } from "@/core/types/rendering";
 import {
   createCubeMeshData,
-  createSphereMeshData,
+  createIcosphereMeshData,
 } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
@@ -153,7 +153,7 @@ async function initWorker(
   });
   const sphereMesh = resourceManager.createMesh(
     "sphere",
-    createSphereMeshData(0.1),
+    createIcosphereMeshData(0.1),
   );
 
   light1Entity = world.createEntity();
