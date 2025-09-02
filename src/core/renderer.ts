@@ -8,6 +8,19 @@ import { BatchManager } from "./rendering/batchManager";
 import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
 
+export interface RendererStats {
+  canvasWidth: number;
+  canvasHeight: number;
+  lightCount: number;
+  visibleOpaque: number;
+  visibleTransparent: number;
+  drawsOpaque: number;
+  drawsTransparent: number;
+  instancesOpaque: number;
+  instancesTransparent: number;
+  cpuTotalUs: number;
+}
+
 /**
  * A pre-computed batch of objects that can be drawn with a single instanced draw call.
  */
@@ -75,6 +88,19 @@ export class Renderer {
   private tempVec3A: Vec3 = vec3.create();
   private tempVec3B: Vec3 = vec3.create();
   private tempCameraPos: Vec3 = vec3.create();
+
+  private stats: RendererStats = {
+    canvasWidth: 0,
+    canvasHeight: 0,
+    lightCount: 0,
+    visibleOpaque: 0,
+    visibleTransparent: 0,
+    drawsOpaque: 0,
+    drawsTransparent: 0,
+    instancesOpaque: 0,
+    instancesTransparent: 0,
+    cpuTotalUs: 0,
+  };
 
   private resizeObserver?: ResizeObserver;
   private resizePending = true;
@@ -448,8 +474,8 @@ export class Renderer {
   private _renderOpaquePass(
     passEncoder: GPURenderPassEncoder,
     batches: DrawBatch[],
-  ): void {
-    if (batches.length === 0) return;
+  ): number {
+    if (batches.length === 0) return 0;
 
     let lastMaterial: Material | null = null;
     let lastMesh: Mesh | null = null;
@@ -490,6 +516,9 @@ export class Renderer {
         passEncoder.draw(mesh.vertexCount, batch.instanceCount, 0, 0);
       }
     }
+
+    // Return the number of batches, which equals the number of draw calls.
+    return batches.length;
   }
 
   private _renderTransparentPass(
@@ -497,8 +526,8 @@ export class Renderer {
     renderables: Renderable[],
     camera: CameraComponent,
     instanceBufferOffset: number, // bytes
-  ): void {
-    if (renderables.length === 0) return;
+  ): number {
+    if (renderables.length === 0) return 0;
 
     // Camera position (from inverse view)
     this.tempCameraPos[0] = camera.inverseViewMatrix[12];
@@ -574,6 +603,7 @@ export class Renderer {
     );
 
     // Draw, batching consecutive renderables with same mesh and material
+    let drawCalls = 0;
     let i = 0;
     while (i < renderables.length) {
       const { mesh, material } = renderables[i];
@@ -621,8 +651,11 @@ export class Renderer {
         passEncoder.draw(mesh.vertexCount, count, 0, i);
       }
 
+      drawCalls++;
       i += count;
     }
+
+    return drawCalls;
   }
 
   private _renderUIPass(
@@ -652,12 +685,22 @@ export class Renderer {
     sceneData: SceneRenderData,
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
   ): void {
+    const tStart = performance.now();
+
     Profiler.begin("Render.Total");
     Profiler.begin("Render.HandleResize");
     this._handleResize(camera);
     Profiler.end("Render.HandleResize");
 
+    // Skip rendering if the canvas is not visible.
     if (this.canvas.width === 0 || this.canvas.height === 0) {
+      // Still update stats for a consistent output.
+      this.stats.canvasWidth = this.canvas.width;
+      this.stats.canvasHeight = this.canvas.height;
+      this.stats.cpuTotalUs = Math.max(
+        0,
+        Math.round((performance.now() - tStart) * 1000),
+      );
       Profiler.end("Render.Total");
       return;
     }
@@ -671,6 +714,7 @@ export class Renderer {
     this.visibleRenderables.length = 0;
     this.transparentRenderables.length = 0;
 
+    // Cull objects against the camera frustum and separate into opaque/transparent lists.
     for (const r of sceneData.renderables) {
       if (this._isInFrustum(r, camera)) {
         if (r.material.isTransparent) {
@@ -680,10 +724,15 @@ export class Renderer {
         }
       }
     }
+    // Update stats with the counts after culling.
+    this.stats.visibleOpaque = this.visibleRenderables.length;
+    this.stats.visibleTransparent = this.transparentRenderables.length;
+    this.stats.lightCount = sceneData.lights.length;
+    this.stats.canvasWidth = this.canvas.width;
+    this.stats.canvasHeight = this.canvas.height;
     Profiler.end("Render.FrustumCullAndSeparate");
 
     Profiler.begin("Render.Batching");
-
     // 1) Build/retrieve opaque batches structure (no writes yet)
     const getPipelineCallback = (material: Material, mesh: Mesh) =>
       material.getPipeline(
@@ -781,6 +830,9 @@ export class Renderer {
         }
       }
     }
+    // Record instance counts for stats
+    this.stats.instancesOpaque = opaqueInstanceTotal;
+    this.stats.instancesTransparent = transparentInstanceTotal;
     Profiler.end("Render.Batching");
 
     Profiler.begin("Render.WriteInstanceBuffer");
@@ -841,12 +893,15 @@ export class Renderer {
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
 
     Profiler.begin("Render.OpaquePass");
-    this._renderOpaquePass(scenePassEncoder, this.opaqueBatches);
+    this.stats.drawsOpaque = this._renderOpaquePass(
+      scenePassEncoder,
+      this.opaqueBatches,
+    );
     Profiler.end("Render.OpaquePass");
 
     // When calling the transparent pass, change the offset to use the opaque count
     Profiler.begin("Render.TransparentPass");
-    this._renderTransparentPass(
+    this.stats.drawsTransparent = this._renderTransparentPass(
       scenePassEncoder,
       this.transparentRenderables,
       camera,
@@ -863,6 +918,12 @@ export class Renderer {
     this.device.queue.submit([commandEncoder.finish()]);
     Profiler.end("Render.Submit");
 
+    // CPU total time for this render
+    this.stats.cpuTotalUs = Math.max(
+      0,
+      Math.round((performance.now() - tStart) * 1000),
+    );
+
     Profiler.end("Render.Total");
   }
 
@@ -876,5 +937,9 @@ export class Renderer {
         "Frame bind group layout is not initialized. Call init() first.",
       );
     return this.frameBindGroupLayout;
+  }
+
+  public getStats(): RendererStats {
+    return this.stats;
   }
 }
