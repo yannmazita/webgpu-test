@@ -1,7 +1,7 @@
 // src/core/utils/raycast.ts
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
-import { vec3, vec4, Vec3 } from "wgpu-matrix";
+import { vec3, vec4, Vec3, mat4 } from "wgpu-matrix";
 
 /**
  * Calculates the 3D world position corresponding to a 2D mouse coordinate,

@@ -15,6 +15,11 @@ export interface IInputSource {
   getMouseDelta(): { x: number; y: number };
 
   /**
+   * Gets the last known mouse position in CSS pixels relative to the viewport.
+   */
+  getMousePosition(): { x: number; y: number };
+
+  /**
    * Checks if the pointer is currently locked to the canvas.
    * @returns True if the pointer is locked.
    */

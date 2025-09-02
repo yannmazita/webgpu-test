@@ -20,6 +20,7 @@ import { createCubeMeshData } from "@/core/utils/primitives";
 import { ActionManager, ActionMapConfig } from "@/core/actionManager";
 import { SharedInputSource } from "@/core/sharedInputSource";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
+import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -50,6 +51,7 @@ let sceneRenderData: SceneRenderData | null = null;
 let cameraEntity = -1;
 let light1Entity = -1;
 let light2Entity = -1;
+let markerEntity = -1;
 
 let inputSource: SharedInputSource | null = null;
 let actionManager: ActionManager | null = null;
@@ -118,6 +120,22 @@ async function initWorker(
     new MeshRendererComponent(cubeMesh, material1),
   );
 
+  // Small debug marker cube to visualize raycast hit
+  const markerMaterial = await resourceManager.createPhongMaterial({
+    baseColor: [1.0, 1.0, 0.2, 1.0], // yellow-ish
+    specularColor: [0.2, 0.2, 0.2],
+    shininess: 16.0,
+  });
+  const markerEntityLocal = world.createEntity();
+  const markerXform = new TransformComponent();
+  markerXform.setScale(0.1, 0.1, 0.1);
+  world.addComponent(markerEntityLocal, markerXform);
+  world.addComponent(
+    markerEntityLocal,
+    new MeshRendererComponent(cubeMesh, markerMaterial),
+  );
+  markerEntity = markerEntityLocal;
+
   (self as any).postMessage({ type: "READY" });
 }
 
@@ -145,6 +163,38 @@ function frame(now: number) {
   // Core systems
   transformSystem(world);
   cameraSystem(world);
+
+  // --- Raycast: compute mouse ray and place marker on Y=0 plane ---
+  const camComp = world.getComponent(cameraEntity, CameraComponent)!;
+  const { width: vpW, height: vpH } = renderer.getViewportCssSize();
+  if (vpW > 0 && vpH > 0) {
+    // Determine mouse position in CSS pixels
+    let mx = Math.floor(vpW * 0.5);
+    let my = Math.floor(vpH * 0.5);
+    if (!actionManager!.isPointerLocked()) {
+      const mp = inputSource!.getMousePosition();
+      // Clamp to viewport
+      mx = Math.min(Math.max(mp.x, 0), Math.max(0, vpW - 1));
+      my = Math.min(Math.max(mp.y, 0), Math.max(0, vpH - 1));
+    }
+
+    const hit = getMouseWorldPositionWithViewport(
+      { x: mx, y: my },
+      vpW,
+      vpH,
+      camComp,
+      // Plane: Y=0
+      undefined,
+      undefined,
+    );
+    if (hit) {
+      const mxf = world.getComponent(markerEntity, TransformComponent)!;
+      // Offset slightly above plane to avoid z-fighting
+      mxf.setPosition(hit[0], hit[1] + 0.02, hit[2]);
+      // Update transforms again so marker appears this frame
+      transformSystem(world);
+    }
+  }
 
   // Render
   renderSystem(world, renderer, sceneRenderData);

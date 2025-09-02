@@ -848,6 +848,10 @@ export class Renderer {
     Profiler.end("Render.Total");
   }
 
+  public getViewportCssSize(): { width: number; height: number } {
+    return { width: this.cssWidth, height: this.cssHeight };
+  }
+
   public getFrameBindGroupLayout(): GPUBindGroupLayout {
     if (!this.frameBindGroupLayout)
       throw new Error(

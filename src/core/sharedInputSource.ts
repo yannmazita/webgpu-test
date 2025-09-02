@@ -6,6 +6,8 @@ import {
   MOUSE_DELTA_X_OFFSET,
   MOUSE_DELTA_Y_OFFSET,
   IS_POINTER_LOCKED_OFFSET,
+  MOUSE_POS_X_OFFSET,
+  MOUSE_POS_Y_OFFSET,
 } from "./sharedInputLayout";
 
 /**
@@ -34,6 +36,12 @@ export class SharedInputSource implements IInputSource {
     // Atomically read the current delta values and reset them to 0.
     const x = Atomics.exchange(this.int32View, MOUSE_DELTA_X_OFFSET / 4, 0);
     const y = Atomics.exchange(this.int32View, MOUSE_DELTA_Y_OFFSET / 4, 0);
+    return { x, y };
+  }
+
+  public getMousePosition(): { x: number; y: number } {
+    const x = Atomics.load(this.int32View, MOUSE_POS_X_OFFSET / 4);
+    const y = Atomics.load(this.int32View, MOUSE_POS_Y_OFFSET / 4);
     return { x, y };
   }
 

@@ -7,6 +7,8 @@ import {
   MOUSE_DELTA_Y_OFFSET,
   IS_POINTER_LOCKED_OFFSET,
   SHARED_BUFFER_SIZE,
+  MOUSE_POS_X_OFFSET,
+  MOUSE_POS_Y_OFFSET,
 } from "./sharedInputLayout";
 
 /**
@@ -17,6 +19,8 @@ export class InputManager implements IInputSource {
   public readonly sharedBuffer: SharedArrayBuffer;
   private int32View: Int32Array;
   private uint8View: Uint8Array;
+  private mouseX = 0;
+  private mouseY = 0;
 
   // Internal state for the main thread.
   private isPointerLockedState = false;
@@ -115,15 +119,58 @@ export class InputManager implements IInputSource {
       IS_POINTER_LOCKED_OFFSET,
       this.isPointerLockedState ? 1 : 0,
     );
+
+    // When entering pointer lock, reset absolute mouse pos to canvas center
+    if (this.isPointerLockedState) {
+      const w = this.canvas.clientWidth || 0;
+      const h = this.canvas.clientHeight || 0;
+      this.mouseX = Math.max(0, Math.floor(w * 0.5));
+      this.mouseY = Math.max(0, Math.floor(h * 0.5));
+      Atomics.store(this.int32View, MOUSE_POS_X_OFFSET / 4, this.mouseX);
+      Atomics.store(this.int32View, MOUSE_POS_Y_OFFSET / 4, this.mouseY);
+    }
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
+    const w = this.canvas.clientWidth || 0;
+    const h = this.canvas.clientHeight || 0;
+
     if (this.isPointerLockedState) {
-      // Atomically add the new movement to the existing delta in the buffer.
-      // This ensures that if multiple mouse events fire before the worker
-      // reads the value, no movement is lost.
+      // Accumulate deltas atomically for the worker to consume
       Atomics.add(this.int32View, MOUSE_DELTA_X_OFFSET / 4, e.movementX);
       Atomics.add(this.int32View, MOUSE_DELTA_Y_OFFSET / 4, e.movementY);
+
+      // Maintain an internal absolute position while locked (clamped)
+      this.mouseX = Math.min(
+        Math.max(this.mouseX + e.movementX, 0),
+        Math.max(0, w - 1),
+      );
+      this.mouseY = Math.min(
+        Math.max(this.mouseY + e.movementY, 0),
+        Math.max(0, h - 1),
+      );
+    } else {
+      // Compute position relative to the canvas in CSS pixels
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouseX = Math.min(
+        Math.max(Math.floor(e.clientX - rect.left), 0),
+        Math.max(0, w - 1),
+      );
+      this.mouseY = Math.min(
+        Math.max(Math.floor(e.clientY - rect.top), 0),
+        Math.max(0, h - 1),
+      );
     }
+
+    // Publish absolute mouse position for the worker (CSS pixels)
+    Atomics.store(this.int32View, MOUSE_POS_X_OFFSET / 4, this.mouseX);
+    Atomics.store(this.int32View, MOUSE_POS_Y_OFFSET / 4, this.mouseY);
   };
+
+  getMousePosition(): { x: number; y: number } {
+    // Main-thread convenience; reading the shared buffer mirrors what the worker does
+    const x = Atomics.load(this.int32View, MOUSE_POS_X_OFFSET / 4);
+    const y = Atomics.load(this.int32View, MOUSE_POS_Y_OFFSET / 4);
+    return { x, y };
+  }
 }

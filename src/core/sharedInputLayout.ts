@@ -32,11 +32,13 @@ export const MOUSE_DELTA_X_OFFSET = 0;
 export const MOUSE_DELTA_Y_OFFSET = 4;
 // Pointer lock state (0 or 1): 1 byte
 export const IS_POINTER_LOCKED_OFFSET = 8;
-// Padding to ensure 4-byte alignment for the keys array if needed
-// const PADDING = 3;
 
-// Start of the key states block
-export const KEYS_OFFSET = 12;
+// Absolute mouse position in CSS pixels (Int32)
+export const MOUSE_POS_X_OFFSET = 12; // 4 bytes
+export const MOUSE_POS_Y_OFFSET = 16; // 4 bytes
+
+// Start of the key states block (uint8s)
+export const KEYS_OFFSET = 20;
 
 // Total size needed for the buffer
 export const SHARED_BUFFER_SIZE = KEYS_OFFSET + SUPPORTED_KEYS.length;
