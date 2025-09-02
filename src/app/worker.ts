@@ -21,6 +21,7 @@ import { ActionManager, ActionMapConfig } from "@/core/actionManager";
 import { SharedInputSource } from "@/core/sharedInputSource";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
+import { quat } from "wgpu-matrix";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -104,21 +105,43 @@ async function initWorker(
   world.addComponent(light2Entity, new TransformComponent());
   world.addComponent(light2Entity, new LightComponent([0, 1, 0, 1]));
 
-  // One cube
+  // 1000 cubes with randomized transforms
   const material1 = await resourceManager.createPhongMaterial({
     baseColor: [1, 0.5, 0.2, 1.0],
     specularColor: [1.0, 1.0, 1.0],
     shininess: 100.0,
   });
   const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
-  const cubeEntity = world.createEntity();
-  const cubeXform = new TransformComponent();
-  //cubeXform.setScale(1.0, 2.0, 0.5); // non-uniform scaling test
-  world.addComponent(cubeEntity, cubeXform);
-  world.addComponent(
-    cubeEntity,
-    new MeshRendererComponent(cubeMesh, material1),
-  );
+
+  // Spawn 1000 cubes with randomized transforms
+  const NUM_CUBES = 1000;
+  for (let i = 0; i < NUM_CUBES; i++) {
+    const cubeEntity = world.createEntity();
+    const cubeXform = new TransformComponent();
+
+    // Random position in a cube of size 50 around origin
+    const px = (Math.random() - 0.5) * 50;
+    const py = (Math.random() - 0.5) * 50;
+    const pz = (Math.random() - 0.5) * 50;
+    cubeXform.setPosition(px, py, pz);
+
+    // Random rotation using Euler → Quaternion
+    const rx = Math.random() * Math.PI * 2;
+    const ry = Math.random() * Math.PI * 2;
+    const rz = Math.random() * Math.PI * 2;
+    const q = quat.fromEuler(rx, ry, rz, "xyz");
+    cubeXform.setRotation(q);
+
+    // Random uniform scale between 0.5 and 2.0
+    const s = 0.5 + Math.random() * 1.5;
+    cubeXform.setScale(s, s, s);
+
+    world.addComponent(cubeEntity, cubeXform);
+    world.addComponent(
+      cubeEntity,
+      new MeshRendererComponent(cubeMesh, material1),
+    );
+  }
 
   // Small debug marker cube to visualize raycast hit
   const markerMaterial = await resourceManager.createPhongMaterial({
