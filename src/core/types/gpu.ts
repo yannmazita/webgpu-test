@@ -1,5 +1,5 @@
 // src/core/types/gpu.ts
-import { Mat3, Mat4, Vec4 } from "wgpu-matrix";
+import { Mat3, Mat4, Vec3, Vec4 } from "wgpu-matrix";
 import { Material } from "@/core/materials/material";
 
 /**
@@ -66,6 +66,14 @@ export interface Light {
 }
 
 /**
+ * Axis-Aligned Bounding Box
+ */
+export interface AABB {
+  min: Vec3;
+  max: Vec3;
+}
+
+/**
  * Represents a renderable object with its GPU buffer and metadata.
  */
 export interface Mesh {
@@ -77,6 +85,8 @@ export interface Mesh {
   indexBuffer?: GPUBuffer;
   indexFormat?: GPUIndexFormat;
   indexCount?: number;
+  /** Axis-aligned bounding box in local mesh space */
+  aabb: AABB;
 }
 
 /**

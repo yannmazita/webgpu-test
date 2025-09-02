@@ -7,6 +7,7 @@ import { CameraComponent } from "./ecs/components/cameraComponent";
 import { BatchManager } from "./rendering/batchManager";
 import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
+import { testAABBFrustum, transformAABB } from "./utils/bounds";
 
 export interface RendererStats {
   canvasWidth: number;
@@ -432,31 +433,22 @@ export class Renderer {
     }
   }
 
+  /**
+   * Tests if a renderable object is within the camera's view frustum.
+   * Uses AABB vs frustum planes testing for accurate culling.
+   */
   private _isInFrustum(
     renderable: Renderable,
     camera: CameraComponent,
   ): boolean {
-    const mx = renderable.modelMatrix[12];
-    const my = renderable.modelMatrix[13];
-    const mz = renderable.modelMatrix[14];
+    // Transform mesh AABB to world space
+    const worldAABB = transformAABB(
+      renderable.mesh.aabb,
+      renderable.modelMatrix,
+    );
 
-    // Approximate radius from scale
-    const sx = renderable.modelMatrix[0];
-    const sy = renderable.modelMatrix[5];
-    const sz = renderable.modelMatrix[10];
-    const radius = Math.max(sx, sy, sz) * 2.0;
-
-    const cx = camera.inverseViewMatrix[12];
-    const cy = camera.inverseViewMatrix[13];
-    const cz = camera.inverseViewMatrix[14];
-
-    const dx = mx - cx;
-    const dy = my - cy;
-    const dz = mz - cz;
-    const distSq = dx * dx + dy * dy + dz * dz;
-
-    const farPlusR = camera.far + radius;
-    return distSq < farPlusR * farPlusR;
+    // Test against frustum planes
+    return testAABBFrustum(worldAABB, camera.frustumPlanes);
   }
 
   private ensureCpuInstanceCapacity(requiredInstances: number): void {

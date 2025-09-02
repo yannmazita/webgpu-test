@@ -1,7 +1,7 @@
 // src/core/resourceManager.ts
 import { Renderer } from "./renderer";
 import { Material } from "./materials/material";
-import { Mesh, PhongMaterialOptions } from "./types/gpu";
+import { AABB, Mesh, PhongMaterialOptions } from "./types/gpu";
 import { PhongMaterial } from "./materials/phongMaterial";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
@@ -9,6 +9,48 @@ import { createGPUBuffer } from "./utils/webgpu";
 import { loadSTL } from "@/loaders/stlLoader";
 import { loadOBJ } from "@/loaders/objLoader";
 import { ShaderPreprocessor } from "./shaders/preprocessor";
+import { vec3 } from "wgpu-matrix";
+
+/**
+ * Computes the axis-aligned bounding box from vertex positions.
+ * @param positions Flattened array of vertex positions [x,y,z,x,y,z,...]
+ * @returns AABB with min and max corners
+ */
+function computeAABB(positions: Float32Array): AABB {
+  if (positions.length === 0) {
+    // Empty mesh - return degenerate AABB
+    return {
+      min: vec3.create(0, 0, 0),
+      max: vec3.create(0, 0, 0),
+    };
+  }
+
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+
+  // Process every 3 floats as one vertex
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+
+  return {
+    min: vec3.create(minX, minY, minZ),
+    max: vec3.create(maxX, maxY, maxZ),
+  };
+}
 
 /**
  * Manages the creation, loading, and caching of GPU resources.
@@ -124,6 +166,9 @@ export class ResourceManager {
     const layouts: GPUVertexBufferLayout[] = [];
     const vertexCount = data.positions.length / 3;
 
+    // Compute AABB from positions
+    const aabb = computeAABB(data.positions);
+
     // Position Buffer (shaderLocation: 0)
     buffers.push(
       createGPUBuffer(
@@ -194,6 +239,7 @@ export class ResourceManager {
       indexBuffer,
       indexCount: data.indices.length,
       indexFormat: data.indices instanceof Uint16Array ? "uint16" : "uint32",
+      aabb,
     };
 
     // unique ID for caching

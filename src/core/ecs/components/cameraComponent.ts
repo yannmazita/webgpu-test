@@ -1,5 +1,5 @@
 // src/core/ecs/components/cameraComponent.ts
-import { Mat4, mat4 } from "wgpu-matrix";
+import { Mat4, mat4, Vec4, vec4 } from "wgpu-matrix";
 import { IComponent } from "../component";
 
 export class CameraComponent implements IComponent {
@@ -15,6 +15,19 @@ export class CameraComponent implements IComponent {
   public viewProjectionMatrix: Mat4 = mat4.identity();
   public inverseViewMatrix: Mat4 = mat4.identity(); // World matrix of the camera
   public inverseProjectionMatrix: Mat4 = mat4.identity();
+
+  // --- Frustum Planes ---
+  // Stored as [a,b,c,d] where ax+by+cz+d=0
+  // Normals point inward (negative half-space is inside frustum)
+  // Order: [left, right, bottom, top, near, far]
+  public frustumPlanes: Vec4[] = [
+    vec4.create(),
+    vec4.create(),
+    vec4.create(),
+    vec4.create(),
+    vec4.create(),
+    vec4.create(),
+  ];
 
   constructor(fovYDegrees = 74, aspectRatio = 16 / 9, near = 0.1, far = 100.0) {
     this.fovYRadians = (fovYDegrees * Math.PI) / 180; // 74° vertical fov is 106 horizontal @ 16/9
