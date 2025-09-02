@@ -36,6 +36,11 @@ import {
   MetricsContext,
   publishMetrics,
 } from "@/core/metrics";
+import {
+  getAxisValue,
+  IActionController,
+  isActionPressed,
+} from "@/core/action";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -70,7 +75,7 @@ let light2Entity = -1;
 let markerEntity = -1;
 
 let inputContext: InputContext | null = null;
-let actionManager: ActionManager | null = null;
+let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
 
 let metricsContext: MetricsContext | null = null;
@@ -98,7 +103,7 @@ async function initWorker(
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
     getMousePosition: () => getMousePosition(inputContext!),
     isPointerLocked: () => isPointerLocked(inputContext!),
-    lateUpdate: () => {}, // No-op for worker reader
+    lateUpdate: () => {},
   };
 
   const actionMap: ActionMapConfig = {
@@ -110,8 +115,15 @@ async function initWorker(
       negativeKey: "ShiftLeft",
     },
   };
-  actionManager = new ActionManager(inputReader, actionMap);
-  cameraControllerSystem = new CameraControllerSystem(actionManager);
+
+  actionController = {
+    isPressed: (name: string) => isActionPressed(actionMap, inputReader, name),
+    getAxis: (name: string) => getAxisValue(actionMap, inputReader, name),
+    getMouseDelta: () => inputReader.getMouseDelta(),
+    isPointerLocked: () => inputReader.isPointerLocked(),
+  };
+
+  cameraControllerSystem = new CameraControllerSystem(actionController);
 
   resourceManager = new ResourceManager(renderer);
   world = new World();
@@ -225,7 +237,7 @@ function frame(now: number) {
     // Determine mouse position in CSS pixels
     let mx = Math.floor(vpW * 0.5);
     let my = Math.floor(vpH * 0.5);
-    if (!actionManager!.isPointerLocked()) {
+    if (!actionController!.isPointerLocked()) {
       const mp = getMousePosition(inputContext!);
       // Clamp to viewport
       mx = Math.min(Math.max(mp.x, 0), Math.max(0, vpW - 1));

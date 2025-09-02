@@ -1,5 +1,5 @@
 // src/core/ecs/systems/cameraControllerSystem.ts
-import { ActionManager } from "@/core/actionManager";
+import { IActionController } from "@/core/action";
 import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
@@ -12,7 +12,7 @@ export class CameraControllerSystem {
   private pitch = 0;
   private yaw = 0;
 
-  private actions: ActionManager;
+  private actions: IActionController;
 
   // Reusable temporaries
   private tmpForward = vec3.create();
@@ -22,7 +22,7 @@ export class CameraControllerSystem {
   private tmpQuat = quat.identity();
   private tmpRotMat: Mat4 = mat4.identity();
 
-  constructor(actions: ActionManager) {
+  constructor(actions: IActionController) {
     this.actions = actions;
   }
 
