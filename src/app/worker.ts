@@ -16,7 +16,10 @@ import {
 } from "@/core/ecs/systems/renderSystem";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { SceneRenderData } from "@/core/types/rendering";
-import { createCubeMeshData } from "@/core/utils/primitives";
+import {
+  createCubeMeshData,
+  createSphereMeshData,
+} from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
 import { quat } from "wgpu-matrix";
@@ -140,13 +143,34 @@ async function initWorker(
   // Lights (and scene lighting resource)
   world.addResource(new SceneLightingComponent());
 
+  const lightMaterial1 = await resourceManager.createPBRMaterial({
+    albedo: [1, 0, 0, 1],
+    emissive: [1, 0, 0],
+  });
+  const lightMaterial2 = await resourceManager.createPBRMaterial({
+    albedo: [0, 1, 0, 1],
+    emissive: [0, 1, 0],
+  });
+  const sphereMesh = resourceManager.createMesh(
+    "sphere",
+    createSphereMeshData(0.1),
+  );
+
   light1Entity = world.createEntity();
   world.addComponent(light1Entity, new TransformComponent());
   world.addComponent(light1Entity, new LightComponent([1, 0, 0, 1]));
+  world.addComponent(
+    light1Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterial1),
+  );
 
   light2Entity = world.createEntity();
   world.addComponent(light2Entity, new TransformComponent());
   world.addComponent(light2Entity, new LightComponent([0, 1, 0, 1]));
+  world.addComponent(
+    light2Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterial2),
+  );
 
   // Create multiple materials for variety
   const materials = await Promise.all([
