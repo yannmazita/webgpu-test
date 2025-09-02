@@ -455,48 +455,39 @@ export class Renderer {
     let lastMesh: Mesh | null = null;
 
     for (const batch of batches) {
+      const mesh = batch.mesh; // ensure mesh is available for all bindings
       passEncoder.setPipeline(batch.pipeline);
+
       if (batch.material !== lastMaterial) {
         passEncoder.setBindGroup(1, batch.material.bindGroup);
         lastMaterial = batch.material;
       }
-      if (batch.mesh !== lastMesh) {
-        for (let i = 0; i < batch.mesh.buffers.length; i++) {
-          passEncoder.setVertexBuffer(i, batch.mesh.buffers[i]);
-        }
-        // bind instance buffer at the byte offset for this batch's first instance
-        const instanceByteOffset =
-          batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
-        passEncoder.setVertexBuffer(
-          batch.mesh.buffers.length,
-          this.instanceBuffer,
-          instanceByteOffset,
-        );
 
-        if (batch.mesh.indexBuffer) {
-          passEncoder.setIndexBuffer(
-            batch.mesh.indexBuffer,
-            batch.mesh.indexFormat!,
-          );
+      if (mesh !== lastMesh) {
+        // Bind mesh vertex buffers only when mesh changes
+        for (let i = 0; i < mesh.buffers.length; i++) {
+          passEncoder.setVertexBuffer(i, mesh.buffers[i]);
         }
-        lastMesh = batch.mesh;
+        if (mesh.indexBuffer) {
+          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+        }
+        lastMesh = mesh;
       }
 
-      if (batch.mesh.indexBuffer) {
-        passEncoder.drawIndexed(
-          batch.mesh.indexCount!,
-          batch.instanceCount,
-          0,
-          0,
-          batch.firstInstance,
-        );
+      // Always bind the instance buffer with the correct per-batch offset
+      const instanceByteOffset =
+        batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
+      passEncoder.setVertexBuffer(
+        mesh.buffers.length,
+        this.instanceBuffer,
+        instanceByteOffset,
+      );
+
+      // Draw with firstInstance = 0 to avoid double-advancing
+      if (mesh.indexBuffer) {
+        passEncoder.drawIndexed(mesh.indexCount!, batch.instanceCount, 0, 0, 0);
       } else {
-        passEncoder.draw(
-          batch.mesh.vertexCount,
-          batch.instanceCount,
-          0,
-          batch.firstInstance,
-        );
+        passEncoder.draw(mesh.vertexCount, batch.instanceCount, 0, 0);
       }
     }
   }
