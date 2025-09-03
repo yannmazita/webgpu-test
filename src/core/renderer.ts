@@ -1,5 +1,5 @@
 // src/core/renderer.ts
-import { Vec3, vec3, Vec4 } from "wgpu-matrix";
+import { Vec3, vec3 } from "wgpu-matrix";
 import { Light, Mesh, Renderable } from "./types/gpu";
 import { Material } from "@/core/materials/material";
 import { SceneRenderData } from "./types/rendering";
@@ -8,6 +8,7 @@ import { BatchManager } from "./rendering/batchManager";
 import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
 import { testAABBFrustum, transformAABB } from "./utils/bounds";
+import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
 
 export interface RendererStats {
   canvasWidth: number;
@@ -55,6 +56,7 @@ export class Renderer {
   private adapter!: GPUAdapter;
   private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
+  private clusterBuilder!: ClusterBuilder;
 
   // Optimization managers
   private batchManager!: BatchManager;
@@ -216,6 +218,12 @@ export class Renderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
+    this.clusterBuilder = new ClusterBuilder(this.device, {
+      gridZ: 64,
+      maxPerCluster: 128,
+    });
+    await this.clusterBuilder.init();
+
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",
       entries: [
@@ -223,20 +231,36 @@ export class Renderer {
           binding: 0,
           visibility: GPUShaderStage.VERTEX,
           buffer: { type: "uniform" },
-        },
+        }, // camera
         {
           binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
+          visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
           buffer: { type: "read-only-storage" },
-        },
+        }, // lights
         {
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
-        },
+        }, // scene
+        {
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        }, // cluster params
+        {
+          binding: 4,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" },
+        }, // cluster counts (read in fs)
+        {
+          binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" },
+        }, // cluster indices (read in fs)
       ],
     });
 
+    // Build initial frame bind group including cluster buffers
     this.frameBindGroup = this.device.createBindGroup({
       label: "FRAME_BIND_GROUP",
       layout: this.frameBindGroupLayout,
@@ -244,6 +268,18 @@ export class Renderer {
         { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
         { binding: 1, resource: { buffer: this.lightStorageBuffer } },
         { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+        {
+          binding: 3,
+          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+        },
+        {
+          binding: 4,
+          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+        },
       ],
     });
 
@@ -431,9 +467,25 @@ export class Renderer {
           { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
           { binding: 1, resource: { buffer: this.lightStorageBuffer } },
           { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+          {
+            binding: 3,
+            resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+          },
+          {
+            binding: 4,
+            resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+          },
+          {
+            binding: 5,
+            resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+          },
         ],
       });
     }
+
+    this.clusterBuilder.updateParams(camera);
+    // Ensure compute bind group references the current lights buffer
+    this.clusterBuilder.createComputeBindGroup(this.lightStorageBuffer);
 
     // Header: u32 count + 3 pad u32 (16 bytes)
     const headerU32 = new Uint32Array(lightDataBuffer, 0, 4);
@@ -882,6 +934,10 @@ export class Renderer {
 
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
+
+    // run clustered light assignment before render
+    this.clusterBuilder.record(commandEncoder, this.stats.lightCount);
+
     // Determine if current depth format includes a stencil aspect
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||

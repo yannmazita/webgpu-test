@@ -1,5 +1,26 @@
 #include "utils.wgsl"
 
+struct ClusterParams {
+    gridZ: u32,
+    maxPerCluster: u32,
+    pad0: u32,
+    pad1: u32,
+    near: f32,
+    far: f32,
+    invZRange: f32,
+    pad2: f32,
+    cameraForward: vec4<f32>,
+    cameraPos: vec4<f32>,
+}
+
+struct ClusterCounts {
+    counts: array<u32>,
+}
+
+struct ClusterLightIndices {
+    indices: array<u32>,
+}
+
 // Frame-level uniforms
 struct CameraUniforms {
     viewProjectionMatrix: mat4x4<f32>,
@@ -40,6 +61,9 @@ struct PBRMaterialUniforms {
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 @group(0) @binding(1) var<storage, read> lightsBuffer: LightsBuffer;
 @group(0) @binding(2) var<uniform> scene: SceneUniforms;
+@group(0) @binding(3) var<uniform> clusterParams: ClusterParams;
+@group(0) @binding(4) var<storage, read> clusterCounts: ClusterCounts;
+@group(0) @binding(5) var<storage, read> clusterLightIndices: ClusterLightIndices;
 
 // @group(1) - Per-material data
 @group(1) @binding(0) var albedoTexture: texture_2d<f32>;
@@ -262,30 +286,46 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     F0 = mix(F0, albedo, metallic);
     roughness = clamp(roughness, 0.04, 1.0);
 
-    // ===== Direct Lighting (with range/intensity) =====
+    // ===== Direct Lighting via Z-slice clustering =====
     var Lo = vec3<f32>(0.0);
-    for (var i: u32 = 0u; i < lightsBuffer.count; i = i + 1u) {
-        let light = lightsBuffer.lights[i];
-        let lightPos = light.position.xyz;
-        let lightColor = light.color.rgb;
-        let range = max(light.params0.x, 0.0001);
-        let intensity = light.params0.y;
 
-        let Lvec = lightPos - in.worldPosition;
-        let dist = length(Lvec);
-        if (dist > range) {
-            continue;
+    // Compute view-like depth along camera forward
+    let toPoint = in.worldPosition - clusterParams.cameraPos.xyz;
+    let viewZ = dot(toPoint, clusterParams.cameraForward.xyz);
+
+    // If outside [near, far], skip direct lights (keep ambient/emissive)
+    if (viewZ >= clusterParams.near && viewZ <= clusterParams.far) {
+        let zNorm = (viewZ - clusterParams.near) * clusterParams.invZRange;
+        let sliceF = clamp(zNorm, 0.0, 0.99999) * f32(clusterParams.gridZ);
+        let slice = u32(floor(sliceF));
+
+        let count = clusterCounts.counts[slice];
+        let maxCount = clusterParams.maxPerCluster;
+
+        // Loop only the lights assigned to this slice
+        for (var i: u32 = 0u; i < count; i = i + 1u) {
+            if (i >= maxCount) { break; } // safety
+            let idx = clusterLightIndices.indices[slice * maxCount + i];
+
+            let light = lightsBuffer.lights[idx];
+            let lightPos = light.position.xyz;
+            let lightColor = light.color.rgb;
+            let range = max(light.params0.x, 0.0001);
+            let intensity = light.params0.y;
+
+            let Lvec = lightPos - in.worldPosition;
+            let dist = length(Lvec);
+            if (dist > range) {
+                continue;
+            }
+            let L = Lvec / max(dist, 0.0001);
+            let attenuation = 1.0 / max(dist * dist, 0.0001);
+            let r = clamp(dist / range, 0.0, 1.0);
+            let rangeFalloff = 1.0 - (r * r * r * r);
+            let radiance = lightColor * attenuation * intensity * rangeFalloff;
+
+            Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, radiance);
         }
-        let L = Lvec / max(dist, 0.0001);
-
-        // Inverse-square attenuation with smooth range falloff
-        let attenuation = 1.0 / max(dist * dist, 0.0001);
-        let r = clamp(dist / range, 0.0, 1.0);
-        let rangeFalloff = 1.0 - (r * r * r * r);
-
-        let radiance = lightColor * attenuation * intensity * rangeFalloff;
-
-        Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, radiance);
     }
 
     // ===== Ambient Lighting =====
