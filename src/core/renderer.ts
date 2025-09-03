@@ -148,12 +148,14 @@ export class Renderer {
       },
       {
         shaderLocation: 9,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
+        offset:
+          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
         format: "float32x3",
       },
       {
         shaderLocation: 10,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
+        offset:
+          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
         format: "float32x3",
       },
     ],
@@ -200,12 +202,12 @@ export class Renderer {
 
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
-      size: 8 * 4,
+      size: 20 * 4, // 20 floats (cameraPos(4)+ambient(4)+fogColor(4)+fogParams0(4)+fogParams1(4))
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.lightStorageBufferCapacity = 4;
-    const lightStructSize = 8 * 4;
+    const lightStructSize = 12 * 4; // 12 floats per light
     const lightStorageBufferSize =
       16 + this.lightStorageBufferCapacity * lightStructSize;
     this.lightStorageBuffer = this.device.createBuffer({
@@ -389,9 +391,9 @@ export class Renderer {
   private _updateFrameUniforms(
     camera: CameraComponent,
     lights: Light[],
-    ambientColor: Vec4,
+    sceneData: SceneRenderData,
   ): void {
-    // Always write small uniforms; cheaper than branching
+    // Camera + scene uniforms
     this.uniformManager.updateCameraUniform(
       this.device,
       this.cameraUniformBuffer,
@@ -401,12 +403,15 @@ export class Renderer {
       this.device,
       this.sceneDataBuffer,
       camera,
-      ambientColor,
+      sceneData.ambientColor,
+      sceneData.fogColor,
+      sceneData.fogParams0,
+      sceneData.fogParams1,
     );
 
-    // Always write lights; ensure capacity
+    // Lights SSBO packing
     const lightCount = lights.length;
-    const lightStructSize = 8 * 4; // 8 floats
+    const lightStructSize = 12 * 4; // 12 floats per light
     const lightDataBuffer = this.uniformManager.getLightDataBuffer(lightCount);
 
     if (lightCount > this.lightStorageBufferCapacity) {
@@ -430,15 +435,22 @@ export class Renderer {
       });
     }
 
-    // Pack: 16 bytes header (u32 count, padded), then [position vec4][color vec4] * N
-    const countHeader = new Uint32Array(lightDataBuffer, 0, 1);
+    // Header: u32 count + 3 pad u32 (16 bytes)
+    const headerU32 = new Uint32Array(lightDataBuffer, 0, 4);
+    headerU32[0] = lightCount;
+    headerU32[1] = 0;
+    headerU32[2] = 0;
+    headerU32[3] = 0;
+
+    // Body: [pos vec4][color vec4][params0 vec4] * N
     const lightDataView = new Float32Array(lightDataBuffer, 16);
-    countHeader[0] = lightCount;
     for (let i = 0; i < lightCount; i++) {
-      const offset = i * 8;
-      lightDataView.set(lights[i].position, offset);
-      lightDataView.set(lights[i].color, offset + 4);
+      const base = i * 12;
+      lightDataView.set(lights[i].position, base + 0);
+      lightDataView.set(lights[i].color, base + 4);
+      lightDataView.set(lights[i].params0, base + 8);
     }
+
     this.device.queue.writeBuffer(
       this.lightStorageBuffer,
       0,
@@ -726,7 +738,7 @@ export class Renderer {
     }
 
     Profiler.begin("Render.UpdateUniforms");
-    this._updateFrameUniforms(camera, sceneData.lights, sceneData.ambientColor);
+    this._updateFrameUniforms(camera, sceneData.lights, sceneData);
     Profiler.end("Render.UpdateUniforms");
 
     Profiler.begin("Render.FrustumCullAndSeparate");

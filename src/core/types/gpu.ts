@@ -24,11 +24,14 @@ export interface Light {
   position: Vec4;
   /** Light color, vec4 and w=1 for padding purposes */
   color: Vec4;
-  /** Light intensity */
-  //intensity: number;
-  /** Light type, 0 = point, 1 = directional 2 = spot */
-  //type: number;
-  //enabled: boolean;
+  /**
+   * params0 = [range, intensity, type, pad0]
+   * range: radius of effect (units)
+   * intensity: scalar multiplier
+   * type: 0=point, 1=directional, 2=spot (future)
+   * pad0: explicit padding for 16-byte alignment
+   */
+  params0: Vec4;
 }
 
 /**

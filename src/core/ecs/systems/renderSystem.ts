@@ -9,9 +9,15 @@ import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
 
-// A global resource for scene lighting properties
+// A global resource for scene properties
 export class SceneLightingComponent {
   public ambientColor: Vec4 = vec4.fromValues(0.1, 0.1, 0.1, 1.0);
+
+  // fog config (defaults off)
+  public fogColor: Vec4 = vec4.fromValues(0.6, 0.7, 0.8, 1.0);
+  // [distanceDensity, height, heightFalloff, enableFlags]
+  public fogParams0: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0);
+  public fogParams1: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0);
 }
 
 /**
@@ -55,6 +61,10 @@ export function renderSystem(
   const sceneLighting =
     world.getResource(SceneLightingComponent) ?? new SceneLightingComponent();
   vec4.copy(sceneLighting.ambientColor, sceneData.ambientColor);
+  // copy fog
+  vec4.copy(sceneLighting.fogColor, sceneData.fogColor);
+  vec4.copy(sceneLighting.fogParams0, sceneData.fogParams0);
+  vec4.copy(sceneLighting.fogParams1, sceneData.fogParams1);
 
   // Collect all renderables
   const renderableQuery = world.query([

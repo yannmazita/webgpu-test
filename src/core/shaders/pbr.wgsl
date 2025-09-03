@@ -8,15 +8,23 @@ struct CameraUniforms {
 struct SceneUniforms {
     cameraPos: vec4<f32>,
     ambientColor: vec4<f32>,
+    fogColor: vec4<f32>,
+    fogParams0: vec4<f32>, // [distanceDensity, height, heightFalloff, enableFlags]
+    fogParams1: vec4<f32>, // reserved/extensible
 }
 
 struct Light {
     position: vec4<f32>,
     color: vec4<f32>,
+    params0: vec4<f32>, // [range, intensity, type, pad0]
 }
 
 struct LightsBuffer {
+    // explicit padding
     count: u32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
     lights: array<Light>,
 }
 
@@ -222,86 +230,98 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var ao = 1.0;
 
     // ===== Sample Textures =====
-    
-    // Albedo texture
+    // Albedo
     if (material.textureFlags.x > 0.5) {
         let albedoSample = textureSample(albedoTexture, materialSampler, in.texCoords);
         albedo = albedo * albedoSample.rgb;
-        // Use alpha from albedo texture if present
-        // (todo: for transparency support in the future)
     }
 
-    // Metallic-Roughness texture (glTF standard: R=unused, G=roughness, B=metallic)
+    // Metallic-Roughness (G=roughness, B=metallic per glTF)
     if (material.textureFlags.y > 0.5) {
-        let metallicRoughnessSample = textureSample(metallicRoughnessTexture, materialSampler, in.texCoords);
-        roughness = roughness * metallicRoughnessSample.g;
-        metallic = metallic * metallicRoughnessSample.b;
+        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, in.texCoords);
+        roughness = roughness * mrSample.g;
+        metallic = metallic * mrSample.b;
     }
 
-    // Emissive texture
+    // Emissive
     if (material.textureFlags.w > 0.5) {
         let emissiveSample = textureSample(emissiveTexture, materialSampler, in.texCoords);
         emissive = emissive * emissiveSample.rgb;
     }
 
-    // Ambient Occlusion texture
-    // Note: We check a bit beyond textureFlags.w since we only have 4 flags in the vec4
-    // we're assuming occlusion is always sampled if the texture is bound
+    // Ambient Occlusion (sample if bound; strength controls blend)
     let occlusionSample = textureSample(occlusionTexture, materialSampler, in.texCoords);
     ao = mix(1.0, occlusionSample.r, occlusionStrength);
 
     // ===== Normal Mapping =====
     let N = getNormalFromMap(in, normalIntensity);
     let V = normalize(scene.cameraPos.xyz - in.worldPosition);
-    
-    // ===== Calculate Base Reflectance =====
-    // Dielectric materials have F0 around 0.04, metals use albedo as F0
+
+    // ===== Base Reflectance =====
     var F0 = vec3<f32>(0.04);
     F0 = mix(F0, albedo, metallic);
-
-    // Clamp roughness to prevent division by zero
     roughness = clamp(roughness, 0.04, 1.0);
 
-    // ===== Direct Lighting =====
+    // ===== Direct Lighting (with range/intensity) =====
     var Lo = vec3<f32>(0.0);
-    
     for (var i: u32 = 0u; i < lightsBuffer.count; i = i + 1u) {
         let light = lightsBuffer.lights[i];
         let lightPos = light.position.xyz;
         let lightColor = light.color.rgb;
-        
-        // Calculate light direction and attenuation
-        let L = normalize(lightPos - in.worldPosition);
-        let distance = length(lightPos - in.worldPosition);
-        let attenuation = 1.0 / (distance * distance);
-        let radiance = lightColor * attenuation;
+        let range = max(light.params0.x, 0.0001);
+        let intensity = light.params0.y;
 
-        // Add this light's contribution
+        let Lvec = lightPos - in.worldPosition;
+        let dist = length(Lvec);
+        if (dist > range) {
+            continue;
+        }
+        let L = Lvec / max(dist, 0.0001);
+
+        // Inverse-square attenuation with smooth range falloff
+        let attenuation = 1.0 / max(dist * dist, 0.0001);
+        let r = clamp(dist / range, 0.0, 1.0);
+        let rangeFalloff = 1.0 - (r * r * r * r);
+
+        let radiance = lightColor * attenuation * intensity * rangeFalloff;
+
         Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, radiance);
     }
 
     // ===== Ambient Lighting =====
-    // Simple ambient lighting (will be replaced with IBL later)
     let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
     var kD = 1.0 - kS;
     kD *= 1.0 - metallic;
-    
+
     let irradiance = scene.ambientColor.rgb;
     let diffuse = irradiance * albedo;
-    
-    // Simple ambient specular approximation
     let ambientSpecular = irradiance * 0.1 * F0;
-    
+
     let ambient = (kD * diffuse + ambientSpecular) * ao;
 
-    // ===== Final Color Assembly =====
+    // ===== Combine =====
     var color = ambient + Lo + emissive;
 
-    // ===== Tone Mapping =====
-    // ACES tone mapping (more filmic than Reinhard)
+    // ===== Fog (distance + height, linear space) =====
+    // fogParams0 = [distanceDensity, height, heightFalloff, enableFlags]
+    let distanceDensity = scene.fogParams0.x;
+    let fogHeight = scene.fogParams0.y;
+    let heightFalloff = scene.fogParams0.z;
+    let enableFlags = scene.fogParams0.w;
+
+    if (enableFlags > 0.0) {
+        let dist = length(scene.cameraPos.xyz - in.worldPosition);
+        let fd = exp(-distanceDensity * dist);
+
+        let dh = max(in.worldPosition.y - fogHeight, 0.0);
+        let fh = exp(-heightFalloff * dh);
+
+        let f = clamp(fd * fh, 0.0, 1.0);
+        color = mix(scene.fogColor.rgb, color, f);
+    }
+
+    // ===== Tone Mapping and Gamma =====
     color = ACESFilmicToneMapping(color);
-    
-    // ===== Gamma Correction =====
     color = pow(color, vec3<f32>(1.0 / 2.2));
 
     return vec4<f32>(color, material.albedo.a);

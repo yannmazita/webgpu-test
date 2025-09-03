@@ -139,26 +139,43 @@ export class ResourceManager {
 
     // Load textures or use dummy texture
     const albedoTexture = options.albedoMap
-      ? await createTextureFromImage(this.renderer.device, options.albedoMap)
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.albedoMap,
+          "rgba8unorm-srgb", // CHANGED: sRGB for albedo
+        )
       : this.dummyTexture;
 
     const metallicRoughnessTexture = options.metallicRoughnessMap
       ? await createTextureFromImage(
           this.renderer.device,
           options.metallicRoughnessMap,
+          "rgba8unorm", // CHANGED: linear
         )
       : this.dummyTexture;
 
     const normalTexture = options.normalMap
-      ? await createTextureFromImage(this.renderer.device, options.normalMap)
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.normalMap,
+          "rgba8unorm", // CHANGED: linear
+        )
       : this.dummyTexture;
 
     const emissiveTexture = options.emissiveMap
-      ? await createTextureFromImage(this.renderer.device, options.emissiveMap)
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.emissiveMap,
+          "rgba8unorm-srgb", // CHANGED: sRGB for emissive
+        )
       : this.dummyTexture;
 
     const occlusionTexture = options.occlusionMap
-      ? await createTextureFromImage(this.renderer.device, options.occlusionMap)
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.occlusionMap,
+          "rgba8unorm", // CHANGED: linear
+        )
       : this.dummyTexture;
 
     const material = new PBRMaterial(
