@@ -2,7 +2,7 @@
 
 Learning graphics programming with WebGPU.
 
-<img width="2528" height="1309" alt="Engine capture" src="https://github.com/user-attachments/assets/0606b7da-5587-4172-81a4-d76a02d41624" />
+<img width="2549" height="1405" alt="Engine demo" src="https://github.com/user-attachments/assets/0264c604-d554-4af2-b8b5-154447ee584a" />
 
 
 # Setup
