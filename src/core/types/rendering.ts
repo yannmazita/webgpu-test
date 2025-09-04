@@ -11,11 +11,15 @@ export class SceneRenderData {
   public lights: Light[] = [];
   public ambientColor: Vec4 = vec4.create();
 
-  /**
-   * Clears the data arrays to prepare for the next frame's data.
-   */
+  // fog parameters
+  public fogColor: Vec4 = vec4.fromValues(0.6, 0.7, 0.8, 1.0);
+  // [distanceDensity, height, heightFalloff, enableFlags]
+  public fogParams0: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0);
+  public fogParams1: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0); // reserved
+
   public clear(): void {
     this.renderables.length = 0;
     this.lights.length = 0;
+    // ambientColor/fog params persist as scene configuration
   }
 }

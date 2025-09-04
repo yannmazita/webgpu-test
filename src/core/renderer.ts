@@ -1,5 +1,5 @@
 // src/core/renderer.ts
-import { Vec3, vec3, Vec4 } from "wgpu-matrix";
+import { Vec3, vec3 } from "wgpu-matrix";
 import { Light, Mesh, Renderable } from "./types/gpu";
 import { Material } from "@/core/materials/material";
 import { SceneRenderData } from "./types/rendering";
@@ -8,6 +8,7 @@ import { BatchManager } from "./rendering/batchManager";
 import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
 import { testAABBFrustum, transformAABB } from "./utils/bounds";
+import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
 
 export interface RendererStats {
   canvasWidth: number;
@@ -20,6 +21,9 @@ export interface RendererStats {
   instancesOpaque: number;
   instancesTransparent: number;
   cpuTotalUs: number;
+  clusterAvgLpcX1000?: number;
+  clusterMaxLpc?: number;
+  clusterOverflows?: number;
 }
 
 /**
@@ -55,6 +59,7 @@ export class Renderer {
   private adapter!: GPUAdapter;
   private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
+  private clusterBuilder!: ClusterBuilder;
 
   // Optimization managers
   private batchManager!: BatchManager;
@@ -101,6 +106,9 @@ export class Renderer {
     instancesOpaque: 0,
     instancesTransparent: 0,
     cpuTotalUs: 0,
+    clusterAvgLpcX1000: 0,
+    clusterMaxLpc: 0,
+    clusterOverflows: 0,
   };
 
   private resizeObserver?: ResizeObserver;
@@ -148,12 +156,14 @@ export class Renderer {
       },
       {
         shaderLocation: 9,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
+        offset:
+          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
         format: "float32x3",
       },
       {
         shaderLocation: 10,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
+        offset:
+          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
         format: "float32x3",
       },
     ],
@@ -200,12 +210,12 @@ export class Renderer {
 
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
-      size: 8 * 4,
+      size: 20 * 4, // 20 floats (cameraPos(4)+ambient(4)+fogColor(4)+fogParams0(4)+fogParams1(4))
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.lightStorageBufferCapacity = 4;
-    const lightStructSize = 8 * 4;
+    const lightStructSize = 12 * 4; // 12 floats per light
     const lightStorageBufferSize =
       16 + this.lightStorageBufferCapacity * lightStructSize;
     this.lightStorageBuffer = this.device.createBuffer({
@@ -214,6 +224,14 @@ export class Renderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
+    this.clusterBuilder = new ClusterBuilder(this.device, {
+      gridX: 16,
+      gridY: 8,
+      gridZ: 64,
+      maxPerCluster: 128,
+    });
+    await this.clusterBuilder.init();
+
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",
       entries: [
@@ -221,20 +239,36 @@ export class Renderer {
           binding: 0,
           visibility: GPUShaderStage.VERTEX,
           buffer: { type: "uniform" },
-        },
+        }, // camera
         {
           binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
+          visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
           buffer: { type: "read-only-storage" },
-        },
+        }, // lights
         {
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
-        },
+        }, // scene
+        {
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
+          buffer: { type: "uniform" },
+        }, // cluster params
+        {
+          binding: 4,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" },
+        }, // cluster counts (read in fs)
+        {
+          binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" },
+        }, // cluster indices (read in fs)
       ],
     });
 
+    // Build initial frame bind group including cluster buffers
     this.frameBindGroup = this.device.createBindGroup({
       label: "FRAME_BIND_GROUP",
       layout: this.frameBindGroupLayout,
@@ -242,6 +276,18 @@ export class Renderer {
         { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
         { binding: 1, resource: { buffer: this.lightStorageBuffer } },
         { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+        {
+          binding: 3,
+          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+        },
+        {
+          binding: 4,
+          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+        },
       ],
     });
 
@@ -389,9 +435,9 @@ export class Renderer {
   private _updateFrameUniforms(
     camera: CameraComponent,
     lights: Light[],
-    ambientColor: Vec4,
+    sceneData: SceneRenderData,
   ): void {
-    // Always write small uniforms; cheaper than branching
+    // Camera + scene uniforms
     this.uniformManager.updateCameraUniform(
       this.device,
       this.cameraUniformBuffer,
@@ -401,12 +447,15 @@ export class Renderer {
       this.device,
       this.sceneDataBuffer,
       camera,
-      ambientColor,
+      sceneData.ambientColor,
+      sceneData.fogColor,
+      sceneData.fogParams0,
+      sceneData.fogParams1,
     );
 
-    // Always write lights; ensure capacity
+    // Lights SSBO packing
     const lightCount = lights.length;
-    const lightStructSize = 8 * 4; // 8 floats
+    const lightStructSize = 12 * 4; // 12 floats per light
     const lightDataBuffer = this.uniformManager.getLightDataBuffer(lightCount);
 
     if (lightCount > this.lightStorageBufferCapacity) {
@@ -426,19 +475,46 @@ export class Renderer {
           { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
           { binding: 1, resource: { buffer: this.lightStorageBuffer } },
           { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+          {
+            binding: 3,
+            resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+          },
+          {
+            binding: 4,
+            resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+          },
+          {
+            binding: 5,
+            resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+          },
         ],
       });
     }
 
-    // Pack: 16 bytes header (u32 count, padded), then [position vec4][color vec4] * N
-    const countHeader = new Uint32Array(lightDataBuffer, 0, 1);
+    this.clusterBuilder.updateParams(
+      camera,
+      this.canvas.width,
+      this.canvas.height,
+    );
+    // Ensure compute bind group references the current lights buffer
+    this.clusterBuilder.createComputeBindGroup(this.lightStorageBuffer);
+
+    // Header: u32 count + 3 pad u32 (16 bytes)
+    const headerU32 = new Uint32Array(lightDataBuffer, 0, 4);
+    headerU32[0] = lightCount;
+    headerU32[1] = 0;
+    headerU32[2] = 0;
+    headerU32[3] = 0;
+
+    // Body: [pos vec4][color vec4][params0 vec4] * N
     const lightDataView = new Float32Array(lightDataBuffer, 16);
-    countHeader[0] = lightCount;
     for (let i = 0; i < lightCount; i++) {
-      const offset = i * 8;
-      lightDataView.set(lights[i].position, offset);
-      lightDataView.set(lights[i].color, offset + 4);
+      const base = i * 12;
+      lightDataView.set(lights[i].position, base + 0);
+      lightDataView.set(lights[i].color, base + 4);
+      lightDataView.set(lights[i].params0, base + 8);
     }
+
     this.device.queue.writeBuffer(
       this.lightStorageBuffer,
       0,
@@ -726,7 +802,7 @@ export class Renderer {
     }
 
     Profiler.begin("Render.UpdateUniforms");
-    this._updateFrameUniforms(camera, sceneData.lights, sceneData.ambientColor);
+    this._updateFrameUniforms(camera, sceneData.lights, sceneData);
     Profiler.end("Render.UpdateUniforms");
 
     Profiler.begin("Render.FrustumCullAndSeparate");
@@ -750,6 +826,11 @@ export class Renderer {
     this.stats.lightCount = sceneData.lights.length;
     this.stats.canvasWidth = this.canvas.width;
     this.stats.canvasHeight = this.canvas.height;
+
+    const cls = this.clusterBuilder.getLastStats();
+    this.stats.clusterAvgLpcX1000 = cls.avgLpcX1000;
+    this.stats.clusterMaxLpc = cls.maxLpc;
+    this.stats.clusterOverflows = cls.overflow;
     Profiler.end("Render.FrustumCullAndSeparate");
 
     Profiler.begin("Render.Batching");
@@ -870,6 +951,10 @@ export class Renderer {
 
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
+
+    // Record clustered compute passes before scene render
+    this.clusterBuilder.record(commandEncoder, this.stats.lightCount);
+
     // Determine if current depth format includes a stencil aspect
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
@@ -896,7 +981,7 @@ export class Renderer {
           view: textureView,
           loadOp: "clear",
           storeOp: "store",
-          clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+          clearValue: { r: 0.6, g: 0.7, b: 0.8, a: 1.0 },
         },
       ],
       depthStencilAttachment: depthAttachment,
@@ -936,6 +1021,8 @@ export class Renderer {
 
     Profiler.begin("Render.Submit");
     this.device.queue.submit([commandEncoder.finish()]);
+    // Notify clusterBuilder that a copy was submitted so it can map asynchronously
+    this.clusterBuilder.onSubmitted();
     Profiler.end("Render.Submit");
 
     // CPU total time for this render

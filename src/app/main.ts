@@ -83,18 +83,38 @@ hud.id = "hud";
 hud.textContent = "Initializing...";
 document.body.appendChild(hud);
 
-setInterval(() => {
+const HUD_UPDATE_INTERVAL_MS = 250;
+let lastHudUpdateTime = 0;
+let lastHudFrameId = 0;
+
+const updateHud = (nowMs: number) => {
+  // Limit DOM updates to the target HUD frequency
+  if (nowMs - lastHudUpdateTime < HUD_UPDATE_INTERVAL_MS) return;
+
   const m = readMetricsSnapshot(metricsContext);
-  if (m.frameId === 0) return;
+  if (m.frameId === 0 || m.frameId === lastHudFrameId) {
+    lastHudUpdateTime = nowMs;
+    return;
+  }
+  lastHudFrameId = m.frameId;
+
   const fps = m.dtUs > 0 ? 1_000_000 / m.dtUs : 0;
   const cpuMs = m.cpuUs / 1000;
+
+  const avgL = (m.clusterAvgX1000 ?? 0) / 1000;
+  const maxL = m.clusterMax ?? 0;
+  const ofl = m.clusterOverflows ?? 0;
+
   hud.textContent =
     `FPS: ${fps.toFixed(1)}  |  CPU(ms): ${cpuMs.toFixed(2)}  |  Frame: ${m.frameId}\n` +
     `Canvas: ${m.w}x${m.h}  |  Lights: ${m.lights}\n` +
     `Visible (O/T): ${m.visOpaque}/${m.visTransp}\n` +
     `Draws (O/T): ${m.drawsOpaque}/${m.drawsTransp}\n` +
-    `Instances (O/T): ${m.instOpaque}/${m.instTransp}`;
-}, 250);
+    `Instances (O/T): ${m.instOpaque}/${m.instTransp}\n` +
+    `Cluster L/cluster avg/max: ${avgL.toFixed(2)}/${maxL}  |  Overflows: ${ofl}`;
+
+  lastHudUpdateTime = nowMs;
+};
 
 // --- Worker Setup ---
 const worker = new Worker(new URL("./worker.ts", import.meta.url), {
@@ -163,13 +183,14 @@ worker.addEventListener("message", (ev) => {
 const tick = (now: number) => {
   if (canSendFrame) {
     canSendFrame = false;
-    // The FRAME message is now just a timing signal.
+    // The FRAME message is just a timing signal.
     // All input data is read directly by the worker from shared memory.
     worker.postMessage({
       type: "FRAME",
       now,
     });
   }
+  updateHud(now);
   requestAnimationFrame(tick);
 };
 

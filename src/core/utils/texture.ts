@@ -10,6 +10,7 @@
 export const createTextureFromImage = async (
   device: GPUDevice,
   imageUrl: string,
+  format: GPUTextureFormat = "rgba8unorm",
 ): Promise<GPUTexture> => {
   const response = await fetch(imageUrl);
   const blob = await response.blob();
@@ -17,7 +18,7 @@ export const createTextureFromImage = async (
 
   const textureDescriptor: GPUTextureDescriptor = {
     size: { width: imgBitmap.width, height: imgBitmap.height },
-    format: "rgba8unorm",
+    format,
     usage:
       GPUTextureUsage.TEXTURE_BINDING |
       GPUTextureUsage.COPY_DST |

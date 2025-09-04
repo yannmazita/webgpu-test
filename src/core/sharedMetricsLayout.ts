@@ -33,6 +33,12 @@ export const METRICS_INSTANCES_OPAQUE_OFFSET = 44;
 export const METRICS_INSTANCES_TRANSPARENT_OFFSET = 48;
 // [13] CPU_TOTAL_US (Renderer.render CPU wall time in microseconds)
 export const METRICS_CPU_TOTAL_US_OFFSET = 52;
+// [14] CLUSTER_AVG_LPC_X1000 (average lights per cluster * 1000)
+export const METRICS_CLUSTER_AVG_X1000_OFFSET = 56;
+// [15] CLUSTER_MAX_LPC (max lights per cluster)
+export const METRICS_CLUSTER_MAX_OFFSET = 60;
+// [16] CLUSTER_OVERFLOWS (total overflows)
+export const METRICS_CLUSTER_OVERFLOWS_OFFSET = 64;
 
 // Total buffer size (bytes)
-export const METRICS_BUFFER_SIZE = 56; // 14 Int32 fields * 4 bytes
+export const METRICS_BUFFER_SIZE = 68; // 17 Int32 fields * 4 bytes
