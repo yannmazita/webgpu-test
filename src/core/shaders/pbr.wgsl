@@ -197,25 +197,31 @@ fn fresnelSchlickRoughness(cosTheta: f32, F0: vec3<f32>, roughness: f32) -> vec3
     return F0 + (max(oneMinusRoughness, F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+struct FragmentInput {
+    @location(0) worldPosition: vec3<f32>,
+    @location(1) worldNormal: vec3<f32>,
+    @location(2) worldTangent: vec3<f32>,
+    @location(3) worldBitangent: vec3<f32>,
+    @location(4) texCoords: vec2<f32>,
+}
+
 // Unpack normal from normal map
-fn getNormalFromMap(in: VertexOutput, normalIntensity: f32) -> vec3<f32> {
+fn getNormalFromMap(fi: FragmentInput, normalIntensity: f32) -> vec3<f32> {
     if (material.textureFlags.z < 0.5) {
-        return normalize(in.worldNormal);
+        return normalize(fi.worldNormal);
     }
 
-    let tangentNormal = textureSample(normalTexture, materialSampler, in.texCoords).xyz * 2.0 - 1.0;
-    
-    // Apply normal intensity
+    let tangentNormal = textureSample(normalTexture, materialSampler, fi.texCoords).xyz * 2.0 - 1.0;
+
     var adjustedNormal = tangentNormal;
     adjustedNormal.x *= normalIntensity;
     adjustedNormal.y *= normalIntensity;
     adjustedNormal = normalize(adjustedNormal);
 
-    let N = normalize(in.worldNormal);
-    let T = normalize(in.worldTangent);
-    let B = normalize(in.worldBitangent);
-    
-    // Ensure proper handedness
+    let N = normalize(fi.worldNormal);
+    let T = normalize(fi.worldTangent);
+    let B = normalize(fi.worldBitangent);
+
     let TBN = mat3x3<f32>(T, B, N);
     return normalize(TBN * adjustedNormal);
 }
@@ -259,7 +265,7 @@ fn calculateLightContribution(
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
     // ===== Sample Material Properties =====
     var albedo = material.albedo.rgb;
     var metallic = material.metallicRoughnessNormalOcclusion.x;
@@ -269,61 +275,53 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var emissive = material.emissive.rgb;
     var ao = 1.0;
 
-    // ===== Sample Textures =====
-    // Albedo
+    // Textures
     if (material.textureFlags.x > 0.5) {
-        let albedoSample = textureSample(albedoTexture, materialSampler, in.texCoords);
+        let albedoSample = textureSample(albedoTexture, materialSampler, fi.texCoords);
         albedo = albedo * albedoSample.rgb;
     }
-
-    // Metallic-Roughness (G=roughness, B=metallic per glTF)
     if (material.textureFlags.y > 0.5) {
-        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, in.texCoords);
+        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, fi.texCoords);
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }
-
-    // Emissive
     if (material.textureFlags.w > 0.5) {
-        let emissiveSample = textureSample(emissiveTexture, materialSampler, in.texCoords);
+        let emissiveSample = textureSample(emissiveTexture, materialSampler, fi.texCoords);
         emissive = emissive * emissiveSample.rgb;
     }
-
-    // Ambient Occlusion (sample if bound; strength controls blend)
-    let occlusionSample = textureSample(occlusionTexture, materialSampler, in.texCoords);
+    let occlusionSample = textureSample(occlusionTexture, materialSampler, fi.texCoords);
     ao = mix(1.0, occlusionSample.r, occlusionStrength);
 
-    // ===== Normal Mapping =====
-    let N = getNormalFromMap(in, normalIntensity);
-    let V = normalize(scene.cameraPos.xyz - in.worldPosition);
+    // Normals and view vector
+    let N = getNormalFromMap(fi, normalIntensity);
+    let V = normalize(scene.cameraPos.xyz - fi.worldPosition);
 
-    // ===== Base Reflectance =====
+    // Base reflectance
     var F0 = vec3<f32>(0.04);
     F0 = mix(F0, albedo, metallic);
     roughness = clamp(roughness, 0.04, 1.0);
 
-
-    // ===== Direct Lighting via 3D clustering (X*Y*Z) =====
+    // ===== Direct Lighting via clustering =====
     var Lo = vec3<f32>(0.0);
 
     // View-like depth along camera forward
-    let toPoint = in.worldPosition - clusterParams.cameraPos.xyz;
+    let toPoint = fi.worldPosition - clusterParams.cameraPos.xyz;
     let viewZ = dot(toPoint, clusterParams.cameraForward.xyz);
 
     if (viewZ >= clusterParams.near && viewZ <= clusterParams.far) {
-        // Z slice
         let zNorm = (viewZ - clusterParams.near) * clusterParams.invZRange;
-        let iz = u32(clamp(floor(zNorm * f32(clusterParams.gridZ)), 0.0, f32(clusterParams.gridZ - 1u)));
+        // Avoid mixing u32 math inside f32 casts: compute f32 first
+        let izF = clamp(floor(zNorm * f32(clusterParams.gridZ)), 0.0, f32(clusterParams.gridZ) - 1.0);
+        let iz = u32(izF);
 
-        // XY tile from pixel position (@builtin(position) is in.screen space pixels)
+        // XY tiling from pixel-space coords (@builtin(position))
         let tileW = clusterParams.viewportSize.x / f32(clusterParams.gridX);
         let tileH = clusterParams.viewportSize.y / f32(clusterParams.gridY);
 
-        let px = in.clip_position.x;
-        let py = in.clip_position.y;
-
-        let ix = u32(clamp(floor(px / tileW), 0.0, f32(clusterParams.gridX - 1u)));
-        let iy = u32(clamp(floor(py / tileH), 0.0, f32(clusterParams.gridY - 1u)));
+        let ixF = clamp(floor(fragPos.x / tileW), 0.0, f32(clusterParams.gridX) - 1.0);
+        let iyF = clamp(floor(fragPos.y / tileH), 0.0, f32(clusterParams.gridY) - 1.0);
+        let ix = u32(ixF);
+        let iy = u32(iyF);
 
         let cidx = clusterIndex(ix, iy, iz);
         let count = clusterCounts.counts[cidx];
@@ -339,12 +337,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let range = max(light.params0.x, 0.0001);
             let intensity = light.params0.y;
 
-            let Lvec = lightPos - in.worldPosition;
+            let Lvec = lightPos - fi.worldPosition;
             let dist = length(Lvec);
-            if (dist > range) {
-                continue;
-            }
+            if (dist > range) { continue; }
             let L = Lvec / max(dist, 0.0001);
+
             let attenuation = 1.0 / max(dist * dist, 0.0001);
             let r = clamp(dist / range, 0.0, 1.0);
             let rangeFalloff = 1.0 - (r * r * r * r);
@@ -354,39 +351,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // ===== Ambient Lighting =====
+    // Ambient
     let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
     var kD = 1.0 - kS;
     kD *= 1.0 - metallic;
-
     let irradiance = scene.ambientColor.rgb;
     let diffuse = irradiance * albedo;
     let ambientSpecular = irradiance * 0.1 * F0;
-
     let ambient = (kD * diffuse + ambientSpecular) * ao;
 
-    // ===== Combine =====
     var color = ambient + Lo + emissive;
 
-    // ===== Fog (distance + height, linear space) =====
-    // fogParams0 = [distanceDensity, height, heightFalloff, enableFlags]
+    // Fog
     let distanceDensity = scene.fogParams0.x;
     let fogHeight = scene.fogParams0.y;
     let heightFalloff = scene.fogParams0.z;
     let enableFlags = scene.fogParams0.w;
 
     if (enableFlags > 0.0) {
-        let dist = length(scene.cameraPos.xyz - in.worldPosition);
+        let dist = length(scene.cameraPos.xyz - fi.worldPosition);
         let fd = exp(-distanceDensity * dist);
-
-        let dh = max(in.worldPosition.y - fogHeight, 0.0);
+        let dh = max(fi.worldPosition.y - fogHeight, 0.0);
         let fh = exp(-heightFalloff * dh);
-
         let f = clamp(fd * fh, 0.0, 1.0);
         color = mix(scene.fogColor.rgb, color, f);
     }
 
-    // ===== Tone Mapping and Gamma =====
+    // Tone mapping + gamma
     color = ACESFilmicToneMapping(color);
     color = pow(color, vec3<f32>(1.0 / 2.2));
 
