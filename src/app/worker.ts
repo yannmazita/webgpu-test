@@ -144,7 +144,7 @@ async function initWorker(
   world.addResource(new SceneLightingComponent());
   const sceneLighting = world.getResource(SceneLightingComponent)!;
   sceneLighting.fogColor.set([0.6, 0.7, 0.8, 1.0]);
-  sceneLighting.fogParams0.set([0.06, 0.0, 0.2, 1.0]); // enableFlags = 1.0 enables fog
+  sceneLighting.fogParams0.set([0.2, 0.0, 0.1, 1.0]);
 
   const lightMaterial1 = await resourceManager.createPBRMaterial({
     albedo: [1, 0, 0, 1],

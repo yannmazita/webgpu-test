@@ -981,7 +981,7 @@ export class Renderer {
           view: textureView,
           loadOp: "clear",
           storeOp: "store",
-          clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+          clearValue: { r: 0.6, g: 0.7, b: 0.8, a: 1.0 },
         },
       ],
       depthStencilAttachment: depthAttachment,
