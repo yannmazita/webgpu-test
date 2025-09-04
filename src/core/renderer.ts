@@ -219,6 +219,8 @@ export class Renderer {
     });
 
     this.clusterBuilder = new ClusterBuilder(this.device, {
+      gridX: 16,
+      gridY: 8,
       gridZ: 64,
       maxPerCluster: 128,
     });
@@ -483,7 +485,11 @@ export class Renderer {
       });
     }
 
-    this.clusterBuilder.updateParams(camera);
+    this.clusterBuilder.updateParams(
+      camera,
+      this.canvas.width,
+      this.canvas.height,
+    );
     // Ensure compute bind group references the current lights buffer
     this.clusterBuilder.createComputeBindGroup(this.lightStorageBuffer);
 
@@ -935,7 +941,7 @@ export class Renderer {
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
 
-    // run clustered light assignment before render
+    // Record clustered compute passes before scene render
     this.clusterBuilder.record(commandEncoder, this.stats.lightCount);
 
     // Determine if current depth format includes a stencil aspect

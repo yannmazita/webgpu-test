@@ -4,8 +4,10 @@ import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
 export interface ClusterConfig {
-  gridZ: number; // number of Z-slices
-  maxPerCluster: number; // fixed cap per slice
+  gridX: number;
+  gridY: number;
+  gridZ: number;
+  maxPerCluster: number;
 }
 
 export class ClusterBuilder {
@@ -29,16 +31,18 @@ export class ClusterBuilder {
   private clearBindGroup!: GPUBindGroup;
   private assignBindGroup!: GPUBindGroup;
 
+  private viewportW = 1;
+  private viewportH = 1;
+
   constructor(device: GPUDevice, cfg: ClusterConfig) {
     this.device = device;
     this.cfg = cfg;
   }
 
   public async init(): Promise<void> {
-    // Params UBO: 2x vec4 + 2x vec4 + 2x vec4 = 48 bytes
     this.clusterParamsBuffer = this.device.createBuffer({
       label: "CLUSTER_PARAMS_BUFFER",
-      size: 64, // pad to 64B for alignment
+      size: 16 * 16, // 256 bytes to cover the struct comfortably
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -102,67 +106,119 @@ export class ClusterBuilder {
   }
 
   private allocateClusterBuffers(): void {
-    // counts: gridZ u32 atomics (we bind as storage)
-    this.countsSize = this.cfg.gridZ * 4;
+    const numClusters = this.cfg.gridX * this.cfg.gridY * this.cfg.gridZ;
+    this.countsSize = numClusters * 4;
     if (this.clusterCountsBuffer) this.clusterCountsBuffer.destroy();
     this.clusterCountsBuffer = this.device.createBuffer({
       label: "CLUSTER_COUNTS_BUFFER",
       size: this.countsSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_DST |
+        GPUBufferUsage.COPY_SRC,
     });
 
-    // indices: gridZ * maxPerCluster u32s
-    this.indicesSize = this.cfg.gridZ * this.cfg.maxPerCluster * 4;
+    this.indicesSize = numClusters * this.cfg.maxPerCluster * 4;
     if (this.clusterIndicesBuffer) this.clusterIndicesBuffer.destroy();
     this.clusterIndicesBuffer = this.device.createBuffer({
       label: "CLUSTER_INDICES_BUFFER",
       size: this.indicesSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_DST |
+        GPUBufferUsage.COPY_SRC,
     });
   }
 
-  public updateParams(camera: CameraComponent): void {
-    // Compute camera forward in world space: -column2 of inverseViewMatrix, normalized
+  public updateParams(
+    camera: CameraComponent,
+    viewportW: number,
+    viewportH: number,
+  ): void {
+    this.setViewport(viewportW, viewportH);
+
+    // Camera basis from inverseViewMatrix (world transform of camera)
     const m = camera.inverseViewMatrix;
+
+    // Right = col0, Up = col1, Forward = -col2 (normalize)
+    let rx = m[0],
+      ry = m[1],
+      rz = m[2];
+    let ux = m[4],
+      uy = m[5],
+      uz = m[6];
     let fx = -m[8],
       fy = -m[9],
       fz = -m[10];
-    const len = Math.hypot(fx, fy, fz) || 1.0;
-    fx /= len;
-    fy /= len;
-    fz /= len;
+
+    const rl = Math.hypot(rx, ry, rz) || 1.0;
+    const ul = Math.hypot(ux, uy, uz) || 1.0;
+    const fl = Math.hypot(fx, fy, fz) || 1.0;
+
+    rx /= rl;
+    ry /= rl;
+    rz /= rl;
+    ux /= ul;
+    uy /= ul;
+    uz /= ul;
+    fx /= fl;
+    fy /= fl;
+    fz /= fl;
 
     const near = camera.near;
     const far = camera.far;
     const invZRange = 1.0 / Math.max(far - near, 1e-6);
+    const tanHalfFovY = Math.tan(camera.fovYRadians * 0.5);
+    const aspect = camera.aspectRatio;
 
-    // Pack ClusterParams
-    // layout:
-    // u32 gridZ, u32 maxPerCluster, u32 pad0, u32 pad1,
-    // f32 near, f32 far, f32 invZRange, f32 pad2,
-    // vec4 cameraForward, vec4 cameraPos
-    const arr = new Float32Array(16);
+    // Pack ClusterParams as 16 vec4-aligned floats (we use a generous buffer size)
+    const arr = new Float32Array(48); // 192B used
     const u32 = new Uint32Array(arr.buffer);
 
-    u32[0] = this.cfg.gridZ >>> 0;
-    u32[1] = this.cfg.maxPerCluster >>> 0;
-    u32[2] = 0;
-    u32[3] = 0;
+    // u32 gridX, gridY, gridZ, maxPerCluster
+    u32[0] = this.cfg.gridX >>> 0;
+    u32[1] = this.cfg.gridY >>> 0;
+    u32[2] = this.cfg.gridZ >>> 0;
+    u32[3] = this.cfg.maxPerCluster >>> 0;
 
-    arr[4] = near;
-    arr[5] = far;
-    arr[6] = invZRange;
-    arr[7] = 0.0;
+    // viewportSize, invViewportSize
+    arr[4] = this.viewportW;
+    arr[5] = this.viewportH;
+    arr[6] = 1.0 / this.viewportW;
+    arr[7] = 1.0 / this.viewportH;
 
-    arr[8] = fx;
-    arr[9] = fy;
-    arr[10] = fz;
-    arr[11] = 0.0;
+    // near, far, invZRange, tanHalfFovY
+    arr[8] = near;
+    arr[9] = far;
+    arr[10] = invZRange;
+    arr[11] = tanHalfFovY;
 
-    arr[12] = m[12];
-    arr[13] = m[13];
-    arr[14] = m[14];
-    arr[15] = 1.0;
+    // aspect, padding
+    arr[12] = aspect;
+    arr[13] = 0.0;
+    arr[14] = 0.0;
+    arr[15] = 0.0;
+
+    // cameraRight.xyz
+    arr[16] = rx;
+    arr[17] = ry;
+    arr[18] = rz;
+    arr[19] = 0.0;
+    // cameraUp.xyz
+    arr[20] = ux;
+    arr[21] = uy;
+    arr[22] = uz;
+    arr[23] = 0.0;
+    // cameraForward.xyz
+    arr[24] = fx;
+    arr[25] = fy;
+    arr[26] = fz;
+    arr[27] = 0.0;
+    // cameraPos.xyz
+    arr[28] = m[12];
+    arr[29] = m[13];
+    arr[30] = m[14];
+    arr[31] = 1.0;
 
     this.device.queue.writeBuffer(this.clusterParamsBuffer, 0, arr);
   }
@@ -190,7 +246,8 @@ export class ClusterBuilder {
       });
       pass.setPipeline(this.clearPipeline);
       pass.setBindGroup(0, this.clearBindGroup);
-      const wg = Math.ceil(this.cfg.gridZ / 64);
+      const total = this.cfg.gridX * this.cfg.gridY * this.cfg.gridZ;
+      const wg = Math.ceil(total / 64);
       pass.dispatchWorkgroups(wg);
       pass.end();
     }
@@ -209,5 +266,10 @@ export class ClusterBuilder {
 
   public getConfig(): ClusterConfig {
     return this.cfg;
+  }
+
+  public setViewport(width: number, height: number): void {
+    this.viewportW = Math.max(1, Math.floor(width));
+    this.viewportH = Math.max(1, Math.floor(height));
   }
 }

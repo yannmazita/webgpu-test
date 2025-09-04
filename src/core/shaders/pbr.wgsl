@@ -1,14 +1,26 @@
 #include "utils.wgsl"
 
 struct ClusterParams {
+    gridX: u32,
+    gridY: u32,
     gridZ: u32,
     maxPerCluster: u32,
-    pad0: u32,
-    pad1: u32,
+
+    viewportSize: vec2<f32>,
+    invViewportSize: vec2<f32>,
+
     near: f32,
     far: f32,
     invZRange: f32,
+    tanHalfFovY: f32,
+
+    aspect: f32,
+    pad0: f32,
+    pad1: f32,
     pad2: f32,
+
+    cameraRight: vec4<f32>,
+    cameraUp: vec4<f32>,
     cameraForward: vec4<f32>,
     cameraPos: vec4<f32>,
 }
@@ -73,6 +85,10 @@ struct PBRMaterialUniforms {
 @group(1) @binding(4) var occlusionTexture: texture_2d<f32>;
 @group(1) @binding(5) var materialSampler: sampler;
 @group(1) @binding(6) var<uniform> material: PBRMaterialUniforms;
+
+fn clusterIndex(ix: u32, iy: u32, iz: u32) -> u32 {
+    return iz * (clusterParams.gridX * clusterParams.gridY) + iy * clusterParams.gridX + ix;
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -286,26 +302,36 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     F0 = mix(F0, albedo, metallic);
     roughness = clamp(roughness, 0.04, 1.0);
 
-    // ===== Direct Lighting via Z-slice clustering =====
+
+    // ===== Direct Lighting via 3D clustering (X*Y*Z) =====
     var Lo = vec3<f32>(0.0);
 
-    // Compute view-like depth along camera forward
+    // View-like depth along camera forward
     let toPoint = in.worldPosition - clusterParams.cameraPos.xyz;
     let viewZ = dot(toPoint, clusterParams.cameraForward.xyz);
 
-    // If outside [near, far], skip direct lights (keep ambient/emissive)
     if (viewZ >= clusterParams.near && viewZ <= clusterParams.far) {
+        // Z slice
         let zNorm = (viewZ - clusterParams.near) * clusterParams.invZRange;
-        let sliceF = clamp(zNorm, 0.0, 0.99999) * f32(clusterParams.gridZ);
-        let slice = u32(floor(sliceF));
+        let iz = u32(clamp(floor(zNorm * f32(clusterParams.gridZ)), 0.0, f32(clusterParams.gridZ - 1u)));
 
-        let count = clusterCounts.counts[slice];
+        // XY tile from pixel position (@builtin(position) is in.screen space pixels)
+        let tileW = clusterParams.viewportSize.x / f32(clusterParams.gridX);
+        let tileH = clusterParams.viewportSize.y / f32(clusterParams.gridY);
+
+        let px = in.clip_position.x;
+        let py = in.clip_position.y;
+
+        let ix = u32(clamp(floor(px / tileW), 0.0, f32(clusterParams.gridX - 1u)));
+        let iy = u32(clamp(floor(py / tileH), 0.0, f32(clusterParams.gridY - 1u)));
+
+        let cidx = clusterIndex(ix, iy, iz);
+        let count = clusterCounts.counts[cidx];
         let maxCount = clusterParams.maxPerCluster;
 
-        // Loop only the lights assigned to this slice
         for (var i: u32 = 0u; i < count; i = i + 1u) {
-            if (i >= maxCount) { break; } // safety
-            let idx = clusterLightIndices.indices[slice * maxCount + i];
+            if (i >= maxCount) { break; }
+            let idx = clusterLightIndices.indices[cidx * maxCount + i];
 
             let light = lightsBuffer.lights[idx];
             let lightPos = light.position.xyz;

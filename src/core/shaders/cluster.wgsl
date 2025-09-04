@@ -15,19 +15,30 @@ struct LightsBuffer {
 };
 
 struct ClusterParams {
+  gridX: u32,
+  gridY: u32,
   gridZ: u32,
   maxPerCluster: u32,
-  pad0: u32,
-  pad1: u32,
+
+  viewportSize: vec2<f32>,     // width, height in pixels
+  invViewportSize: vec2<f32>,  // 1/width, 1/height
+
   near: f32,
   far: f32,
   invZRange: f32,
+  tanHalfFovY: f32,
+
+  aspect: f32,
+  pad0: f32,
+  pad1: f32,
   pad2: f32,
+
+  cameraRight: vec4<f32>,   // xyz used
+  cameraUp: vec4<f32>,      // xyz used
   cameraForward: vec4<f32>, // xyz used
   cameraPos: vec4<f32>,     // xyz used
 };
 
-// Storage buffers for clusters
 struct ClusterCounts {
   counts: array<atomic<u32>>,
 };
@@ -36,23 +47,23 @@ struct ClusterLightIndices {
   indices: array<u32>,
 };
 
-// Bindings for compute
 @group(0) @binding(0) var<uniform> clusterParams: ClusterParams;
 @group(0) @binding(1) var<storage, read> lightsBuffer: LightsBuffer;
 @group(0) @binding(2) var<storage, read_write> clusterCountsRW: ClusterCounts;
 @group(0) @binding(3) var<storage, read_write> clusterLightIndicesRW: ClusterLightIndices;
 
-// Workgroup size for clear
+fn numClusters() -> u32 {
+  return clusterParams.gridX * clusterParams.gridY * clusterParams.gridZ;
+}
+
 @compute @workgroup_size(64)
 fn cs_clear_counts(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x;
-  if (idx < clusterParams.gridZ) {
-    // Zero the counter for this Z-slice
+  if (idx < numClusters()) {
     atomicStore(&clusterCountsRW.counts[idx], 0u);
   }
 }
 
-// Assign each light to overlapping z-slices
 @compute @workgroup_size(64)
 fn cs_assign_lights(@builtin(global_invocation_id) gid: vec3<u32>) {
   let li = gid.x;
@@ -63,40 +74,77 @@ fn cs_assign_lights(@builtin(global_invocation_id) gid: vec3<u32>) {
   let lp = lightsBuffer.lights[li].position.xyz;
   let range = max(lightsBuffer.lights[li].params0.x, 0.0001);
 
-  // Project center to camera-forward axis (view-like depth in world space)
+  // View-space components using camera basis
   let toLight = lp - clusterParams.cameraPos.xyz;
-  let centerZ = dot(toLight, clusterParams.cameraForward.xyz);
+  let vx = dot(toLight, clusterParams.cameraRight.xyz);
+  let vy = dot(toLight, clusterParams.cameraUp.xyz);
+  let vz = dot(toLight, clusterParams.cameraForward.xyz);
 
-  // Depth interval influenced by the light
-  var zMin = centerZ - range;
-  var zMax = centerZ + range;
-
-  // Clip to camera near/far
+  // Z overlap range
+  var zMin = vz - range;
+  var zMax = vz + range;
   zMin = max(zMin, clusterParams.near);
   zMax = min(zMax, clusterParams.far);
-  if (zMax <= zMin) {
-    return;
-  }
+  if (zMax <= zMin) { return; }
 
-  // Linear Z slicing
+  // Normalized Z [0,1)
   let z0 = (zMin - clusterParams.near) * clusterParams.invZRange;
   let z1 = (zMax - clusterParams.near) * clusterParams.invZRange;
 
-  let gridZf = f32(clusterParams.gridZ);
-  var sliceMin = i32(floor(z0 * gridZf));
-  var sliceMax = i32(floor(z1 * gridZf));
+  let gZ = f32(clusterParams.gridZ);
+  var sliceMinZ = i32(floor(clamp(z0, 0.0, 0.99999) * gZ));
+  var sliceMaxZ = i32(floor(clamp(z1, 0.0, 0.99999) * gZ));
 
-  sliceMin = clamp(sliceMin, 0, i32(clusterParams.gridZ) - 1);
-  sliceMax = clamp(sliceMax, 0, i32(clusterParams.gridZ) - 1);
+  sliceMinZ = clamp(sliceMinZ, 0, i32(clusterParams.gridZ) - 1);
+  sliceMaxZ = clamp(sliceMaxZ, 0, i32(clusterParams.gridZ) - 1);
 
-  // For each overlapped Z-slice, append light index
-  for (var s = sliceMin; s <= sliceMax; s = s + 1) {
-    let us = u32(s);
-    let writeIdx = atomicAdd(&clusterCountsRW.counts[us], 1u);
-    if (writeIdx < clusterParams.maxPerCluster) {
-      let base = us * clusterParams.maxPerCluster + writeIdx;
-      clusterLightIndicesRW.indices[base] = li;
+  // Project sphere to screen to find XY bounds (pixels)
+  // Perspective relationships:
+  // tanHalfFovX = tanHalfFovY * aspect
+  let tanHalfFovX = clusterParams.tanHalfFovY * clusterParams.aspect;
+  let zSafe = max(vz, 1e-4);
+
+  let xNdc = vx / (zSafe * tanHalfFovX);
+  let yNdc = vy / (zSafe * clusterParams.tanHalfFovY);
+
+  // Map NDC [-1,1] to pixel coords (top-left origin)
+  let px = (xNdc * 0.5 + 0.5) * clusterParams.viewportSize.x;
+  let py = (-yNdc * 0.5 + 0.5) * clusterParams.viewportSize.y;
+
+  let rNdcX = range / (zSafe * tanHalfFovX);
+  let rNdcY = range / (zSafe * clusterParams.tanHalfFovY);
+  let rPxX = rNdcX * 0.5 * clusterParams.viewportSize.x;
+  let rPxY = rNdcY * 0.5 * clusterParams.viewportSize.y;
+
+  // Tile sizes
+  let tileW = clusterParams.viewportSize.x / f32(clusterParams.gridX);
+  let tileH = clusterParams.viewportSize.y / f32(clusterParams.gridY);
+
+  var tileMinX = i32(floor((px - rPxX) / tileW));
+  var tileMaxX = i32(floor((px + rPxX) / tileW));
+  var tileMinY = i32(floor((py - rPxY) / tileH));
+  var tileMaxY = i32(floor((py + rPxY) / tileH));
+
+  tileMinX = clamp(tileMinX, 0, i32(clusterParams.gridX) - 1);
+  tileMaxX = clamp(tileMaxX, 0, i32(clusterParams.gridX) - 1);
+  tileMinY = clamp(tileMinY, 0, i32(clusterParams.gridY) - 1);
+  tileMaxY = clamp(tileMaxY, 0, i32(clusterParams.gridY) - 1);
+
+  // Append light index to all overlapped clusters
+  for (var sz = sliceMinZ; sz <= sliceMaxZ; sz = sz + 1) {
+    for (var ty = tileMinY; ty <= tileMaxY; ty = ty + 1) {
+      for (var tx = tileMinX; tx <= tileMaxX; tx = tx + 1) {
+        let clusterIdx = u32(sz) * (clusterParams.gridX * clusterParams.gridY)
+                       + u32(ty) * clusterParams.gridX
+                       + u32(tx);
+
+        let writeIdx = atomicAdd(&clusterCountsRW.counts[clusterIdx], 1u);
+        if (writeIdx < clusterParams.maxPerCluster) {
+          let base = clusterIdx * clusterParams.maxPerCluster + writeIdx;
+          clusterLightIndicesRW.indices[base] = li;
+        }
+        // else overflow; ignore extra lights in this cluster
+      }
     }
-    // else: overflow; ignore excess lights for this slice
   }
 }
