@@ -31,6 +31,14 @@ export class ClusterBuilder {
   private clearBindGroup!: GPUBindGroup;
   private assignBindGroup!: GPUBindGroup;
 
+  private readbackBuffer!: GPUBuffer;
+  private readbackPending = false;
+  private frameCounter = 0;
+  private readonly READBACK_PERIOD = 8; // every N frames
+  private lastAvgLpcX1000 = 0; // average lights per cluster * 1000 (int)
+  private lastMaxLpc = 0; // max lights in any cluster
+  private lastOverflowCount = 0; // sum of (count - maxPerCluster) over clusters
+
   private viewportW = 1;
   private viewportH = 1;
 
@@ -47,6 +55,13 @@ export class ClusterBuilder {
     });
 
     this.allocateClusterBuffers();
+
+    // Create readback buffer for counts (MAP_READ | COPY_DST)
+    this.readbackBuffer = this.device.createBuffer({
+      label: "CLUSTER_COUNTS_READBACK",
+      size: this.countsSize,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
 
     // Load/compile compute shader
     const code = await this.preprocessor.process(clusterUrl);
@@ -238,6 +253,42 @@ export class ClusterBuilder {
     this.assignBindGroup = this.clearBindGroup; // same bindings
   }
 
+  private async computeStatsFromReadback(): Promise<void> {
+    try {
+      await this.readbackBuffer.mapAsync(GPUMapMode.READ);
+      const data = new Uint32Array(this.readbackBuffer.getMappedRange());
+      const numClusters = this.cfg.gridX * this.cfg.gridY * this.cfg.gridZ;
+      let sum = 0;
+      let max = 0;
+      let overflow = 0;
+      const maxPer = this.cfg.maxPerCluster >>> 0;
+      for (let i = 0; i < numClusters; i++) {
+        const c = data[i] >>> 0;
+        sum += c;
+        if (c > max) max = c;
+        if (c > maxPer) overflow += c - maxPer;
+      }
+      this.readbackBuffer.unmap();
+      // Store as ints for metrics
+      const avg = numClusters > 0 ? sum / numClusters : 0;
+      this.lastAvgLpcX1000 = Math.min(0x7fffffff, Math.round(avg * 1000));
+      this.lastMaxLpc = max;
+      this.lastOverflowCount = overflow;
+    } catch (e) {
+      // Mapping may fail if GPU timeline not ready; ignore this cycle
+    } finally {
+      this.readbackPending = false;
+    }
+  }
+
+  public onSubmitted(): void {
+    // Kick off async map+read once a copy has been enqueued in the same frame
+    if (this.readbackPending) {
+      // Schedule compute; do not await
+      void this.computeStatsFromReadback();
+    }
+  }
+
   public record(commandEncoder: GPUCommandEncoder, lightCount: number): void {
     // Clear counts
     {
@@ -262,6 +313,19 @@ export class ClusterBuilder {
       pass.dispatchWorkgroups(wg);
       pass.end();
     }
+
+    // Periodic readback copy of counts to staging buffer
+    this.frameCounter++;
+    if (this.frameCounter % this.READBACK_PERIOD === 0) {
+      commandEncoder.copyBufferToBuffer(
+        this.clusterCountsBuffer,
+        0,
+        this.readbackBuffer,
+        0,
+        this.countsSize,
+      );
+      this.readbackPending = true;
+    }
   }
 
   public getConfig(): ClusterConfig {
@@ -271,5 +335,17 @@ export class ClusterBuilder {
   public setViewport(width: number, height: number): void {
     this.viewportW = Math.max(1, Math.floor(width));
     this.viewportH = Math.max(1, Math.floor(height));
+  }
+
+  public getLastStats(): {
+    avgLpcX1000: number;
+    maxLpc: number;
+    overflow: number;
+  } {
+    return {
+      avgLpcX1000: this.lastAvgLpcX1000,
+      maxLpc: this.lastMaxLpc,
+      overflow: this.lastOverflowCount,
+    };
   }
 }

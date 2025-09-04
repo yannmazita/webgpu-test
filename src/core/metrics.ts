@@ -16,6 +16,9 @@ import {
   METRICS_INSTANCES_OPAQUE_OFFSET,
   METRICS_INSTANCES_TRANSPARENT_OFFSET,
   METRICS_CPU_TOTAL_US_OFFSET,
+  METRICS_CLUSTER_AVG_X1000_OFFSET,
+  METRICS_CLUSTER_MAX_OFFSET,
+  METRICS_CLUSTER_OVERFLOWS_OFFSET,
 } from "./sharedMetricsLayout";
 import { RendererStats } from "./renderer";
 
@@ -40,6 +43,9 @@ export interface MetricsSnapshot {
   instOpaque: number;
   instTransp: number;
   cpuUs: number;
+  clusterAvgX1000?: number;
+  clusterMax?: number;
+  clusterOverflows?: number;
 }
 
 /**
@@ -128,6 +134,21 @@ export function publishMetrics(
     idx(METRICS_CPU_TOTAL_US_OFFSET),
     stats.cpuTotalUs,
   );
+  Atomics.store(
+    context.view,
+    idx(METRICS_CLUSTER_AVG_X1000_OFFSET),
+    stats.clusterAvgLpcX1000 ?? 0,
+  );
+  Atomics.store(
+    context.view,
+    idx(METRICS_CLUSTER_MAX_OFFSET),
+    stats.clusterMaxLpc ?? 0,
+  );
+  Atomics.store(
+    context.view,
+    idx(METRICS_CLUSTER_OVERFLOWS_OFFSET),
+    stats.clusterOverflows ?? 0,
+  );
 }
 
 /**
@@ -166,6 +187,15 @@ export function readMetricsSnapshot(context: MetricsContext): MetricsSnapshot {
         idx(METRICS_INSTANCES_TRANSPARENT_OFFSET),
       ),
       cpuUs: Atomics.load(context.view, idx(METRICS_CPU_TOTAL_US_OFFSET)),
+      clusterAvgX1000: Atomics.load(
+        context.view,
+        idx(METRICS_CLUSTER_AVG_X1000_OFFSET),
+      ),
+      clusterMax: Atomics.load(context.view, idx(METRICS_CLUSTER_MAX_OFFSET)),
+      clusterOverflows: Atomics.load(
+        context.view,
+        idx(METRICS_CLUSTER_OVERFLOWS_OFFSET),
+      ),
       frameId: 0,
     };
 

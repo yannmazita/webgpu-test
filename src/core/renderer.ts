@@ -21,6 +21,9 @@ export interface RendererStats {
   instancesOpaque: number;
   instancesTransparent: number;
   cpuTotalUs: number;
+  clusterAvgLpcX1000?: number;
+  clusterMaxLpc?: number;
+  clusterOverflows?: number;
 }
 
 /**
@@ -103,6 +106,9 @@ export class Renderer {
     instancesOpaque: 0,
     instancesTransparent: 0,
     cpuTotalUs: 0,
+    clusterAvgLpcX1000: 0,
+    clusterMaxLpc: 0,
+    clusterOverflows: 0,
   };
 
   private resizeObserver?: ResizeObserver;
@@ -820,6 +826,11 @@ export class Renderer {
     this.stats.lightCount = sceneData.lights.length;
     this.stats.canvasWidth = this.canvas.width;
     this.stats.canvasHeight = this.canvas.height;
+
+    const cls = this.clusterBuilder.getLastStats();
+    this.stats.clusterAvgLpcX1000 = cls.avgLpcX1000;
+    this.stats.clusterMaxLpc = cls.maxLpc;
+    this.stats.clusterOverflows = cls.overflow;
     Profiler.end("Render.FrustumCullAndSeparate");
 
     Profiler.begin("Render.Batching");
@@ -1010,6 +1021,8 @@ export class Renderer {
 
     Profiler.begin("Render.Submit");
     this.device.queue.submit([commandEncoder.finish()]);
+    // Notify clusterBuilder that a copy was submitted so it can map asynchronously
+    this.clusterBuilder.onSubmitted();
     Profiler.end("Render.Submit");
 
     // CPU total time for this render

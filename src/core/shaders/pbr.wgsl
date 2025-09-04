@@ -306,11 +306,12 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     // View-like depth along camera forward
     let toPoint = fi.worldPosition - clusterParams.cameraPos.xyz;
-    let viewZ = dot(toPoint, clusterParams.cameraForward.xyz);
+    let viewZraw = dot(toPoint, clusterParams.cameraForward.xyz);
+    // Tiny near-plane bias to reduce slice flicker at edges
+    let viewZ = max(viewZraw, clusterParams.near + 1e-4);
 
     if (viewZ >= clusterParams.near && viewZ <= clusterParams.far) {
         let zNorm = (viewZ - clusterParams.near) * clusterParams.invZRange;
-        // Avoid mixing u32 math inside f32 casts: compute f32 first
         let izF = clamp(floor(zNorm * f32(clusterParams.gridZ)), 0.0, f32(clusterParams.gridZ) - 1.0);
         let iz = u32(izF);
 
@@ -326,9 +327,9 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         let cidx = clusterIndex(ix, iy, iz);
         let count = clusterCounts.counts[cidx];
         let maxCount = clusterParams.maxPerCluster;
+        let countClamped = min(count, maxCount); // clamp once
 
-        for (var i: u32 = 0u; i < count; i = i + 1u) {
-            if (i >= maxCount) { break; }
+        for (var i: u32 = 0u; i < countClamped; i = i + 1u) {
             let idx = clusterLightIndices.indices[cidx * maxCount + i];
 
             let light = lightsBuffer.lights[idx];
