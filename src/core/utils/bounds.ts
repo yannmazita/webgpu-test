@@ -19,11 +19,13 @@ export function transformAABB(aabb: AABB, matrix: Mat4, outAABB?: AABB): AABB {
   result.min[1] = result.max[1] = matrix[13];
   result.min[2] = result.max[2] = matrix[14];
 
-  // For each axis of the original AABB, find the extent along each world axis
+  // For each local axis i, accumulate contribution along each world axis j
+  // Column-major indexing: m[row=j, col=i] = matrix[i*4 + j]
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 3; j++) {
-      const a = matrix[j * 4 + i] * aabb.min[i];
-      const b = matrix[j * 4 + i] * aabb.max[i];
+      const mji = matrix[i * 4 + j]; // corrected indexing
+      const a = mji * aabb.min[i];
+      const b = mji * aabb.max[i];
 
       if (a < b) {
         result.min[j] += a;

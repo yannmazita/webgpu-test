@@ -711,26 +711,6 @@ export class Renderer {
         this.depthFormat,
       );
 
-      passEncoder.setPipeline(pipeline);
-      passEncoder.setBindGroup(1, material.bindGroup);
-
-      // Bind mesh vertex buffers
-      for (let j = 0; j < mesh.buffers.length; j++) {
-        passEncoder.setVertexBuffer(j, mesh.buffers[j]);
-      }
-
-      // Bind instance buffer immediately after mesh buffers
-      passEncoder.setVertexBuffer(
-        mesh.buffers.length,
-        this.instanceBuffer,
-        instanceBufferOffset,
-        instanceDataView.byteLength,
-      );
-
-      if (mesh.indexBuffer) {
-        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-      }
-
       // Count consecutive instances with same mesh and material
       let count = 1;
       while (
@@ -741,10 +721,32 @@ export class Renderer {
         count++;
       }
 
+      // Bind pipeline and resources per group
+      passEncoder.setPipeline(pipeline);
+      passEncoder.setBindGroup(1, material.bindGroup);
+
+      // Bind mesh vertex buffers
+      for (let j = 0; j < mesh.buffers.length; j++) {
+        passEncoder.setVertexBuffer(j, mesh.buffers[j]);
+      }
+
+      // Bind the instance buffer with a per-group byte offset and size
+      const groupByteOffset =
+        instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
+      const groupByteSize = count * Renderer.INSTANCE_BYTE_STRIDE;
+      passEncoder.setVertexBuffer(
+        mesh.buffers.length,
+        this.instanceBuffer,
+        groupByteOffset,
+        groupByteSize,
+      );
+
       if (mesh.indexBuffer) {
-        passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, i);
+        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+        // firstInstance must be 0 when using per-group buffer offsets
+        passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
       } else {
-        passEncoder.draw(mesh.vertexCount, count, 0, i);
+        passEncoder.draw(mesh.vertexCount, count, 0, 0);
       }
 
       drawCalls++;
