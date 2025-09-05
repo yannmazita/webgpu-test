@@ -15,6 +15,11 @@ import {
   createIcosphereMeshData,
 } from "./utils/primitives";
 
+export interface PBRMaterialSpec {
+  type: "PBR";
+  options: PBRMaterialOptions;
+}
+
 /**
  * Computes the axis-aligned bounding box from vertex positions.
  * @param positions Flattened array of vertex positions [x,y,z,x,y,z,...]
@@ -56,18 +61,30 @@ function computeAABB(positions: Float32Array): AABB {
   };
 }
 
-// Internal helpers for attaching stable handles to runtime objects without polluting JSON
-function _setHandle(obj: object, handle: string): void {
-  Object.defineProperty(obj, "__handle", {
-    value: handle,
+// Internal helpers for attaching stable metadata to runtime objects without polluting JSON
+function _defineHidden<T extends object>(
+  obj: T,
+  key: string,
+  value: any,
+): void {
+  Object.defineProperty(obj, key, {
+    value,
     writable: false,
     enumerable: false,
     configurable: false,
   });
 }
-
+function _setHandle(obj: object, handle: string): void {
+  _defineHidden(obj, "__handle", handle);
+}
 function _getHandle(obj: any): string | undefined {
   return obj && typeof obj === "object" ? obj.__handle : undefined;
+}
+function _setPbrOptions(obj: object, options: PBRMaterialOptions): void {
+  _defineHidden(obj, "__pbrOptions", options);
+}
+function _getPbrOptions(obj: any): PBRMaterialOptions | undefined {
+  return obj && typeof obj === "object" ? obj.__pbrOptions : undefined;
 }
 
 /**
@@ -81,7 +98,7 @@ export class ResourceManager {
   private static nextMeshId = 0;
   /** A reference to the main renderer instance. */
   private renderer: Renderer;
-  /** A cache for Material objects keyed by their properties/handles. */
+  /** A cache for Material objects keyed by their deterministic "materialKey". */
   private materials = new Map<string, Material>();
   /** A cache for Mesh objects keyed by a unique string identifier or handle. */
   private meshes = new Map<string, Mesh>();
@@ -124,7 +141,7 @@ export class ResourceManager {
     });
   }
 
-  // ---------- Handle accessors for Scene IO ----------
+  // ---------- Handle and spec accessors for Scene IO ----------
 
   public getHandleForMesh(mesh: Mesh): string | undefined {
     return _getHandle(mesh);
@@ -134,145 +151,25 @@ export class ResourceManager {
     return _getHandle(material);
   }
 
-  // ---------- PBR material handle parsing ----------
-
-  private parsePBRHandle(handle: string): PBRMaterialOptions | null {
-    if (!handle.startsWith("PBR:")) return null;
-    // The materialKey used in createPBRMaterial is:
-    // `PBR:${albedo.join()}:${metallic}:${roughness}:${normalIntensity}:${emissive.join()}:${occlusionStrength}:${albedoMap??""}:${metallicRoughnessMap??""}:${normalMap??""}:${emissiveMap??""}:${occlusionMap??""}`
-    const parts = handle.split(":");
-    if (parts.length < 7) return null;
-
-    const parseFloatArray = (s: string, n: number): number[] => {
-      const arr = s.split(",").map((v) => parseFloat(v));
-      if (arr.length !== n || arr.some((v) => Number.isNaN(v))) return [];
-      return arr;
-    };
-
-    const albedoArr = parseFloatArray(parts[1], 4);
-    const metallic = parseFloat(parts[2]);
-    const roughness = parseFloat(parts[3]);
-    const normalIntensity = parseFloat(parts[4]);
-    const emissiveArr = parseFloatArray(parts[5], 3);
-    const occlusionStrength = parseFloat(parts[6]);
-
-    // Optional maps
-    const albedoMap = parts[7] || undefined;
-    const metallicRoughnessMap = parts[8] || undefined;
-    const normalMap = parts[9] || undefined;
-    const emissiveMap = parts[10] || undefined;
-    const occlusionMap = parts[11] || undefined;
-
-    if (!albedoArr.length || !emissiveArr.length) return null;
-
-    return {
-      albedo: albedoArr as [number, number, number, number],
-      metallic,
-      roughness,
-      normalIntensity,
-      emissive: emissiveArr as [number, number, number],
-      occlusionStrength,
-      albedoMap,
-      metallicRoughnessMap,
-      normalMap,
-      emissiveMap,
-      occlusionMap,
-    };
+  public getMaterialSpec(material: Material): PBRMaterialSpec | undefined {
+    const opts = _getPbrOptions(material);
+    if (opts) {
+      return { type: "PBR", options: opts };
+    }
+    return undefined;
   }
 
-  // ---------- Material resolution by handle ----------
-
-  /**
-   * Resolves a material handle to a Material instance (loads/creates if needed).
-   * Currently supports PBR handles.
-   */
-  public async resolveMaterialByHandle(handle: string): Promise<Material> {
-    // Return cached material if present
-    const cached = this.materials.get(handle);
-    if (cached) return cached;
-
-    if (handle.startsWith("PBR:")) {
-      const options = this.parsePBRHandle(handle);
-      if (!options) throw new Error(`Invalid PBR handle: ${handle}`);
-      // createPBRMaterial will build the same key and cache it
-      const mat = await this.createPBRMaterial(options);
-      // Ensure we can look it up by the exact handle string as well
-      this.materials.set(handle, mat);
-      return mat;
-    }
-
-    throw new Error(`Unsupported material handle: ${handle}`);
-  }
-
-  // ---------- Mesh resolution by handle ----------
-
-  /**
-   * Resolves a mesh handle to a Mesh instance (loads/creates if needed).
-   * Supports PRIM:cube, PRIM:icosphere, OBJ:<url>, STL:<url>.
-   */
-  public async resolveMeshByHandle(handle: string): Promise<Mesh> {
-    // Alias: if we already resolved this handle, return it
-    if (this.meshes.has(handle)) {
-      return this.meshes.get(handle)!;
-    }
-
-    if (handle.startsWith("PRIM:cube")) {
-      // Optional size parameter: PRIM:cube:size=1
-      let size = 1.0;
-      const m = /size=([0-9]*\.?[0-9]+)/.exec(handle);
-      if (m) size = parseFloat(m[1]);
-      const data = createCubeMeshData(size);
-      const mesh = this.createMesh(handle, data);
-      _setHandle(mesh, handle);
-      this.meshes.set(handle, mesh);
-      return mesh;
-    }
-
-    if (handle.startsWith("PRIM:icosphere")) {
-      // PRIM:icosphere:r=0.5,sub=2
-      let r = 0.5,
-        sub = 2;
-      const rm = /r=([0-9]*\.?[0-9]+)/.exec(handle);
-      const sm = /sub=([0-9]+)/.exec(handle);
-      if (rm) r = parseFloat(rm[1]);
-      if (sm) sub = parseInt(sm[1], 10);
-      const data = createIcosphereMeshData(r, sub);
-      const mesh = this.createMesh(handle, data);
-      _setHandle(mesh, handle);
-      this.meshes.set(handle, mesh);
-      return mesh;
-    }
-
-    if (handle.startsWith("OBJ:")) {
-      const url = handle.substring(4);
-      const mesh = await this.loadMeshFromOBJ(url);
-      _setHandle(mesh, handle);
-      // Also index by the handle for aliasing
-      this.meshes.set(handle, mesh);
-      return mesh;
-    }
-
-    if (handle.startsWith("STL:")) {
-      const url = handle.substring(4);
-      const mesh = await this.loadMeshFromSTL(url);
-      _setHandle(mesh, handle);
-      this.meshes.set(handle, mesh);
-      return mesh;
-    }
-
-    // Fallback to internal keys if someone passes a key we used for createMesh
-    if (this.meshes.has(handle)) return this.meshes.get(handle)!;
-
-    throw new Error(`Unsupported mesh handle: ${handle}`);
-  }
+  // ---------- Material creation and resolution ----------
 
   /**
    * Creates a new PBR material or retrieves it from the cache.
+   * Uses a deterministic key derived from options (including texture URLs) as the cache key.
+   * Also attaches non-enumerable metadata for scene serialization.
    */
   public async createPBRMaterial(
     options: PBRMaterialOptions = {},
   ): Promise<Material> {
-    // Set default values
+    // Default options
     const albedo = options.albedo ?? [1, 1, 1, 1];
     const metallic = options.metallic ?? 0.0;
     const roughness = options.roughness ?? 0.5;
@@ -280,24 +177,23 @@ export class ResourceManager {
     const emissive = options.emissive ?? [0, 0, 0];
     const occlusionStrength = options.occlusionStrength ?? 1.0;
 
-    // Create unique cache key (also used as handle)
+    // Deterministic cache key
     const materialKey = `PBR:${albedo.join()}:${metallic}:${roughness}:${normalIntensity}:${emissive.join()}:${occlusionStrength}:${
       options.albedoMap ?? ""
     }:${options.metallicRoughnessMap ?? ""}:${options.normalMap ?? ""}:${
       options.emissiveMap ?? ""
     }:${options.occlusionMap ?? ""}`;
 
-    if (this.materials.has(materialKey)) {
-      return this.materials.get(materialKey)!;
-    }
+    const cached = this.materials.get(materialKey);
+    if (cached) return cached;
 
-    // Initialize PBR material system once
+    // Ensure shader/layout initialized
     if (!this.pbrMaterialInitialized) {
       await PBRMaterial.initialize(this.renderer.device, this.preprocessor);
       this.pbrMaterialInitialized = true;
     }
 
-    // Load textures or use dummy texture (note: sRGB for albedo/emissive, linear for others)
+    // Load textures or use dummy; sRGB for albedo/emissive, linear for others
     const albedoTexture = options.albedoMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -349,11 +245,92 @@ export class ResourceManager {
       this.defaultSampler,
     );
 
-    // Attach a stable handle (materialKey) and cache
+    // Attach stable handle and original options for scene serialization
     _setHandle(material, materialKey);
+    // Clone array fields defensively
+    const clonedOpts: PBRMaterialOptions = {
+      ...options,
+      albedo: options.albedo
+        ? ([...options.albedo] as [number, number, number, number])
+        : undefined,
+      emissive: options.emissive
+        ? ([...options.emissive] as [number, number, number])
+        : undefined,
+    };
+    _setPbrOptions(material, clonedOpts);
+
     this.materials.set(materialKey, material);
     return material;
   }
+
+  /**
+   * Resolves a v1 material spec (structured) to a Material instance.
+   */
+  public async resolveMaterialSpec(spec: PBRMaterialSpec): Promise<Material> {
+    if (!spec || spec.type !== "PBR") {
+      throw new Error("Unsupported material spec (expected type 'PBR').");
+    }
+    return this.createPBRMaterial(spec.options);
+  }
+
+  // ---------- Mesh resolution by handle ----------
+
+  /**
+   * Resolves a mesh handle to a Mesh instance (loads/creates if needed).
+   * Supports PRIM:cube, PRIM:icosphere, OBJ:<url>, STL:<url>.
+   */
+  public async resolveMeshByHandle(handle: string): Promise<Mesh> {
+    // Alias: if we already resolved this handle, return it
+    const cached = this.meshes.get(handle);
+    if (cached) return cached;
+
+    if (handle.startsWith("PRIM:cube")) {
+      // Optional size parameter: PRIM:cube:size=1
+      let size = 1.0;
+      const m = /size=([0-9]*\.?[0-9]+)/.exec(handle);
+      if (m) size = parseFloat(m[1]);
+      const data = createCubeMeshData(size);
+      const mesh = this.createMesh(handle, data);
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
+
+    if (handle.startsWith("PRIM:icosphere")) {
+      // PRIM:icosphere:r=0.5,sub=2
+      let r = 0.5,
+        sub = 2;
+      const rm = /r=([0-9]*\.?[0-9]+)/.exec(handle);
+      const sm = /sub=([0-9]+)/.exec(handle);
+      if (rm) r = parseFloat(rm[1]);
+      if (sm) sub = parseInt(sm[1], 10);
+      const data = createIcosphereMeshData(r, sub);
+      const mesh = this.createMesh(handle, data);
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
+
+    if (handle.startsWith("OBJ:")) {
+      const url = handle.substring(4);
+      const mesh = await this.loadMeshFromOBJ(url);
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
+
+    if (handle.startsWith("STL:")) {
+      const url = handle.substring(4);
+      const mesh = await this.loadMeshFromSTL(url);
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
+
+    throw new Error(`Unsupported mesh handle: ${handle}`);
+  }
+
+  // ---------- Low-level creation and loaders ----------
 
   public createMesh(key: string, data: MeshData): Mesh {
     if (this.meshes.has(key)) {
@@ -440,7 +417,7 @@ export class ResourceManager {
       aabb,
     };
 
-    // unique ID for caching
+    // unique ID for batching cache keys
     (mesh as any).id = ResourceManager.nextMeshId++;
 
     // Attach a best-effort handle if caller used a simple key

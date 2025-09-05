@@ -7,6 +7,7 @@ import { LightComponent } from "./components/lightComponent";
 import { HierarchyComponent } from "./components/hierarchyComponent";
 import { setParent } from "./utils/hierarchy";
 import { quat, vec3, Vec3, Quat } from "wgpu-matrix";
+import { PBRMaterialOptions } from "@/core/types/gpu";
 
 export interface ValidationLimits {
   MAX_ENTITIES: number;
@@ -152,8 +153,7 @@ function validateMeshHandle(
       ? null
       : "STL URL invalid";
   }
-  // Allow existing cached internal keys as a last resort
-  return null;
+  return "Unsupported mesh handle";
 }
 
 // The current PBR handle format uses ":" separators which may conflict with URLs.
@@ -175,6 +175,51 @@ function validateMaterialHandle(
   return null;
 }
 
+function validatePbrOptions(
+  opt: Partial<PBRMaterialOptions>,
+  limits: ValidationLimits,
+  opts: ValidationOptions,
+): string | null {
+  if (!opt || typeof opt !== "object") return "PBR options must be an object";
+  const arr4 = (a: any) =>
+    Array.isArray(a) && a.length === 4 && a.every(isFiniteNumber);
+  const arr3 = (a: any) =>
+    Array.isArray(a) && a.length === 3 && a.every(isFiniteNumber);
+
+  if (opt.albedo && !arr4(opt.albedo))
+    return "albedo must be [r,g,b,a] numbers";
+  if (opt.metallic !== undefined && !isFiniteNumber(opt.metallic))
+    return "metallic must be a number";
+  if (opt.roughness !== undefined && !isFiniteNumber(opt.roughness))
+    return "roughness must be a number";
+  if (opt.normalIntensity !== undefined && !isFiniteNumber(opt.normalIntensity))
+    return "normalIntensity must be a number";
+  if (opt.emissive && !arr3(opt.emissive))
+    return "emissive must be [r,g,b] numbers";
+  if (
+    opt.occlusionStrength !== undefined &&
+    !isFiniteNumber(opt.occlusionStrength)
+  )
+    return "occlusionStrength must be a number";
+
+  // Validate texture URLs (if present)
+  const urlFields = [
+    "albedoMap",
+    "metallicRoughnessMap",
+    "normalMap",
+    "emissiveMap",
+    "occlusionMap",
+  ] as const;
+  for (const k of urlFields) {
+    if (opt[k] !== undefined) {
+      if (!isString(opt[k])) return `${k} must be a string URL`;
+      if (!validateUrl(opt[k], limits, opts.allowRelativeUrls))
+        return `${k} URL invalid`;
+    }
+  }
+  return null;
+}
+
 export interface SceneEntityV1 {
   id: string; // UUID
   name?: string;
@@ -185,8 +230,11 @@ export interface SceneEntityV1 {
       scale: [number, number, number];
     };
     MeshRenderer?: {
-      mesh: string; // handle
-      material: string; // handle
+      mesh: string; // handle: PRIM:/OBJ:/STL:
+      material: {
+        type: "PBR";
+        options: import("@/core/types/gpu").PBRMaterialOptions;
+      };
     };
     Light?: {
       color: [number, number, number, number];
@@ -229,7 +277,7 @@ export function validateSceneDocument(
     };
   }
 
-  // Pre-scan UUIDs for duplicates and parent existence
+  // Pre-scan UUIDs
   const ids = new Set<string>();
   const allIds: string[] = [];
 
@@ -318,16 +366,6 @@ export function validateSceneDocument(
           `$.entities[${i}].components.Transform.rotationQuat`,
           "must be a [number,number,number,number]",
         );
-      } else {
-        const q = t.rotationQuat as number[];
-        const len = Math.hypot(q[0], q[1], q[2], q[3]);
-        if (!Number.isFinite(len) || len < 1e-6) {
-          err(
-            `$.entities[${i}].components.Transform.rotationQuat`,
-            "invalid quaternion length",
-          );
-        }
-        // Near-unit check can be a warning; we choose not to error here.
       }
       if (!ensureArray<number>(t.scale, 3) || !t.scale.every(isFiniteNumber)) {
         err(
@@ -356,15 +394,25 @@ export function validateSceneDocument(
         const mErr = validateMeshHandle(mr.mesh, limits, opts);
         if (mErr) err(`$.entities[${i}].components.MeshRenderer.mesh`, mErr);
       }
-      if (!isString(mr.material)) {
+      const mat = mr.material;
+      if (!mat || typeof mat !== "object") {
         err(
           `$.entities[${i}].components.MeshRenderer.material`,
-          "must be a string",
+          "must be an object",
+        );
+      } else if (mat.type !== "PBR") {
+        err(
+          `$.entities[${i}].components.MeshRenderer.material.type`,
+          "must be 'PBR'",
         );
       } else {
-        const matErr = validateMaterialHandle(mr.material, limits);
-        if (matErr)
-          err(`$.entities[${i}].components.MeshRenderer.material`, matErr);
+        const vErr = validatePbrOptions(mat.options, limits, opts);
+        if (vErr) {
+          err(
+            `$.entities[${i}].components.MeshRenderer.material.options`,
+            vErr,
+          );
+        }
       }
     }
 
@@ -378,11 +426,6 @@ export function validateSceneDocument(
         err(
           `$.entities[${i}].components.Light.color`,
           "must be [r,g,b,a] numbers",
-        );
-      } else if (lc.color.some((v: number) => v < 0 || v > 100)) {
-        err(
-          `$.entities[${i}].components.Light.color`,
-          "channels must be within [0,100]",
         );
       }
       if (
@@ -448,8 +491,7 @@ export function validateSceneDocument(
     }
   }
 
-  // Cycle detection for hierarchy
-  // Build adjacency: child -> parent
+  // Cycle detection for hierarchy (unchanged)
   const parentOf = new Map<string, string>();
   for (let i = 0; i < anyDoc.entities.length; i++) {
     const ent = anyDoc.entities[i];
@@ -534,15 +576,15 @@ export function serializeWorld(
 
     if (mr) {
       const meshHandle = rm.getHandleForMesh(mr.mesh);
-      const matHandle = rm.getHandleForMaterial(mr.material);
-      if (!meshHandle || !matHandle) {
+      const matSpec = rm.getMaterialSpec(mr.material);
+      if (!meshHandle || !matSpec) {
         console.warn(
-          "serializeWorld: missing handles for MeshRenderer; skipping component",
+          "serializeWorld: missing mesh/material spec; skipping MeshRenderer",
         );
       } else {
         comps.MeshRenderer = {
           mesh: meshHandle,
-          material: matHandle,
+          material: matSpec,
         };
       }
     }
@@ -591,7 +633,6 @@ export async function deserializeIntoWorld(
   }
   const vdoc = res.doc;
 
-  // First pass: create entities with UUID and attach basic components (no parenting yet)
   const pendingParents: { childUuid: string; parentUuid: string }[] = [];
 
   for (const ent of vdoc.entities) {
@@ -601,24 +642,22 @@ export async function deserializeIntoWorld(
 
     if (c.Transform) {
       const t = new TransformComponent();
-      // Normalize quaternion if not unit (do not error here; validation already checked basic soundness)
       const rq = c.Transform.rotationQuat;
-      const len = Math.hypot(rq[0], rq[1], rq[2], rq[3]) || 1.0;
-      const nq: [number, number, number, number] = [
-        rq[0] / len,
-        rq[1] / len,
-        rq[2] / len,
-        rq[3] / len,
+      const nq = [rq[0], rq[1], rq[2], rq[3]] as [
+        number,
+        number,
+        number,
+        number,
       ];
       t.setPosition(...c.Transform.position);
-      t.setRotation(nq);
+      t.setRotation(quat.fromValues(nq[0], nq[1], nq[2], nq[3]));
       t.setScale(...c.Transform.scale);
       world.addComponent(e, t);
     }
 
     if (c.MeshRenderer) {
       const mesh = await rm.resolveMeshByHandle(c.MeshRenderer.mesh);
-      const mat = await rm.resolveMaterialByHandle(c.MeshRenderer.material);
+      const mat = await rm.resolveMaterialSpec(c.MeshRenderer.material);
       world.addComponent(e, new MeshRendererComponent(mesh, mat));
     }
 
@@ -641,7 +680,6 @@ export async function deserializeIntoWorld(
     }
   }
 
-  // Second pass: set up hierarchy
   for (const link of pendingParents) {
     const childE = world.getEntityByUuid(link.childUuid);
     const parentE = world.getEntityByUuid(link.parentUuid);
