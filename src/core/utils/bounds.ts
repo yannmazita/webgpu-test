@@ -11,7 +11,7 @@ import { AABB } from "../types/gpu";
  * collision detection prep work.
  *
  * @param aabb The AABB in local space.
- * @param matrix The transformation matrix (e.g., a model matrix).
+ * @param matrix The transformation matrix (like a model matrix).
  * @param outAABB Optional. A pre-allocated AABB to store the result,
  *     avoiding a new allocation.
  * @returns The transformed AABB in world space.
