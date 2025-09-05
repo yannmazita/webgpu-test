@@ -14,13 +14,20 @@ export class World {
   // Versioned query cache: each cached entry is valid only for the worldVersion it was built on
   private queryCache = new Map<string, { version: number; result: Entity[] }>();
   private worldVersion = 0;
+  private uuidToEntity = new Map<string, Entity>();
+  private entityToUuid = new Map<Entity, string>();
 
   constructor() {
     // Reserve entity 0 for global components/resources
-    this.globalEntity = this.createEntity();
+    const e0 = this.createEntity(); // NOTE: now calls the new signature
+    this.globalEntity = e0;
     if (this.globalEntity !== 0) {
       throw new Error("World initialization error: global entity is not 0.");
     }
+  }
+
+  private _generateUuid(): string {
+    return crypto.randomUUID();
   }
 
   /**
@@ -53,10 +60,21 @@ export class World {
    * Creates a new entity with a unique ID.
    * @returns The newly created entity's ID.
    */
-  public createEntity(): Entity {
+  public createEntity(uuid?: string): Entity {
     const entityId = this.recycledEntityIds.pop() ?? this.nextEntityId++;
     this.entities.add(entityId);
-    this.worldVersion++; // Any entity set change invalidates cached query results
+    this.worldVersion++;
+
+    // Assign or generate UUID (skip for global entity 0 if desired)
+    const useUuid = uuid ?? this._generateUuid();
+    if (this.uuidToEntity.has(useUuid)) {
+      throw new Error(
+        `Duplicate UUID detected when creating entity: ${useUuid}`,
+      );
+    }
+    this.uuidToEntity.set(useUuid, entityId);
+    this.entityToUuid.set(entityId, useUuid);
+
     return entityId;
   }
 
@@ -75,9 +93,16 @@ export class World {
       store.delete(entity);
     }
 
+    // Remove UUID maps
+    const uuid = this.entityToUuid.get(entity);
+    if (uuid !== undefined) {
+      this.entityToUuid.delete(entity);
+      this.uuidToEntity.delete(uuid);
+    }
+
     this.entities.delete(entity);
     this.recycledEntityIds.push(entity);
-    this.worldVersion++; // Invalidate caches by version bump
+    this.worldVersion++;
   }
 
   /**
@@ -193,5 +218,13 @@ export class World {
 
     this.queryCache.set(cacheKey, { version: this.worldVersion, result });
     return result;
+  }
+
+  public getEntityByUuid(uuid: string): Entity | undefined {
+    return this.uuidToEntity.get(uuid);
+  }
+
+  public getEntityUuid(entity: Entity): string | undefined {
+    return this.entityToUuid.get(entity);
   }
 }
