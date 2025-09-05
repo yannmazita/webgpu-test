@@ -3,13 +3,18 @@ import { vec3, Mat4, Vec4 } from "wgpu-matrix";
 import { AABB } from "../types/gpu";
 
 /**
- * Transforms an AABB by a 4x4 transformation matrix.
- * Uses the optimized method that avoids transforming all 8 corners.
+ * Transforms an axis-aligned bounding box (AABB) by a 4x4 matrix.
  *
- * @param aabb The axis-aligned bounding box in local space
- * @param matrix The transformation matrix (typically a model matrix)
- * @param outAABB Optional output AABB to avoid allocation. If not provided, creates a new one.
- * @returns The transformed AABB in world space
+ * This function calculates the new world-space AABB of an object after it has
+ * been transformed. It uses an optimized method that does not require
+ * transforming all 8 corners of the box, making it efficient for culling and
+ * collision detection prep work.
+ *
+ * @param aabb The AABB in local space.
+ * @param matrix The transformation matrix (e.g., a model matrix).
+ * @param outAABB Optional. A pre-allocated AABB to store the result,
+ *     avoiding a new allocation.
+ * @returns The transformed AABB in world space.
  */
 export function transformAABB(aabb: AABB, matrix: Mat4, outAABB?: AABB): AABB {
   const result = outAABB || { min: vec3.create(), max: vec3.create() };
@@ -41,12 +46,17 @@ export function transformAABB(aabb: AABB, matrix: Mat4, outAABB?: AABB): AABB {
 }
 
 /**
- * Tests if an AABB is completely outside any of the frustum planes.
- * Uses the "positive vertex" method for efficiency.
+ * Tests if an AABB is inside or intersecting with the view frustum.
  *
- * @param aabb The axis-aligned bounding box to test
- * @param frustumPlanes Array of 6 planes as Vec4 [a,b,c,d] where ax+by+cz+d=0
- * @returns true if the AABB is inside or intersecting the frustum, false if completely outside
+ * This function is a core part of frustum culling. It efficiently determines
+ * if an object's bounding box is visible to the camera. It uses the
+ * "positive vertex" optimization, which avoids checking all 8 corners of the
+ * box against each frustum plane.
+ *
+ * @param aabb The AABB to test, typically in world space.
+ * @param frustumPlanes An array of 6 planes defining the camera frustum.
+ * @returns `true` if the AABB is at least partially inside the frustum,
+ *     `false` if it is completely outside.
  */
 export function testAABBFrustum(aabb: AABB, frustumPlanes: Vec4[]): boolean {
   for (let i = 0; i < 6; i++) {

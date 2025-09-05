@@ -4,11 +4,20 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3, vec4, Vec3, mat4 } from "wgpu-matrix";
 
 /**
- * Calculates the 3D world position corresponding to a 2D mouse coordinate,
- * by intersecting a ray with a virtual plane.
+ * Calculates the 3D world position corresponding to a 2D mouse coordinate.
  *
- * This version uses the canvas client size. For worker/OffscreenCanvas, prefer
- * getMouseWorldPositionWithViewport to pass numeric dimensions.
+ * This function creates a ray from the camera through the mouse cursor and
+ * finds where it intersects with a virtual plane in the scene. This is
+ * useful for things like placing objects or selecting points in the world.
+ *
+ * @param mouseCoords The 2D mouse coordinates.
+ * @param canvas The HTML canvas element.
+ * @param cameraComp The camera component.
+ * @param _cameraTransform The camera transform component (deprecated).
+ * @param planeNormal The normal of the virtual plane to intersect with.
+ * @param planePoint A point on the virtual plane.
+ * @returns The 3D world position, or null if the ray is parallel to the
+ *     plane.
  */
 export function getMouseWorldPosition(
   mouseCoords: { x: number; y: number },
@@ -31,13 +40,18 @@ export function getMouseWorldPosition(
 }
 
 /**
- * Builds a world-space pick ray from a 2D mouse coordinate using the camera's inverse matrices.
+ * Creates a world-space ray from a 2D mouse coordinate.
  *
- * @param mouseCoords Mouse position in CSS pixels relative to the viewport (0..width, 0..height)
- * @param viewportWidth Viewport width in CSS pixels
- * @param viewportHeight Viewport height in CSS pixels
- * @param cameraComp Camera component providing inverseViewMatrix and inverseProjectionMatrix
- * @returns { origin, direction } where origin is camera position and direction is normalized
+ * This function is the first step in raycasting. It takes a 2D screen
+ * position and converts it into a 3D ray (an origin and a direction) in world
+ * space. This ray can then be used for intersection tests with objects in the
+ * scene.
+ *
+ * @param mouseCoords The 2D mouse coordinates.
+ * @param viewportWidth The width of the viewport.
+ * @param viewportHeight The height of the viewport.
+ * @param cameraComp The camera component.
+ * @returns An object containing the ray's origin and direction.
  */
 export function getPickRay(
   mouseCoords: { x: number; y: number },
@@ -102,12 +116,17 @@ export function getPickRay(
 }
 
 /**
- * Intersects a ray with a plane.
- * @param origin Ray origin
- * @param direction Ray direction (normalized recommended)
- * @param planePoint A point on the plane
- * @param planeNormal Plane normal (does not need to be normalized)
- * @returns Intersection point or null if parallel or behind origin
+ * Finds the intersection point of a ray and a plane.
+ *
+ * This is a fundamental geometric calculation used in raycasting. It
+ * determines the point in 3D space where a given ray intersects with a plane.
+ *
+ * @param origin The origin of the ray.
+ * @param direction The direction of the ray.
+ * @param planePoint A point on the plane.
+ * @param planeNormal The normal of the plane.
+ * @returns The intersection point, or null if the ray is parallel to the
+ *     plane or intersects behind the origin.
  */
 export function intersectRayWithPlane(
   origin: Vec3,
@@ -129,14 +148,21 @@ export function intersectRayWithPlane(
 }
 
 /**
- * Worker/OffscreenCanvas-friendly helper: uses numeric viewport dimensions.
+ * Calculates the 3D world position corresponding to a 2D mouse coordinate,
+ * using numeric viewport dimensions.
  *
- * @param mouseCoords Mouse position in CSS pixels relative to the viewport
- * @param viewportWidth CSS width
- * @param viewportHeight CSS height
- * @param cameraComp Camera component
- * @param planeNormal Plane normal (default Y-up)
- * @param planePoint A point on the plane (default origin)
+ * This function is a variant of `getMouseWorldPosition` that is suitable for
+ * use in environments where there is no access to the DOM, such as web
+ * workers.
+ *
+ * @param mouseCoords The 2D mouse coordinates.
+ * @param viewportWidth The width of the viewport.
+ * @param viewportHeight The height of the viewport.
+ * @param cameraComp The camera component.
+ * @param planeNormal The normal of the virtual plane to intersect with.
+ * @param planePoint A point on the virtual plane.
+ * @returns The 3D world position, or null if the ray is parallel to the
+ *     plane.
  */
 export function getMouseWorldPositionWithViewport(
   mouseCoords: { x: number; y: number },

@@ -174,6 +174,13 @@ export class Renderer {
     this.canvas = canvas;
   }
 
+  /**
+   * Initializes the renderer.
+   *
+   * This method sets up the WebGPU device and context, creates the depth
+   * texture, and initializes the uniform buffers and other resources.
+   * It must be called before any rendering can be done.
+   */
   public async init(): Promise<void> {
     await this.setupDevice();
     this.setupContext();
@@ -331,8 +338,10 @@ export class Renderer {
   }
 
   /**
-   * External resize hook for worker-driven sizing. Computes physical size,
-   * updates canvas, depth texture, and camera aspect immediately.
+   * External resize hook for worker-driven sizing.
+   *
+   * Computes physical size, updates canvas, depth texture, and camera aspect
+   * immediately.
    */
   public requestResize(
     cssWidth: number,
@@ -778,6 +787,17 @@ export class Renderer {
     uiPassEncoder.end();
   }
 
+  /**
+   * Renders a single frame.
+   *
+   * This method performs frustum culling, batching, and sorting of renderable
+   * objects, and then records and submits the necessary render passes to the
+   * GPU.
+   * @param camera The camera to render from.
+   * @param sceneData The data for the scene to render.
+   * @param postSceneDrawCallback An optional callback to render UI or other
+   * content after the main scene has been drawn.
+   */
   public render(
     camera: CameraComponent,
     sceneData: SceneRenderData,
@@ -1036,10 +1056,19 @@ export class Renderer {
     Profiler.end("Render.Total");
   }
 
+  /**
+   * Returns the CSS size of the viewport.
+   */
   public getViewportCssSize(): { width: number; height: number } {
     return { width: this.cssWidth, height: this.cssHeight };
   }
 
+  /**
+   * Returns the frame bind group layout.
+   *
+   * This layout defines the structure of the bind group that is used for
+   * frame-level uniforms, such as the camera and lights.
+   */
   public getFrameBindGroupLayout(): GPUBindGroupLayout {
     if (!this.frameBindGroupLayout)
       throw new Error(
@@ -1048,6 +1077,9 @@ export class Renderer {
     return this.frameBindGroupLayout;
   }
 
+  /**
+   * Returns the rendering statistics for the last frame.
+   */
   public getStats(): RendererStats {
     return this.stats;
   }

@@ -47,6 +47,13 @@ export class ClusterBuilder {
     this.cfg = cfg;
   }
 
+  /**
+   * Initializes the cluster builder.
+   *
+   * This method creates the necessary GPU resources, including buffers and
+   * compute pipelines, for the clustered forward rendering implementation. It
+   * must be called before the cluster builder can be used.
+   */
   public async init(): Promise<void> {
     this.clusterParamsBuffer = this.device.createBuffer({
       label: "CLUSTER_PARAMS_BUFFER",
@@ -145,6 +152,17 @@ export class ClusterBuilder {
     });
   }
 
+  /**
+   * Updates the cluster parameters uniform buffer.
+   *
+   * This method packs camera and viewport data into a uniform buffer that is
+   * used by the compute shaders to correctly assign lights to clusters. It
+   * should be called every frame before the `record` method.
+   *
+   * @param camera The camera component.
+   * @param viewportW The width of the viewport.
+   * @param viewportH The height of the viewport.
+   */
   public updateParams(
     camera: CameraComponent,
     viewportW: number,
@@ -238,6 +256,15 @@ export class ClusterBuilder {
     this.device.queue.writeBuffer(this.clusterParamsBuffer, 0, arr);
   }
 
+  /**
+   * Creates the bind group for the compute shaders.
+   *
+   * This method creates a bind group that contains all the resources needed
+   * by the compute shaders, including the cluster parameters, the light list,
+   * and the cluster counts and indices buffers.
+   *
+   * @param lightsBuffer The buffer containing the light data.
+   */
   public createComputeBindGroup(lightsBuffer: GPUBuffer): void {
     this.clearBindGroup = this.device.createBindGroup({
       label: "CLUSTER_CLEAR_BG",
@@ -281,6 +308,14 @@ export class ClusterBuilder {
     }
   }
 
+  /**
+   * Notifies the cluster builder that a command buffer has been submitted.
+   *
+   * This method is called by the renderer after it has submitted a command
+   * buffer that includes a copy operation to the readback buffer. This
+   * allows the cluster builder to start the asynchronous process of mapping
+   * the readback buffer and computing statistics.
+   */
   public onSubmitted(): void {
     // Kick off async map+read once a copy has been enqueued in the same frame
     if (this.readbackPending) {
@@ -289,6 +324,17 @@ export class ClusterBuilder {
     }
   }
 
+  /**
+   * Records the compute passes for clearing and assigning lights to clusters.
+   *
+   * This method records two compute passes: one to clear the cluster counts
+   * from the previous frame, and another to assign the current frame's
+   * lights to their corresponding clusters. It also periodically records a
+   * copy operation to a readback buffer for statistics.
+   *
+   * @param commandEncoder The command encoder to record the passes into.
+   * @param lightCount The number of lights in the scene.
+   */
   public record(commandEncoder: GPUCommandEncoder, lightCount: number): void {
     // Clear counts
     {
@@ -328,15 +374,32 @@ export class ClusterBuilder {
     }
   }
 
+  /**
+   * Gets the cluster configuration.
+   * @returns The cluster configuration.
+   */
   public getConfig(): ClusterConfig {
     return this.cfg;
   }
 
+  /**
+   * Sets the viewport dimensions.
+   * @param width The width of the viewport.
+   * @param height The height of the viewport.
+   */
   public setViewport(width: number, height: number): void {
     this.viewportW = Math.max(1, Math.floor(width));
     this.viewportH = Math.max(1, Math.floor(height));
   }
 
+  /**
+   * Gets the latest statistics from the cluster builder.
+   *
+   * The statistics are read back from the GPU periodically, so they may not
+   * be updated every frame.
+   *
+   * @returns The latest cluster statistics.
+   */
   public getLastStats(): {
     avgLpcX1000: number;
     maxLpc: number;

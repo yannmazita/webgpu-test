@@ -111,8 +111,9 @@ export class ResourceManager {
   private pbrMaterialInitialized = false;
 
   /**
+   * Creates a new ResourceManager.
    * @param renderer The renderer used to access the `GPUDevice`
-   *   and other GPU-related configurations.
+   *  and other GPU-related configurations.
    */
   constructor(renderer: Renderer) {
     this.renderer = renderer;
@@ -143,14 +144,23 @@ export class ResourceManager {
 
   // ---------- Handle and spec accessors for Scene IO ----------
 
+  /**
+   * Gets the handle for a given mesh.
+   */
   public getHandleForMesh(mesh: Mesh): string | undefined {
     return _getHandle(mesh);
   }
 
+  /**
+   * Gets the handle for a given material.
+   */
   public getHandleForMaterial(material: Material): string | undefined {
     return _getHandle(material);
   }
 
+  /**
+   * Gets the material specification for a given material.
+   */
   public getMaterialSpec(material: Material): PBRMaterialSpec | undefined {
     const opts = _getPbrOptions(material);
     if (opts) {
@@ -163,8 +173,10 @@ export class ResourceManager {
 
   /**
    * Creates a new PBR material or retrieves it from the cache.
-   * Uses a deterministic key derived from options (including texture URLs) as the cache key.
-   * Also attaches non-enumerable metadata for scene serialization.
+   *
+   * Uses a deterministic key derived from options (including texture URLs)
+   * as the cache key. Also attaches non-enumerable metadata for scene
+   * serialization.
    */
   public async createPBRMaterial(
     options: PBRMaterialOptions = {},
@@ -264,7 +276,7 @@ export class ResourceManager {
   }
 
   /**
-   * Resolves a v1 material spec (structured) to a Material instance.
+   * Resolves a material specification to a material instance.
    */
   public async resolveMaterialSpec(spec: PBRMaterialSpec): Promise<Material> {
     if (!spec || spec.type !== "PBR") {
@@ -276,8 +288,21 @@ export class ResourceManager {
   // ---------- Mesh resolution by handle ----------
 
   /**
-   * Resolves a mesh handle to a Mesh instance (loads/creates if needed).
-   * Supports PRIM:cube, PRIM:icosphere, OBJ:<url>, STL:<url>.
+   * Resolves a mesh from a string identifier, referred to as a "handle".
+   *
+   * This method loads or creates a mesh based on the handle's format. The
+   * handle also serves as a cache key, ensuring that the same resource is not
+   * loaded multiple times.
+   *
+   * Supported handle formats:
+   * - **Primitives:**
+   *   - `PRIM:cube` (default size 1.0)
+   *   - `PRIM:cube:size=2.5`
+   *   - `PRIM:icosphere` (default radius 0.5, subdivisions 2)
+   *   - `PRIM:icosphere:r=1.0,sub=3`
+   * - **Model Files:**
+   *   - `OBJ:path/to/model.obj`
+   *   - `STL:path/to/model.stl`
    */
   public async resolveMeshByHandle(handle: string): Promise<Mesh> {
     // Alias: if we already resolved this handle, return it
@@ -332,6 +357,16 @@ export class ResourceManager {
 
   // ---------- Low-level creation and loaders ----------
 
+  /**
+   * Creates a new mesh from the given mesh data.
+   *
+   * This is a low-level method that takes raw mesh data and creates the
+   * necessary GPU buffers.
+   * @param key A unique key to identify the mesh in the cache.
+   * @param data The mesh data, including positions, normals, indices, and
+   *     texture coordinates.
+   * @returns The created mesh.
+   */
   public createMesh(key: string, data: MeshData): Mesh {
     if (this.meshes.has(key)) {
       return this.meshes.get(key)!;

@@ -5,6 +5,19 @@ import { TransformComponent } from "../components/transformComponent";
 import { Entity } from "../entity";
 import { World } from "../world";
 
+/**
+ * Updates the local and world matrices for all entities with a
+ * TransformComponent.
+ *
+ * This system is responsible for calculating the final world-space position,
+ * rotation, and scale of every object in the scene. It respects the scene
+ * hierarchy, ensuring that child transforms are correctly combined with their
+ * parent's. It starts from the root nodes of the hierarchy and recursively
+ * updates all children. This system should be one of the first to run each
+ * frame.
+ *
+ * @param world The world containing the entities.
+ */
 export function transformSystem(world: World): void {
   const roots: Entity[] = [];
   const entities = world.query([TransformComponent]);

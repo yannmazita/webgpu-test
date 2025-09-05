@@ -41,6 +41,7 @@ export class World {
   /**
    * Gets a global, singleton-like component from the world.
    * @param componentType The type of the component to retrieve.
+   * @returns The component instance, or undefined if it does not exist.
    */
   public getResource<T extends IComponent>(
     componentType: ComponentConstructor<T>,
@@ -58,6 +59,8 @@ export class World {
 
   /**
    * Creates a new entity with a unique ID.
+   * @param uuid An optional UUID to assign to the entity. If not provided,
+   * a random UUID will be generated.
    * @returns The newly created entity's ID.
    */
   public createEntity(uuid?: string): Entity {
@@ -126,7 +129,8 @@ export class World {
    * Retrieves a component of a specific type for a given entity.
    * @param entity The entity to get the component from.
    * @param componentType The type (constructor) of the component to retrieve.
-   * @returns The component instance, or undefined if the entity does not have it.
+   * @returns The component instance, or undefined if the entity does not have
+   * it.
    */
   public getComponent<T extends IComponent>(
     entity: Entity,
@@ -220,10 +224,21 @@ export class World {
     return result;
   }
 
+  /**
+   * Gets an entity by its UUID.
+   * @param uuid The UUID of the entity to retrieve.
+   * @returns The entity ID, or undefined if no entity has that UUID.
+   */
   public getEntityByUuid(uuid: string): Entity | undefined {
     return this.uuidToEntity.get(uuid);
   }
 
+  /**
+   * Gets the UUID of an entity.
+   * @param entity The ID of the entity to get the UUID for.
+   * @returns The UUID of the entity, or undefined if the entity does not
+   * exist.
+   */
   public getEntityUuid(entity: Entity): string | undefined {
     return this.entityToUuid.get(entity);
   }

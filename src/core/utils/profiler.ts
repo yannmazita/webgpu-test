@@ -17,18 +17,34 @@ export class Profiler {
   private static startTimes = new Map<string, number>();
   private static enabled = DEFAULT_PROFILER_ENABLED;
 
+  /**
+   * Enables or disables the profiler.
+   * @param enabled Whether to enable the profiler.
+   */
   static setEnabled(enabled: boolean): void {
     this.enabled = enabled;
   }
+  /**
+   * Checks if the profiler is enabled.
+   * @returns True if the profiler is enabled, false otherwise.
+   */
   static isEnabled(): boolean {
     return this.enabled;
   }
 
+  /**
+   * Starts a new timing measurement.
+   * @param name The name of the measurement.
+   */
   static begin(name: string): void {
     if (!this.enabled) return;
     this.startTimes.set(name, performance.now());
   }
 
+  /**
+   * Ends a timing measurement.
+   * @param name The name of the measurement.
+   */
   static end(name: string): void {
     if (!this.enabled) return;
     const startTime = this.startTimes.get(name);
@@ -47,6 +63,10 @@ export class Profiler {
     this.startTimes.delete(name);
   }
 
+  /**
+   * Gets a formatted string with the performance report.
+   * @returns The performance report.
+   */
   static getReport(): string {
     const timings = Array.from(this.timings.values()).sort(
       (a, b) => b.duration - a.duration,
@@ -61,11 +81,17 @@ export class Profiler {
     return report;
   }
 
+  /**
+   * Resets the profiler's timings.
+   */
   static reset(): void {
     this.timings.clear();
     this.startTimes.clear();
   }
 
+  /**
+   * Logs the performance report to the console and resets the profiler.
+   */
   static logReport(): void {
     if (!this.enabled) return;
     console.log(this.getReport());

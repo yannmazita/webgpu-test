@@ -1,6 +1,15 @@
 // src/core/utils/primitives.ts
 import { MeshData } from "@/core/types/mesh";
 
+/**
+ * Creates the mesh data for a cube.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a cube of a given size.
+ *
+ * @param size The size of the cube.
+ * @returns The mesh data for the cube.
+ */
 export function createCubeMeshData(size = 1.0): MeshData {
   const s = size / 2;
 
@@ -59,6 +68,15 @@ export function createCubeMeshData(size = 1.0): MeshData {
   return { positions, normals, texCoords, indices };
 }
 
+/**
+ * Creates the mesh data for a plane.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a plane of a given size.
+ *
+ * @param size The size of the plane.
+ * @returns The mesh data for the plane.
+ */
 export function createPlaneMeshData(size = 1.0): MeshData {
   const s = size / 2;
 
@@ -79,6 +97,16 @@ export function createPlaneMeshData(size = 1.0): MeshData {
   return { positions, normals, texCoords, indices };
 }
 
+/**
+ * Creates the mesh data for a UV sphere.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a UV sphere of a given radius and number of subdivisions.
+ *
+ * @param radius The radius of the sphere.
+ * @param subdivisions The number of subdivisions.
+ * @returns The mesh data for the sphere.
+ */
 export function createUvSphereMeshData(
   radius = 0.5,
   subdivisions = 16,
@@ -125,6 +153,18 @@ export function createUvSphereMeshData(
   };
 }
 
+/**
+ * Creates the mesh data for an icosphere.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for an icosphere of a given radius and number of subdivisions.
+ * An icosphere is a sphere made of triangles that are more evenly distributed
+ * than in a UV sphere.
+ *
+ * @param radius The radius of the sphere.
+ * @param subdivisions The number of subdivisions.
+ * @returns The mesh data for the sphere.
+ */
 export function createIcosphereMeshData(
   radius = 0.5,
   subdivisions = 2,
@@ -243,6 +283,18 @@ export function createIcosphereMeshData(
   };
 }
 
+/**
+ * Creates the mesh data for a cylinder.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a cylinder of a given radius, height, and number of
+ * subdivisions.
+ *
+ * @param radius The radius of the cylinder.
+ * @param height The height of the cylinder.
+ * @param subdivisions The number of subdivisions.
+ * @returns The mesh data for the cylinder.
+ */
 export function createCylinderMeshData(
   radius = 0.5,
   height = 1.0,
@@ -286,6 +338,18 @@ export function createCylinderMeshData(
   };
 }
 
+/**
+ * Creates the mesh data for a cone.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a cone of a given radius, height, and number of
+ * subdivisions.
+ *
+ * @param radius The radius of the cone.
+ * @param height The height of the cone.
+ * @param subdivisions The number of subdivisions.
+ * @returns The mesh data for the cone.
+ */
 export function createConeMeshData(
   radius = 0.5,
   height = 1.0,
@@ -328,6 +392,19 @@ export function createConeMeshData(
   };
 }
 
+/**
+ * Creates the mesh data for a torus.
+ *
+ * This function generates the vertex positions, normals, texture coordinates,
+ * and indices for a torus of a given radius, tube radius, and number of
+ * segments.
+ *
+ * @param radius The radius of the torus.
+ * @param tube The radius of the tube.
+ * @param radialSegments The number of radial segments.
+ * @param tubularSegments The number of tubular segments.
+ * @returns The mesh data for the torus.
+ */
 export function createTorusMeshData(
   radius = 0.5,
   tube = 0.2,

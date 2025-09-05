@@ -249,6 +249,13 @@ export interface SceneEntityV1 {
   };
 }
 
+/**
+ * Validates a scene document against a set of limits and options.
+ * @param doc The scene document to validate.
+ * @param limitsPartial Optional partial limits to override the defaults.
+ * @param optsPartial Optional partial options to override the defaults.
+ * @returns A result object indicating success or failure.
+ */
 export function validateSceneDocument(
   doc: unknown,
   limitsPartial?: Partial<ValidationLimits>,
@@ -543,6 +550,12 @@ function isSceneV1(doc: any): doc is SceneDocumentV1 {
 }
 
 // Serialize all non-global entities
+/**
+ * Serializes the state of the world into a scene document.
+ * @param world The world to serialize.
+ * @param rm The resource manager.
+ * @returns The serialized scene document.
+ */
 export function serializeWorld(
   world: World,
   rm: ResourceManager,
@@ -620,6 +633,14 @@ export function serializeWorld(
 }
 
 // Load into an existing world (clearing world is up to caller)
+/**
+ * Deserializes a scene document into the world.
+ * @param doc The scene document to deserialize.
+ * @param world The world to deserialize into.
+ * @param rm The resource manager.
+ * @param limitsPartial Optional partial limits to override the defaults.
+ * @param optsPartial Optional partial options to override the defaults.
+ */
 export async function deserializeIntoWorld(
   doc: SceneDocument,
   world: World,

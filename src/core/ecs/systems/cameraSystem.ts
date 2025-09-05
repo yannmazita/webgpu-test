@@ -5,12 +5,16 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { World } from "@/core/ecs/world";
 
 /**
- * Extracts frustum planes from a view-projection matrix.
- * Planes are stored as [a,b,c,d] where ax+by+cz+d=0.
- * Normals point inward (negative half-space is inside frustum).
+ * Extracts the six frustum planes from a combined view-projection matrix.
  *
- * @param viewProjectionMatrix The combined view-projection matrix
- * @param outPlanes Array of 6 Vec4 to store the planes [left, right, bottom, top, near, far]
+ * This function is a prerequisite for frustum culling. By representing the
+ * camera's view volume as a set of planes, we can efficiently test whether
+ * objects are inside or outside the view. The planes are normalized to ensure
+ * that the distance calculation used in culling is accurate.
+ *
+ * @param viewProjectionMatrix The combined view-projection matrix.
+ * @param outPlanes An array of 6 Vec4s to store the planes in the order:
+ *     left, right, bottom, top, near, far.
  */
 function extractFrustumPlanes(
   viewProjectionMatrix: Mat4,
@@ -70,8 +74,15 @@ function extractFrustumPlanes(
 }
 
 /**
- * Updates the view-related matrices of all camera entities.
- * This system should run AFTER the transformSystem but BEFORE the renderSystem.
+ * Updates the view-related matrices for all camera entities.
+ *
+ * This system is responsible for synchronizing the `CameraComponent` with its
+ * associated `TransformComponent`. It computes the view matrix, the combined
+ * view-projection matrix, and extracts the frustum planes. This ensures that
+ * all camera data is consistent and ready for the rendering system. It must
+ * run after the `transformSystem` has updated all world matrices but after
+ * renderSystem.
+ *
  * @param world The world containing the entities.
  */
 export function cameraSystem(world: World): void {

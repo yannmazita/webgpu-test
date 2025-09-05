@@ -26,6 +26,20 @@ export class CameraControllerSystem {
     this.actions = actions;
   }
 
+  /**
+   * Updates the camera's position and orientation based on user input.
+   *
+   * This method implements a first-person-style camera control scheme. It
+   * translates abstract user actions (e.g., 'move_forward', mouse movement)
+   * into changes in the camera's TransformComponent. This system is designed
+   * to be frame-rate independent by using a delta time value for all
+   * movements.
+   *
+   * @param world The ECS world, used to query for the main camera entity.
+   * @param deltaTime The time elapsed since the last frame, in seconds. This
+   *     ensures that camera movement is smooth and independent of the
+   *     frame rate.
+   */
   public update(world: World, deltaTime: number): void {
     const query = world.query([MainCameraTagComponent, TransformComponent]);
     if (query.length === 0) return;

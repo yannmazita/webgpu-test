@@ -18,6 +18,23 @@ export class Shader {
     this.fragmentEntryPoint = fragmentEntryPoint;
   }
 
+  /**
+   * Creates a new shader from a URL.
+   *
+   * This static method fetches the shader source code from the given URL,
+   * processes it with the provided preprocessor, and then creates a new
+   * `Shader` instance.
+   *
+   * @param device The GPU device.
+   * @param preprocessor The shader preprocessor.
+   * @param url The URL of the shader source file.
+   * @param label An optional label for the shader module.
+   * @param vertexEntryPoint The name of the vertex shader entry point
+   *     function.
+   * @param fragmentEntryPoint The name of the fragment shader entry point
+   *     function.
+   * @returns A promise that resolves to the new `Shader` instance.
+   */
   public static async fromUrl(
     device: GPUDevice,
     preprocessor: ShaderPreprocessor,

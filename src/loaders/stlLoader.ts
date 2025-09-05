@@ -7,6 +7,15 @@ export interface STLGeometry {
   indices: Uint32Array; // triangle indices
 }
 
+/**
+ * Parses the contents of an STL file.
+ *
+ * This function detects whether the STL file is in ASCII or binary format
+ * and calls the appropriate parser.
+ *
+ * @param arrayBuffer The contents of the STL file.
+ * @returns The parsed STL geometry.
+ */
 export const parseSTL = (arrayBuffer: ArrayBuffer): STLGeometry => {
   const dv = new DataView(arrayBuffer);
 
@@ -104,6 +113,11 @@ const parseASCII = (text: string): STLGeometry => {
   };
 };
 
+/**
+ * Fetches an STL file from a URL and parses it into geometry.
+ * @param url The URL of the .stl file.
+ * @returns A promise that resolves to the parsed STL geometry.
+ */
 export const loadSTL = async (url: string): Promise<STLGeometry> => {
   const response = await fetch(url);
   const buffer = await response.arrayBuffer();

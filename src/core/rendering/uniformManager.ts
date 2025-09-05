@@ -20,7 +20,16 @@ export class UniformManager {
     this.lightDataBuffer = new ArrayBuffer(bufferSize);
   }
 
-  // Always write VP matrix
+  /**
+   * Updates the camera uniform buffer with the view-projection matrix.
+   *
+   * This method is called every frame to ensure that the GPU has the latest
+   * camera matrix for rendering.
+   *
+   * @param device The GPU device.
+   * @param buffer The camera uniform buffer.
+   * @param camera The camera component.
+   */
   public updateCameraUniform(
     device: GPUDevice,
     buffer: GPUBuffer,
@@ -33,7 +42,21 @@ export class UniformManager {
     );
   }
 
-  // Always write scene data
+  /**
+   * Updates the scene uniform buffer with scene-wide data.
+   *
+   * This method packs various scene-wide data, such as camera position,
+   * ambient color, and fog parameters, into a single uniform buffer. This
+   * data is then available to all shaders in the scene.
+   *
+   * @param device The GPU device.
+   * @param buffer The scene uniform buffer.
+   * @param camera The camera component.
+   * @param ambientColor The ambient color of the scene.
+   * @param fogColor The color of the fog.
+   * @param fogParams0 The primary fog parameters.
+   * @param fogParams1 The secondary fog parameters.
+   */
   public updateSceneUniform(
     device: GPUDevice,
     buffer: GPUBuffer,
@@ -58,9 +81,19 @@ export class UniformManager {
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }
 
-  // Get a reusable light data buffer, resizing if needed
+  /**
+   * Gets a reusable ArrayBuffer for light data.
+   *
+   * This method provides a pre-allocated or resized ArrayBuffer to hold the
+   * light data for the current frame. This is a memory optimization that
+   * avoids allocating a new buffer every frame, which helps to reduce
+   * garbage collection pauses.
+   *
+   * @param lightCount The number of lights in the scene.
+   * @returns An ArrayBuffer with enough capacity to hold the light data.
+   */
   public getLightDataBuffer(lightCount: number): ArrayBuffer {
-    const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT; // CHANGED
+    const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT;
     if (lightCount > this.lightStorageBufferCapacity) {
       this.lightStorageBufferCapacity = Math.ceil(lightCount * 1.5);
       const newSize = 16 + this.lightStorageBufferCapacity * lightStructSize;

@@ -31,6 +31,23 @@ export class Material {
     this.isTransparent = isTransparent;
   }
 
+  /**
+   * Retrieves or creates a render pipeline for this material.
+   *
+   * This method ensures that a unique pipeline is created for each combination
+   * of mesh layout, canvas format, and depth format. It uses a cache to avoid
+   * creating duplicate pipelines, which is a significant performance
+   * optimization.
+   *
+   * @param meshLayouts The vertex buffer layouts of the mesh.
+   * @param instanceDataLayout The vertex buffer layout for instance data.
+   * @param frameBindGroupLayout The bind group layout for frame-level
+   *     uniforms.
+   * @param canvasFormat The format of the canvas texture.
+   * @param depthFormat The format of the depth texture.
+   * @returns A render pipeline compatible with this material and the given
+   *     parameters.
+   */
   public getPipeline(
     meshLayouts: GPUVertexBufferLayout[],
     instanceDataLayout: GPUVertexBufferLayout,

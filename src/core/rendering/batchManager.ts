@@ -60,7 +60,17 @@ export class BatchManager {
   }
 
   /**
-   * Checks if the structure of opaque renderables has changed since last frame.
+   * Checks if the structure of opaque renderables has changed since the last
+   * frame.
+   *
+   * This is an optimization to avoid rebuilding the batch data structures if
+   * only the transforms of objects have changed. It works by creating a
+   * "signature" of the scene's renderable structure (a sorted list of
+   * material/mesh pairs and their counts) and comparing it to the signature
+   * from the previous frame.
+   *
+   * @param opaqueRenderables A list of the opaque renderable objects for the
+   *     current frame.
    */
   public checkIfDirty(opaqueRenderables: Renderable[]): void {
     const newSignature = this._computeOpaqueSignature(opaqueRenderables);
@@ -94,6 +104,18 @@ export class BatchManager {
 
   /**
    * Gets or creates batches for opaque objects.
+   *
+   * This method groups renderable objects by their render pipeline, material,
+   * and mesh. This allows the renderer to draw many objects with a single
+   * instanced draw call, which is much more efficient than drawing each
+   * object individually. It uses the `checkIfDirty` optimization to take a
+   * fast path when only instance data needs updating.
+   *
+   * @param allRenderables A list of all renderable objects for the current
+   *     frame.
+   * @param getPipeline A function that retrieves or creates a render
+   *     pipeline for a given material and mesh.
+   * @returns A map of render pipelines to their corresponding batches.
    */
   public getOpaqueBatches(
     allRenderables: Renderable[],
@@ -175,6 +197,14 @@ export class BatchManager {
 
   /**
    * Gets a pre-allocated Float32Array for instance data.
+   *
+   * This method provides a view into a larger, pre-allocated array buffer.
+   * This is a memory optimization that avoids allocating a new array for
+   * instance data every frame, which helps to reduce garbage collection
+   * pauses.
+   *
+   * @param size The number of instances to allocate space for.
+   * @returns A Float32Array view with the requested size.
    */
   public getInstanceDataArray(size: number): Float32Array {
     const requiredSize = size * this.INSTANCE_STRIDE_IN_FLOATS;
@@ -190,7 +220,11 @@ export class BatchManager {
   }
 
   /**
-   * Mark batches as needing rebuild.
+   * Marks the batches as dirty, forcing a rebuild on the next frame.
+   *
+   * This should be called whenever the structure of the scene changes in a
+   * way that affects batching, such as adding or removing objects, or
+   * changing their materials or meshes.
    */
   public invalidate(): void {
     this.batchesDirty = true;

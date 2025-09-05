@@ -4,11 +4,18 @@ import { Entity } from "../entity";
 import { World } from "../world";
 
 /**
- * Sets the parent of a child entity, correctly updating both the child's
- * and the parent's HierarchyComponents.
+ * Establishes a parent-child relationship between two entities.
+ *
+ * This utility function correctly manages the `HierarchyComponent` on both the
+ * child and parent entities. It handles adding `HierarchyComponent`s if they
+' * don't exist, removing the child from its previous parent's list, and
+ * adding it to the new parent's list. This ensures the scene graph remains
+ * consistent.
+ *
  * @param world The world containing the entities.
- * @param child The entity to become the child.
- * @param parent The entity to become the parent. Pass null to un-parent.
+ * @param child The entity to be parented.
+ * @param parent The entity to become the parent. If null, the child will be
+ *     un-parented and become a root entity.
  */
 export function setParent(
   world: World,

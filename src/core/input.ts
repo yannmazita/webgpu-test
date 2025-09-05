@@ -32,6 +32,12 @@ export function createInputContext(buffer: SharedArrayBuffer): InputContext {
 
 // --- Writer Functions (for Main Thread) ---
 
+/**
+ * Updates the state of a key in the shared buffer.
+ * @param ctx The input context.
+ * @param code The key code.
+ * @param isDown Whether the key is down.
+ */
 export function updateKeyState(
   ctx: InputContext,
   code: string,
@@ -43,6 +49,12 @@ export function updateKeyState(
   }
 }
 
+/**
+ * Accumulates the mouse delta in the shared buffer.
+ * @param ctx The input context.
+ * @param dx The change in x.
+ * @param dy The change in y.
+ */
 export function accumulateMouseDelta(
   ctx: InputContext,
   dx: number,
@@ -52,6 +64,12 @@ export function accumulateMouseDelta(
   Atomics.add(ctx.int32View, MOUSE_DELTA_Y_OFFSET >> 2, dy);
 }
 
+/**
+ * Updates the mouse position in the shared buffer.
+ * @param ctx The input context.
+ * @param x The x position.
+ * @param y The y position.
+ */
 export function updateMousePosition(
   ctx: InputContext,
   x: number,
@@ -61,18 +79,34 @@ export function updateMousePosition(
   Atomics.store(ctx.int32View, MOUSE_POS_Y_OFFSET >> 2, y);
 }
 
+/**
+ * Updates the pointer lock state in the shared buffer.
+ * @param ctx The input context.
+ * @param isLocked Whether the pointer is locked.
+ */
 export function updatePointerLock(ctx: InputContext, isLocked: boolean): void {
   Atomics.store(ctx.uint8View, IS_POINTER_LOCKED_OFFSET, isLocked ? 1 : 0);
 }
 
 // --- Reader Functions (for Worker Thread) ---
 
+/**
+ * Checks if a key is down.
+ * @param ctx The input context.
+ * @param code The key code.
+ * @returns True if the key is down, false otherwise.
+ */
 export function isKeyDown(ctx: InputContext, code: string): boolean {
   const keyIndex = KEY_MAP.get(code);
   if (keyIndex === undefined) return false;
   return Atomics.load(ctx.uint8View, KEYS_OFFSET + keyIndex) === 1;
 }
 
+/**
+ * Gets the mouse delta and resets it to zero.
+ * @param ctx The input context.
+ * @returns The mouse delta.
+ */
 export function getAndResetMouseDelta(ctx: InputContext): {
   x: number;
   y: number;
@@ -82,12 +116,22 @@ export function getAndResetMouseDelta(ctx: InputContext): {
   return { x, y };
 }
 
+/**
+ * Gets the mouse position.
+ * @param ctx The input context.
+ * @returns The mouse position.
+ */
 export function getMousePosition(ctx: InputContext): { x: number; y: number } {
   const x = Atomics.load(ctx.int32View, MOUSE_POS_X_OFFSET >> 2);
   const y = Atomics.load(ctx.int32View, MOUSE_POS_Y_OFFSET >> 2);
   return { x, y };
 }
 
+/**
+ * Checks if the pointer is locked.
+ * @param ctx The input context.
+ * @returns True if the pointer is locked, false otherwise.
+ */
 export function isPointerLocked(ctx: InputContext): boolean {
   return Atomics.load(ctx.uint8View, IS_POINTER_LOCKED_OFFSET) === 1;
 }

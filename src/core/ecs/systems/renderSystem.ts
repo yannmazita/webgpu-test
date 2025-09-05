@@ -21,10 +21,21 @@ export class SceneLightingComponent {
 }
 
 /**
- * Collects all renderable entities and scene-wide data, then passes it to the Renderer.
- * @param world The world containing the entities.
- * @param renderer The main renderer instance.
- * @param postSceneDrawCallback An optional callback for drawing UI or other overlays.
+ * Gathers all necessary data and orchestrates the rendering of a single frame.
+ *
+ * This system acts as the bridge between the ECS world and the low-level
+ * renderer. It queries the world for all visible objects (lights, meshes),
+ * collects scene-wide settings like lighting, and packages this data into a
+ * `SceneRenderData` object. This object is then passed to the `Renderer` to
+ * perform the actual GPU commands.
+ *
+ * @param world The ECS world containing the scene's entities.
+ * @param renderer The main renderer instance that will draw the scene.
+ * @param sceneData A pre-allocated data structure to be filled with this
+ *     frame's renderable objects and scene properties. Reusing this object
+ *     avoids allocations every frame.
+ * @param postSceneDrawCallback An optional callback function that allows for
+ *     drawing UI or other overlays after the main scene has been rendered.
  */
 export function renderSystem(
   world: World,

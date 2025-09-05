@@ -11,8 +11,15 @@ export class PBRMaterial extends Material {
   private static layout: GPUBindGroupLayout | null = null;
 
   /**
-   * Initializes the shared shader and layout for all PBR materials.
-   * This must be called once before any PBRMaterial is instantiated.
+   * Initializes the shared resources for all PBR materials.
+   *
+   * This static method creates the PBR shader and the material-level bind
+   * group layout. It must be called once before any `PBRMaterial` instance
+   * is created. This approach is used to prevent redundant shader compilation
+   * and layout creation, which are expensive operations.
+   *
+   * @param device The GPU device.
+   * @param preprocessor The shader preprocessor.
    */
   public static async initialize(
     device: GPUDevice,
