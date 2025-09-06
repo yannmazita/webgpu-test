@@ -22,7 +22,7 @@ import {
   createPlaneMeshData,
 } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
-import { quat, vec3, mat4 } from "wgpu-matrix";
+import { quat, vec3 } from "wgpu-matrix";
 import { IInputSource } from "@/core/iinputSource";
 import {
   createInputContext,
@@ -277,6 +277,10 @@ async function initWorker(
   (self as any).postMessage({ type: "READY" });
 }
 
+function easeInCubic(t: number): number {
+  return t * t * t;
+}
+
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
@@ -305,16 +309,32 @@ function frame(now: number) {
   if (isFreeCameraActive) {
     cameraControllerSystem.update(world, dt);
   } else {
+    // Initialize animation timer on first frame
+    if (animationStartTime === 0) animationStartTime = now;
+
+    // --- Animation Logic ---
     const DURATION_MS = 16000;
     const elapsed = now - animationStartTime;
     const progress = (elapsed % DURATION_MS) / DURATION_MS;
-    const easedProgress = easeInOutCubic(progress);
+    const easedProgress = easeInCubic(progress); // Use ease-in as requested
 
-    const START_Y = 50; // same as initial y pos, important
+    // 1. Vertical drop
+    const START_Y = 50.0; // Same as initial Y position, important
     const END_Y = 40.0;
     const currentY = START_Y + (END_Y - START_Y) * easedProgress;
-
     cameraTransform.setPosition(0, currentY, 0);
+
+    // 2. Z-axis roll animation
+    const START_ROT_Z_RAD = -Math.PI / 24 / 180; // Same as initial Z rotation, important
+    const END_ROT_Z_RAD = (20.0 * Math.PI) / 180;
+    const currentRotZRad =
+      START_ROT_Z_RAD + (END_ROT_Z_RAD - START_ROT_Z_RAD) * easedProgress;
+
+    const finalRotation = quat.identity();
+    quat.rotateX(finalRotation, -Math.PI / 2, finalRotation); // Apply the -90deg pitch to look down
+    quat.rotateZ(finalRotation, currentRotZRad, finalRotation); // Apply the roll around new Z axis
+
+    cameraTransform.setRotation(finalRotation);
   }
 
   // Animate lights
