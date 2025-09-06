@@ -1,7 +1,12 @@
 // src/core/resourceManager.ts
 import { Renderer } from "./renderer";
 import { Material } from "./materials/material";
-import { AABB, Mesh, PBRMaterialOptions } from "./types/gpu";
+import {
+  AABB,
+  Mesh,
+  PBRMaterialOptions,
+  UnlitGroundMaterialOptions,
+} from "./types/gpu";
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
@@ -14,6 +19,7 @@ import {
   createCubeMeshData,
   createIcosphereMeshData,
 } from "./utils/primitives";
+import { UnlitGroundMaterial } from "./materials/unlitGroundMaterial";
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -107,8 +113,9 @@ export class ResourceManager {
   private defaultSampler!: GPUSampler;
   /** The shader preprocessor for handling #includes. */
   private preprocessor: ShaderPreprocessor;
-  /** A flag to ensure PbrMaterial static resources are initialized only once. */
+  /** Flags to ensure material static resources are initialized only once. */
   private pbrMaterialInitialized = false;
+  private unlitGroundMaterialInitialized = false;
 
   /**
    * Creates a new ResourceManager.
@@ -270,6 +277,47 @@ export class ResourceManager {
         : undefined,
     };
     _setPbrOptions(material, clonedOpts);
+
+    this.materials.set(materialKey, material);
+    return material;
+  }
+
+  /**
+   * Creates a new UnlitGround material for groundes or backgrounds.
+   * @param options The configuration for the material, either a texture or a color.
+   * @returns A promise that resolves to the UnlitMaterial instance.
+   */
+  public async createUnlitGroundMaterial(
+    options: UnlitGroundMaterialOptions,
+  ): Promise<Material> {
+    const colorKey = options.color ? options.color.join(",") : "";
+    const materialKey = `UNLIT_SKYBOX:${options.textureUrl ?? ""}:${colorKey}`;
+    const cached = this.materials.get(materialKey);
+    if (cached) return cached;
+
+    // Ensure shader/layout initialized
+    if (!this.unlitGroundMaterialInitialized) {
+      await UnlitGroundMaterial.initialize(
+        this.renderer.device,
+        this.preprocessor,
+      );
+      this.unlitGroundMaterialInitialized = true;
+    }
+
+    const texture = options.textureUrl
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.textureUrl,
+          "rgba8unorm-srgb",
+        )
+      : this.dummyTexture;
+
+    const material = new UnlitGroundMaterial(
+      this.renderer.device,
+      options,
+      texture,
+      this.defaultSampler,
+    );
 
     this.materials.set(materialKey, material);
     return material;

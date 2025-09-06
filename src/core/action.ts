@@ -26,6 +26,7 @@ export type ActionMapConfig = Record<string, ActionBinding>;
  */
 export interface IActionController {
   isPressed(actionName: string): boolean;
+  wasPressed(actionName: string): boolean;
   getAxis(actionName: string): number;
   getMouseDelta(): { x: number; y: number };
   isPointerLocked(): boolean;
@@ -76,4 +77,40 @@ export function getAxisValue(
     value -= 1;
   }
   return value;
+}
+
+/**
+ * A helper map to track the previous state of actions for wasActionPressed.
+ * The key is the action name, the value is its pressed state last frame.
+ */
+export type ActionStateMap = Map<string, boolean>;
+
+/**
+ * Checks if a button-type action was just pressed in the current frame.
+ * This is useful for toggle actions where you only want to react once per key press.
+ * @param actionMap The map defining all actions.
+ * @param inputSource The current input state provider.
+ * @param actionName The name of the action to check.
+ * @param previousState A map tracking the pressed state from the previous frame.
+ * @returns `true` if the action is currently pressed but was not pressed last frame.
+ */
+export function wasActionPressed(
+  actionMap: ActionMapConfig,
+  inputSource: IInputSource,
+  actionName: string,
+  previousState: ActionStateMap,
+): boolean {
+  const binding = actionMap[actionName];
+  if (!binding || binding.type !== "button") {
+    // Silently return false for non-button or undefined actions
+    return false;
+  }
+
+  const isPressedNow = isActionPressed(actionMap, inputSource, actionName);
+  const wasPressed = previousState.get(actionName) ?? false;
+
+  // Update state for next frame
+  previousState.set(actionName, isPressedNow);
+
+  return isPressedNow && !wasPressed;
 }

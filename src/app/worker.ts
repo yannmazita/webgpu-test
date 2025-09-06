@@ -19,9 +19,10 @@ import { SceneRenderData } from "@/core/types/rendering";
 import {
   createCubeMeshData,
   createIcosphereMeshData,
+  createPlaneMeshData,
 } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
-import { quat } from "wgpu-matrix";
+import { quat, vec3, mat4 } from "wgpu-matrix";
 import { IInputSource } from "@/core/iinputSource";
 import {
   createInputContext,
@@ -39,10 +40,14 @@ import {
 } from "@/core/metrics";
 import {
   ActionMapConfig,
+  ActionStateMap,
   getAxisValue,
   IActionController,
   isActionPressed,
+  wasActionPressed,
 } from "@/core/action";
+import { PRNG } from "@/core/utils/prng";
+import { setParent } from "@/core/ecs/utils/hierarchy";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -72,18 +77,22 @@ let world: World | null = null;
 let sceneRenderData: SceneRenderData | null = null;
 
 let cameraEntity = -1;
+let gridRootEntity = -1;
 let light1Entity = -1;
 let light2Entity = -1;
 
 let inputContext: InputContext | null = null;
 let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
+let isFreeCameraActive = false;
+const previousActionState: ActionStateMap = new Map();
 
 let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
 
 // State for dt
 let lastFrameTime = 0;
+const animationStartTime = Date.now();
 
 async function initWorker(
   offscreen: OffscreenCanvas,
@@ -115,10 +124,13 @@ async function initWorker(
       positiveKey: "Space",
       negativeKey: "ShiftLeft",
     },
+    toggle_camera_mode: { type: "button", keys: ["KeyC"] },
   };
 
   actionController = {
     isPressed: (name: string) => isActionPressed(actionMap, inputReader, name),
+    wasPressed: (name: string) =>
+      wasActionPressed(actionMap, inputReader, name, previousActionState),
     getAxis: (name: string) => getAxisValue(actionMap, inputReader, name),
     getMouseDelta: () => inputReader.getMouseDelta(),
     isPointerLocked: () => inputReader.isPointerLocked(),
@@ -130,155 +142,229 @@ async function initWorker(
   world = new World();
   sceneRenderData = new SceneRenderData();
 
+  // --- Scene Setup ---
+
   // Camera
   cameraEntity = world.createEntity();
   const camXform = new TransformComponent();
-  camXform.setPosition(0, 1, 3);
+  camXform.setPosition(0, 5, 25);
   world.addComponent(cameraEntity, camXform);
-  world.addComponent(cameraEntity, new CameraComponent(74, 16 / 9, 0.1, 100.0));
+  world.addComponent(
+    cameraEntity,
+    new CameraComponent(85, 16 / 9, 0.1, 1000.0),
+  );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
-  // Lights (and scene lighting resource)
+  // Scene Lighting and Fog
   world.addResource(new SceneLightingComponent());
   const sceneLighting = world.getResource(SceneLightingComponent)!;
+  sceneLighting.ambientColor.set([0.3, 0.32, 0.46, 1.0]);
+  sceneLighting.fogColor.set([0.196, 0.211, 0.254, 1.0]); // #323641
+  sceneLighting.fogParams0.set([0.03, 0.0, 0.0, 1.0]);
 
-  //sceneLighting.ambientColor.set([0.4, 0.4, 0.5, 1.0]);
-  sceneLighting.fogColor.set([0.05, 0.05, 0.1, 1.0]); // Dark blue/purple mood
-  sceneLighting.fogParams0.set([0.08, 2.0, 0.5, 1.0]); // Higher density, starts at Y=2, falls off sharply
+  // Ground Plane
+  const groundPlaneEntity = world.createEntity();
+  const groundMaterial = await resourceManager.createUnlitGroundMaterial({
+    color: [0.01, 0.01, 0.02, 1.0],
+  });
+  const groundMesh = resourceManager.createMesh(
+    "ground_plane",
+    createPlaneMeshData(500),
+  );
+  const groundXform = new TransformComponent();
+  groundXform.setPosition(0, 0, 0);
+  world.addComponent(groundPlaneEntity, groundXform);
+  world.addComponent(
+    groundPlaneEntity,
+    new MeshRendererComponent(groundMesh, groundMaterial),
+  );
 
-  const lightMaterial1 = await resourceManager.createPBRMaterial({
+  // Lights
+  const lightMaterialRed = await resourceManager.createPBRMaterial({
     albedo: [1, 0, 0, 1],
     emissive: [1, 0, 0],
   });
-  const lightMaterial2 = await resourceManager.createPBRMaterial({
+  const lightMaterialGreen = await resourceManager.createPBRMaterial({
     albedo: [0, 1, 0, 1],
     emissive: [0, 1, 0],
   });
   const sphereMesh = resourceManager.createMesh(
     "sphere",
-    createIcosphereMeshData(0.1),
+    createIcosphereMeshData(0.2),
   );
 
   light1Entity = world.createEntity();
   world.addComponent(light1Entity, new TransformComponent());
-  world.addComponent(light1Entity, new LightComponent([1, 0, 0, 1]));
   world.addComponent(
     light1Entity,
-    new MeshRendererComponent(sphereMesh, lightMaterial1),
+    new LightComponent([1, 0, 0, 1], [0, 0, 0, 1], 20.0, 5.0),
+  );
+  world.addComponent(
+    light1Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterialRed),
   );
 
   light2Entity = world.createEntity();
   world.addComponent(light2Entity, new TransformComponent());
-  world.addComponent(light2Entity, new LightComponent([0, 1, 0, 1]));
   world.addComponent(
     light2Entity,
-    new MeshRendererComponent(sphereMesh, lightMaterial2),
+    new LightComponent([0, 1, 0, 1], [0, 0, 0, 1], 20.0, 5.0),
+  );
+  world.addComponent(
+    light2Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterialGreen),
   );
 
-  // Create multiple materials for variety
-  const materials = await Promise.all([
-    // Metallic materials
-    resourceManager.createPBRMaterial({
-      albedo: [0.8, 0.6, 0.2, 1.0], // Gold-ish
-      metallic: 0.9,
-      roughness: 0.1,
-    }),
-    resourceManager.createPBRMaterial({
-      albedo: [0.7, 0.7, 0.8, 1.0], // Steel-ish
-      metallic: 1.0,
-      roughness: 0.3,
-    }),
-    // Dielectric materials
-    resourceManager.createPBRMaterial({
-      albedo: [0.8, 0.2, 0.2, 1.0], // Red plastic
-      metallic: 0.0,
-      roughness: 0.7,
-    }),
-    resourceManager.createPBRMaterial({
-      albedo: [0.2, 0.8, 0.3, 1.0], // Green plastic
-      metallic: 0.0,
-      roughness: 0.4,
-    }),
-    resourceManager.createPBRMaterial({
-      albedo: [0.1, 0.1, 0.8, 1.0], // Blue ceramic
-      metallic: 0.0,
-      roughness: 0.1,
-    }),
-  ]);
+  // Pillar Grid
+  const GRID_W = 14;
+  const GRID_H = 8;
+  const PILLAR_BASE_SIZE = 2.0;
+  const PILLAR_SPACING = 2.2;
+  const PILLAR_HEIGHT = 40.0;
 
+  const hiddenIndices = new Set([41, 40, 47, 48, 46, 95, 94, 102, 101]);
+  const prng = new PRNG(1337);
   const cubeMesh = resourceManager.createMesh("cube", createCubeMeshData());
 
-  // Spawn 1000 cubes with randomized transforms and materials
-  const NUM_CUBES = 1000;
-  for (let i = 0; i < NUM_CUBES; i++) {
-    const cubeEntity = world.createEntity();
-    const cubeXform = new TransformComponent();
+  gridRootEntity = world.createEntity();
+  world.addComponent(gridRootEntity, new TransformComponent());
 
-    // Random position
-    const px = (Math.random() - 0.5) * 50;
-    const py = (Math.random() - 0.5) * 50;
-    const pz = (Math.random() - 0.5) * 50;
-    cubeXform.setPosition(px, py, pz);
+  for (let gy = 0; gy < GRID_H; gy++) {
+    for (let gx = 0; gx < GRID_W; gx++) {
+      const index = gy * GRID_W + gx + 1;
+      if (hiddenIndices.has(index)) {
+        continue;
+      }
 
-    // Random rotation
-    const rx = Math.random() * Math.PI * 2;
-    const ry = Math.random() * Math.PI * 2;
-    const rz = Math.random() * Math.PI * 2;
-    const q = quat.fromEuler(rx, ry, rz, "xyz");
-    cubeXform.setRotation(q);
+      const pillar = world.createEntity();
+      const pillarXform = new TransformComponent();
 
-    // Random scale
-    const s = 0.5 + Math.random() * 1.5;
-    cubeXform.setScale(s, s, s);
+      // Grid positions on XZ plane
+      const px = (gx - GRID_W / 2 + 0.5) * PILLAR_SPACING;
+      const pz = (gy - GRID_H / 2 + 0.5) * PILLAR_SPACING;
 
-    // Pick random material
-    const randomMaterial =
-      materials[Math.floor(Math.random() * materials.length)];
+      // Lift pillar so its base sits on ground (y = 0)
+      const py = PILLAR_HEIGHT / 2;
 
-    world.addComponent(cubeEntity, cubeXform);
-    world.addComponent(
-      cubeEntity,
-      new MeshRendererComponent(cubeMesh, randomMaterial),
-    );
+      pillarXform.setPosition(px, py, pz);
+
+      pillarXform.setScale(
+        PILLAR_BASE_SIZE * 0.8,
+        PILLAR_HEIGHT,
+        PILLAR_BASE_SIZE * 0.8,
+      );
+
+      const grey = 0.38 + prng.next() * 0.3;
+      const material = await resourceManager.createPBRMaterial({
+        albedo: [grey, grey + 0.05, grey + 0.15, 0.95],
+        metallic: 0.1,
+        roughness: 0.8,
+      });
+
+      world.addComponent(pillar, pillarXform);
+      world.addComponent(pillar, new MeshRendererComponent(cubeMesh, material));
+      setParent(world, pillar, gridRootEntity);
+    }
   }
 
   (self as any).postMessage({ type: "READY" });
 }
 
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 function frame(now: number) {
-  if (!renderer || !world || !sceneRenderData || !cameraControllerSystem)
+  if (
+    !renderer ||
+    !world ||
+    !sceneRenderData ||
+    !cameraControllerSystem ||
+    !actionController
+  )
     return;
 
-  // dt in seconds; clamp long pauses
   const MAX_PAUSE = 0.5;
   let dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0;
   lastFrameTime = now;
   if (dt > MAX_PAUSE) dt = MAX_PAUSE;
 
-  // Input-driven camera
-  cameraControllerSystem.update(world, dt);
+  if (actionController.wasPressed("toggle_camera_mode")) {
+    isFreeCameraActive = !isFreeCameraActive;
+  }
 
-  // Animate lights
-  const t = now / 1000;
-  const radius = 3.0;
-  const l1 = world.getComponent(light1Entity, TransformComponent)!;
-  l1.setPosition(Math.sin(t * 0.7) * radius, 2.0, Math.cos(t * 0.7) * radius);
-  const l2 = world.getComponent(light2Entity, TransformComponent)!;
-  l2.setPosition(Math.sin(-t * 0.4) * radius, 2.0, Math.cos(-t * 0.4) * radius);
+  const camXform = world.getComponent(cameraEntity, TransformComponent)!;
 
-  // Core systems
+  if (isFreeCameraActive) {
+    cameraControllerSystem.update(world, dt);
+  } else {
+    const DURATION_MS = 16000;
+    const elapsed = now - animationStartTime;
+    const progress = (elapsed % DURATION_MS) / DURATION_MS;
+    const easedProgress = easeInOutCubic(progress);
+
+    // --- Camera Animation ---
+    // The grid of pillars should remain static.
+    // We animate the camera's position along a downward spiral path.
+
+    // Define the animation path parameters
+    const START_RADIUS = 0.0; // Start directly above the center
+    const END_RADIUS = 40.0;
+    const START_Y = 50.0; // Start high up
+    const END_Y = 5.0;
+    const START_ANGLE_RAD = -90 * (Math.PI / 180); // Start facing "down" the Z axis
+    const END_ANGLE_RAD = 120 * (Math.PI / 180);
+
+    // Interpolate parameters based on animation progress
+    const currentRadius =
+      START_RADIUS + (END_RADIUS - START_RADIUS) * easedProgress;
+    const currentAngle =
+      START_ANGLE_RAD + (END_ANGLE_RAD - START_ANGLE_RAD) * easedProgress;
+    const currentY = START_Y + (END_Y - START_Y) * easedProgress;
+
+    // Calculate camera's X and Z position on the circle
+    const camX = Math.cos(currentAngle) * currentRadius;
+    const camZ = Math.sin(currentAngle) * currentRadius;
+
+    camXform.setPosition(camX, currentY, camZ);
+
+    // Keep the camera pointed at the center of the scene
+    const target = vec3.create(0, 0, 0);
+    const up = vec3.create(0, 1, 0);
+    const viewMatrix = mat4.lookAt(camXform.position, target, up);
+
+    // Invert the view matrix to get the camera's world matrix
+    const worldMatrix = mat4.invert(viewMatrix);
+    // extract the quaternion from the world matrix
+    const rotationQuat = quat.fromMat(worldMatrix);
+    camXform.setRotation(rotationQuat);
+  }
+
+  const LIGHT_ANIM_DURATION_S = 8.0;
+  const lightProgress =
+    ((now / 1000) % LIGHT_ANIM_DURATION_S) / LIGHT_ANIM_DURATION_S;
+
+  const l1Xform = world.getComponent(light1Entity, TransformComponent)!;
+  const startPos1 = vec3.fromValues(10, 5, 10);
+  const endPos1 = vec3.fromValues(-5, -2, -15);
+  const currentPos1 = vec3.lerp(startPos1, endPos1, lightProgress);
+  l1Xform.setPosition(currentPos1);
+
+  const l2Xform = world.getComponent(light2Entity, TransformComponent)!;
+  const startPos2 = vec3.fromValues(10, 8, 0);
+  const endPos2 = vec3.fromValues(-15, 2, 5);
+  const currentPos2 = vec3.lerp(startPos2, endPos2, lightProgress);
+  l2Xform.setPosition(currentPos2);
+
   transformSystem(world);
   cameraSystem(world);
 
-  // Render
   renderSystem(world, renderer, sceneRenderData);
 
-  // Publish per-frame metrics
   if (metricsContext && renderer) {
     publishMetrics(metricsContext, renderer.getStats(), dt, ++metricsFrameId);
   }
 
-  // Acknowledge frame completion to main thread
   (self as any).postMessage({ type: "FRAME_DONE" });
 }
 

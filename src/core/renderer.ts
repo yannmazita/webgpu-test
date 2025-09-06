@@ -819,6 +819,7 @@ export class Renderer {
     Profiler.end("Render.UpdateUniforms");
 
     Profiler.begin("Render.FrustumCullAndSeparate");
+    Profiler.begin("Render.FrustumCullAndSeparate");
     // Use pre-allocated arrays to avoid GC
     this.visibleRenderables.length = 0;
     this.transparentRenderables.length = 0;

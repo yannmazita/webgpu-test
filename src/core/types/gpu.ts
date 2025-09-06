@@ -166,3 +166,14 @@ export interface PBRMaterialOptions {
    */
   occlusionMap?: string;
 }
+
+/**
+ * Options for creating an UnlitGround material.
+ * Can be configured with either a texture or a solid color.
+ */
+export interface UnlitGroundMaterialOptions {
+  /** The URL of the texture to apply. If provided, `color` is ignored. */
+  textureUrl?: string;
+  /** A solid color to apply [R, G, B, A]. Used if `textureUrl` is not provided. */
+  color?: [number, number, number, number];
+}

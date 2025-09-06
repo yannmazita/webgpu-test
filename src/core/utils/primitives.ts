@@ -92,7 +92,7 @@ export function createPlaneMeshData(size = 1.0): MeshData {
   const texCoords = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
 
   // Indices
-  const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+  const indices = new Uint16Array([0, 2, 1, 0, 3, 2]);
 
   return { positions, normals, texCoords, indices };
 }
