@@ -263,7 +263,7 @@ async function initWorker(
 
       const grey = 0.38 + prng.next() * 0.3;
       const material = await resourceManager.createPBRMaterial({
-        albedo: [grey, grey + 0.05, grey + 0.15, 0.95],
+        albedo: [grey, grey + 0.05, grey + 0.15, 1],
         metallic: 0.1,
         roughness: 0.8,
       });
@@ -277,10 +277,7 @@ async function initWorker(
   (self as any).postMessage({ type: "READY" });
 }
 
-function easeInCubic(t: number): number {
-  return t * t * t;
-}
-
+// PS2 "long" startup demo
 function frame(now: number) {
   if (
     !renderer ||
@@ -309,9 +306,21 @@ function frame(now: number) {
     if (animationStartTime === 0) animationStartTime = now;
 
     const DURATION_MS = 12000;
-    const elapsed = now - animationStartTime;
-    const progress = (elapsed % DURATION_MS) / DURATION_MS;
-    const easedProgress = easeInCubic(progress);
+    const elapsed = (now - animationStartTime) % DURATION_MS;
+    const t = elapsed / DURATION_MS; // normalized [0,1), loops every 12s
+
+    let easedProgress: number;
+    if (t <= 10 / 12) {
+      // First 10 seconds
+      const localT = t / (10 / 12);
+      easedProgress = Math.pow(localT, 0.5); // moderate speedup
+      easedProgress *= 10 / 12; // scale back into [0,0.833]
+    } else {
+      // Last 2 seconds
+      const localT = (t - 10 / 12) / (2 / 12);
+      easedProgress = 1.0 - Math.pow(1 - localT, 2); // fast ease-out
+      easedProgress = 10 / 12 + easedProgress * (2 / 12); // scale into [0.833,1]
+    }
 
     // Vertical drop
     const START_Y = 50.0; // Same as initial Y position, important
