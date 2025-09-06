@@ -148,7 +148,7 @@ async function initWorker(
   cameraEntity = world.createEntity();
   const cameraTransform = new TransformComponent();
   // Start above pillars at origin;
-  cameraTransform.setPosition(0, 50, 0);
+  cameraTransform.setPosition(0, 52, 0);
   world.addComponent(cameraEntity, cameraTransform);
   world.addComponent(
     cameraEntity,
@@ -197,7 +197,7 @@ async function initWorker(
   });
   const sphereMesh = resourceManager.createMesh(
     "sphere",
-    createIcosphereMeshData(0.2),
+    createIcosphereMeshData(0.1),
   );
 
   light1Entity = world.createEntity();
@@ -224,7 +224,7 @@ async function initWorker(
 
   // Pillar Grid
   const GRID_W = 14;
-  const GRID_H = 8;
+  const GRID_H = 9;
   const PILLAR_BASE_SIZE = 2.0;
   const PILLAR_SPACING = 2.2;
   const PILLAR_HEIGHT = 40.0;
@@ -309,30 +309,37 @@ function frame(now: number) {
     const elapsed = (now - animationStartTime) % DURATION_MS;
     const t = elapsed / DURATION_MS; // normalized [0,1), loops every 12s
 
-    let easedProgress: number;
+    let easedVerticalProgress: number;
+    let easedRollProgress: number;
     if (t <= 10 / 12) {
       // First 10 seconds
       const localT = t / (10 / 12);
-      easedProgress = Math.pow(localT, 0.5); // moderate speedup
-      easedProgress *= 10 / 12; // scale back into [0,0.833]
+      easedVerticalProgress = Math.pow(localT, 3.5);
+      easedVerticalProgress *= 10 / 12; // scale back into [0,0.833]
+
+      easedRollProgress = Math.pow(localT, 3.2);
+      easedRollProgress *= 10 / 12;
     } else {
       // Last 2 seconds
       const localT = (t - 10 / 12) / (2 / 12);
-      easedProgress = 1.0 - Math.pow(1 - localT, 2); // fast ease-out
-      easedProgress = 10 / 12 + easedProgress * (2 / 12); // scale into [0.833,1]
+      easedVerticalProgress = 1.0 - Math.pow(1 - localT, 2); // fast ease-out
+      easedVerticalProgress = 10 / 12 + easedVerticalProgress * (2 / 12); // scale into [0.833,1]
+
+      easedRollProgress = 1.0 - Math.pow(1 - localT, 5);
+      easedRollProgress = 10 / 12 + easedRollProgress * (2 / 12);
     }
 
     // Vertical drop
-    const START_Y = 50.0; // Same as initial Y position, important
+    const START_Y = 52.0; // Same as initial Y position, important
     const END_Y = 40.0;
-    const currentY = START_Y + (END_Y - START_Y) * easedProgress;
+    const currentY = START_Y + (END_Y - START_Y) * easedVerticalProgress;
     cameraTransform.setPosition(0, currentY, 0);
 
     // Z-axis roll animation
-    const START_ROT_Z_RAD = -Math.PI / 24 / 180; // Same as initial Z rotation, important
-    const END_ROT_Z_RAD = (20.0 * Math.PI) / 180;
+    const START_ROT_Z_RAD = -Math.PI / 24; // Same as initial Z rotation, important
+    const END_ROT_Z_RAD = Math.PI / 2;
     const currentRotZRad =
-      START_ROT_Z_RAD + (END_ROT_Z_RAD - START_ROT_Z_RAD) * easedProgress;
+      START_ROT_Z_RAD + (END_ROT_Z_RAD - START_ROT_Z_RAD) * easedRollProgress;
 
     const finalRotation = quat.identity();
     quat.rotateX(finalRotation, -Math.PI / 2, finalRotation); // Apply the -90deg pitch to look down
@@ -347,14 +354,14 @@ function frame(now: number) {
     ((now / 1000) % LIGHT_ANIM_DURATION_S) / LIGHT_ANIM_DURATION_S;
 
   const l1Xform = world.getComponent(light1Entity, TransformComponent)!;
-  const startPos1 = vec3.fromValues(10, 5, 10);
-  const endPos1 = vec3.fromValues(-5, -2, -15);
+  const startPos1 = vec3.fromValues(10, 41, 10);
+  const endPos1 = vec3.fromValues(-5, 42, -15);
   const currentPos1 = vec3.lerp(startPos1, endPos1, lightProgress);
   l1Xform.setPosition(currentPos1);
 
   const l2Xform = world.getComponent(light2Entity, TransformComponent)!;
-  const startPos2 = vec3.fromValues(10, 8, 0);
-  const endPos2 = vec3.fromValues(-15, 2, 5);
+  const startPos2 = vec3.fromValues(10, 41, 0);
+  const endPos2 = vec3.fromValues(-15, 40.5, 5);
   const currentPos2 = vec3.lerp(startPos2, endPos2, lightProgress);
   l2Xform.setPosition(currentPos2);
 
