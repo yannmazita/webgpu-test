@@ -281,10 +281,6 @@ function easeInCubic(t: number): number {
   return t * t * t;
 }
 
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
 function frame(now: number) {
   if (
     !renderer ||
@@ -312,19 +308,18 @@ function frame(now: number) {
     // Initialize animation timer on first frame
     if (animationStartTime === 0) animationStartTime = now;
 
-    // --- Animation Logic ---
-    const DURATION_MS = 16000;
+    const DURATION_MS = 12000;
     const elapsed = now - animationStartTime;
     const progress = (elapsed % DURATION_MS) / DURATION_MS;
-    const easedProgress = easeInCubic(progress); // Use ease-in as requested
+    const easedProgress = easeInCubic(progress);
 
-    // 1. Vertical drop
+    // Vertical drop
     const START_Y = 50.0; // Same as initial Y position, important
     const END_Y = 40.0;
     const currentY = START_Y + (END_Y - START_Y) * easedProgress;
     cameraTransform.setPosition(0, currentY, 0);
 
-    // 2. Z-axis roll animation
+    // Z-axis roll animation
     const START_ROT_Z_RAD = -Math.PI / 24 / 180; // Same as initial Z rotation, important
     const END_ROT_Z_RAD = (20.0 * Math.PI) / 180;
     const currentRotZRad =
