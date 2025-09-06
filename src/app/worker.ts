@@ -75,7 +75,6 @@ let sceneRenderData: SceneRenderData | null = null;
 let cameraEntity = -1;
 let light1Entity = -1;
 let light2Entity = -1;
-let markerEntity = -1;
 
 let inputContext: InputContext | null = null;
 let actionController: IActionController | null = null;
@@ -241,23 +240,6 @@ async function initWorker(
       new MeshRendererComponent(cubeMesh, randomMaterial),
     );
   }
-
-  // Small debug marker cube to visualize raycast hit
-  const markerMaterial = await resourceManager.createPBRMaterial({
-    albedo: [1.0, 1.0, 0.2, 1.0],
-    metallic: 0.0,
-    roughness: 0.3,
-    emissive: [0.5, 0.5, 0.1], // Bright yellow glow
-  });
-  const markerEntityLocal = world.createEntity();
-  const markerXform = new TransformComponent();
-  markerXform.setScale(0.1, 0.1, 0.1);
-  world.addComponent(markerEntityLocal, markerXform);
-  world.addComponent(
-    markerEntityLocal,
-    new MeshRendererComponent(cubeMesh, markerMaterial),
-  );
-  markerEntity = markerEntityLocal;
 
   (self as any).postMessage({ type: "READY" });
 }
