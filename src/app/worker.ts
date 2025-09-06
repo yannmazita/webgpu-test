@@ -80,6 +80,8 @@ let cameraEntity = -1;
 let gridRootEntity = -1;
 let light1Entity = -1;
 let light2Entity = -1;
+let light3Entity = -1;
+let light4Entity = -1;
 
 let inputContext: InputContext | null = null;
 let actionController: IActionController | null = null;
@@ -195,6 +197,14 @@ async function initWorker(
     albedo: [0, 1, 0, 1],
     emissive: [0, 1, 0],
   });
+  const lightMaterialBlue = await resourceManager.createPBRMaterial({
+    albedo: [0, 0, 1, 1],
+    emissive: [0, 0, 1],
+  });
+  const lightMaterialPurple = await resourceManager.createPBRMaterial({
+    albedo: [0.5, 0, 1, 1],
+    emissive: [0.5, 0, 1],
+  });
   const sphereMesh = resourceManager.createMesh(
     "sphere",
     createIcosphereMeshData(0.1),
@@ -220,6 +230,28 @@ async function initWorker(
   world.addComponent(
     light2Entity,
     new MeshRendererComponent(sphereMesh, lightMaterialGreen),
+  );
+
+  light3Entity = world.createEntity();
+  world.addComponent(light3Entity, new TransformComponent());
+  world.addComponent(
+    light3Entity,
+    new LightComponent([0, 0, 1, 1], [0, 0, 0, 1], 20.0, 5.0),
+  );
+  world.addComponent(
+    light3Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterialBlue),
+  );
+
+  light4Entity = world.createEntity();
+  world.addComponent(light4Entity, new TransformComponent());
+  world.addComponent(
+    light4Entity,
+    new LightComponent([0.5, 0, 1, 1], [0, 0, 0, 1], 20.0, 5.0),
+  );
+  world.addComponent(
+    light4Entity,
+    new MeshRendererComponent(sphereMesh, lightMaterialPurple),
   );
 
   // Pillar Grid
@@ -364,6 +396,18 @@ function frame(now: number) {
   const endPos2 = vec3.fromValues(-15, 40.5, 5);
   const currentPos2 = vec3.lerp(startPos2, endPos2, lightProgress);
   l2Xform.setPosition(currentPos2);
+
+  const l3Xform = world.getComponent(light3Entity, TransformComponent)!;
+  const startPos3 = vec3.fromValues(-10, 40, 10);
+  const endPos3 = vec3.fromValues(15, 42.5, -5);
+  const currentPos3 = vec3.lerp(startPos3, endPos3, lightProgress);
+  l3Xform.setPosition(currentPos3);
+
+  const l4Xform = world.getComponent(light4Entity, TransformComponent)!;
+  const startPos4 = vec3.fromValues(5, 42, -15);
+  const endPos4 = vec3.fromValues(-10, 40, 15);
+  const currentPos4 = vec3.lerp(startPos4, endPos4, lightProgress);
+  l4Xform.setPosition(currentPos4);
 
   transformSystem(world);
   cameraSystem(world);
