@@ -296,8 +296,8 @@ async function initWorker(
       const grey = 0.38 + prng.next() * 0.3;
       const material = await resourceManager.createPBRMaterial({
         albedo: [grey, grey + 0.05, grey + 0.15, 1],
-        metallic: 0.1,
-        roughness: 0.8,
+        metallic: 0.0,
+        roughness: 0.8 + prng.next() * 0.1, // varied roughness
       });
 
       world.addComponent(pillar, pillarXform);
