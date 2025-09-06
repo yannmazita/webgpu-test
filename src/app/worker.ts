@@ -21,7 +21,6 @@ import {
   createIcosphereMeshData,
 } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
-import { getMouseWorldPositionWithViewport } from "@/core/utils/raycast";
 import { quat } from "wgpu-matrix";
 import { IInputSource } from "@/core/iinputSource";
 import {
@@ -268,38 +267,6 @@ function frame(now: number) {
   // Core systems
   transformSystem(world);
   cameraSystem(world);
-
-  // --- Raycast: compute mouse ray and place marker on Y=0 plane ---
-  const camComp = world.getComponent(cameraEntity, CameraComponent)!;
-  const { width: vpW, height: vpH } = renderer.getViewportCssSize();
-  if (vpW > 0 && vpH > 0) {
-    // Determine mouse position in CSS pixels
-    let mx = Math.floor(vpW * 0.5);
-    let my = Math.floor(vpH * 0.5);
-    if (!actionController!.isPointerLocked()) {
-      const mp = getMousePosition(inputContext!);
-      // Clamp to viewport
-      mx = Math.min(Math.max(mp.x, 0), Math.max(0, vpW - 1));
-      my = Math.min(Math.max(mp.y, 0), Math.max(0, vpH - 1));
-    }
-
-    const hit = getMouseWorldPositionWithViewport(
-      { x: mx, y: my },
-      vpW,
-      vpH,
-      camComp,
-      // Plane: Y=0
-      undefined,
-      undefined,
-    );
-    if (hit) {
-      const mxf = world.getComponent(markerEntity, TransformComponent)!;
-      // Offset slightly above plane to avoid z-fighting
-      mxf.setPosition(hit[0], hit[1] + 0.02, hit[2]);
-      // Update transforms again so marker appears this frame
-      transformSystem(world);
-    }
-  }
 
   // Render
   renderSystem(world, renderer, sceneRenderData);
