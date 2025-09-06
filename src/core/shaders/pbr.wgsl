@@ -361,7 +361,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let ambientSpecular = irradiance * 0.1 * F0;
     let ambient = (kD * diffuse + ambientSpecular) * ao;
 
-    var color = ambient + Lo + emissive;
+    var color = ambient + Lo;
 
     // Fog
     let distanceDensity = scene.fogParams0.x;
@@ -371,12 +371,27 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     if (enableFlags > 0.0) {
         let dist = length(scene.cameraPos.xyz - fi.worldPosition);
-        let fd = exp(-distanceDensity * dist);
-        let dh = max(fi.worldPosition.y - fogHeight, 0.0);
+        // Exponential squared for a denser falloff
+        let fogDistTerm = distanceDensity * dist;
+        let fd = exp(-(fogDistTerm * fogDistTerm));
+
+        // Invert height logic: fog is dense *below* fogHeight
+        let dh = max(fogHeight - fi.worldPosition.y, 0.0);
         let fh = exp(-heightFalloff * dh);
+        
         let f = clamp(fd * fh, 0.0, 1.0);
+        
+        // Apply fog to reflected light (ambient + direct)
         color = mix(scene.fogColor.rgb, color, f);
+
+        // Add a haze component for atmospheric scattering
+        let hazeIntensity = 0.2;
+        let haze = scene.fogColor.rgb * (1.0 - f) * hazeIntensity;
+        color += haze;
     }
+
+    // Add emissive color after fog so it cuts through
+    color += emissive;
 
     // Tone mapping + gamma
     color = ACESFilmicToneMapping(color);

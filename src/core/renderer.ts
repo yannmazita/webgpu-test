@@ -994,7 +994,12 @@ export class Renderer {
           view: textureView,
           loadOp: "clear",
           storeOp: "store",
-          clearValue: { r: 0.6, g: 0.7, b: 0.8, a: 1.0 },
+          clearValue: {
+            r: sceneData.fogColor[0],
+            g: sceneData.fogColor[1],
+            b: sceneData.fogColor[2],
+            a: sceneData.fogColor[3],
+          },
         },
       ],
       depthStencilAttachment: depthAttachment,

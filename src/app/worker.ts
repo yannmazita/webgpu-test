@@ -141,8 +141,10 @@ async function initWorker(
   // Lights (and scene lighting resource)
   world.addResource(new SceneLightingComponent());
   const sceneLighting = world.getResource(SceneLightingComponent)!;
-  sceneLighting.fogColor.set([0.6, 0.7, 0.8, 1.0]);
-  sceneLighting.fogParams0.set([0.2, 0.0, 0.1, 1.0]);
+
+  //sceneLighting.ambientColor.set([0.4, 0.4, 0.5, 1.0]);
+  sceneLighting.fogColor.set([0.05, 0.05, 0.1, 1.0]); // Dark blue/purple mood
+  sceneLighting.fogParams0.set([0.08, 2.0, 0.5, 1.0]); // Higher density, starts at Y=2, falls off sharply
 
   const lightMaterial1 = await resourceManager.createPBRMaterial({
     albedo: [1, 0, 0, 1],
