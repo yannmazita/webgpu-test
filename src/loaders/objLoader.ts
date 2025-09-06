@@ -1,5 +1,5 @@
 // src/loaders/objLoader.ts
-import { Vec3, vec3 } from "wgpu-matrix";
+import { vec3 } from "wgpu-matrix";
 
 /**
  * Defines the structure for geometry data loaded from an OBJ file.

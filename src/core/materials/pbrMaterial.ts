@@ -145,7 +145,7 @@ export class PBRMaterial extends Material {
     uniformData[13] = hasMetallicRoughnessMap;
     uniformData[14] = hasNormalMap;
     uniformData[15] = hasEmissiveMap;
-    // Note: hasOcclusionMap would go in next vec4 if needed
+    // todo: hasOcclusionMap would go in next vec4
 
     return createGPUBuffer(
       device,

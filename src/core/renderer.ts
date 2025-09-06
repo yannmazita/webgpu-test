@@ -77,19 +77,10 @@ export class Renderer {
   private frameInstanceData!: Float32Array;
   private frameInstanceCapacity = 100; // Initial capacity
 
-  // Cached state for resize handling
-  private lastCanvasWidth = 0;
-  private lastCanvasHeight = 0;
-  private lastTextureWidth = 0;
-  private lastTextureHeight = 0;
-
   // Pre-allocated arrays for render data
   private visibleRenderables: Renderable[] = [];
   private transparentRenderables: Renderable[] = [];
   private opaqueBatches: DrawBatch[] = [];
-
-  // Stable sort for transparent objects
-  private transparentSortIndices: number[] = [];
 
   private tempVec3A: Vec3 = vec3.create();
   private tempVec3B: Vec3 = vec3.create();

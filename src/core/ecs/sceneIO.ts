@@ -6,7 +6,7 @@ import { MeshRendererComponent } from "./components/meshRendererComponent";
 import { LightComponent } from "./components/lightComponent";
 import { HierarchyComponent } from "./components/hierarchyComponent";
 import { setParent } from "./utils/hierarchy";
-import { quat, vec3, Vec3, Quat } from "wgpu-matrix";
+import { quat } from "wgpu-matrix";
 import { PBRMaterialOptions } from "@/core/types/gpu";
 
 export interface ValidationLimits {
@@ -154,25 +154,6 @@ function validateMeshHandle(
       : "STL URL invalid";
   }
   return "Unsupported mesh handle";
-}
-
-// The current PBR handle format uses ":" separators which may conflict with URLs.
-// For strict validation without parsing, we only check prefix and length.
-function validateMaterialHandle(
-  handle: string,
-  limits: ValidationLimits,
-): string | null {
-  if (
-    !isString(handle) ||
-    handle.length === 0 ||
-    handle.length > limits.MAX_HANDLE_LEN
-  ) {
-    return "Material handle invalid length";
-  }
-  if (!handle.startsWith("PBR:")) {
-    return "Unsupported material handle";
-  }
-  return null;
 }
 
 function validatePbrOptions(
@@ -544,10 +525,6 @@ export interface SceneDocumentV1 {
 }
 
 export type SceneDocument = SceneDocumentV1;
-
-function isSceneV1(doc: any): doc is SceneDocumentV1 {
-  return doc && doc.version === 1 && Array.isArray(doc.entities);
-}
 
 // Serialize all non-global entities
 /**
