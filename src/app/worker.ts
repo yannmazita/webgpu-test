@@ -92,7 +92,7 @@ let metricsFrameId = 0;
 
 // State for dt
 let lastFrameTime = 0;
-const animationStartTime = Date.now();
+let animationStartTime = 0;
 
 async function initWorker(
   offscreen: OffscreenCanvas,
@@ -146,14 +146,21 @@ async function initWorker(
 
   // Camera
   cameraEntity = world.createEntity();
-  const camXform = new TransformComponent();
-  camXform.setPosition(0, 5, 25);
-  world.addComponent(cameraEntity, camXform);
+  const cameraTransform = new TransformComponent();
+  // Start above pillars at origin;
+  cameraTransform.setPosition(0, 50, 0);
+  world.addComponent(cameraEntity, cameraTransform);
   world.addComponent(
     cameraEntity,
-    new CameraComponent(85, 16 / 9, 0.1, 1000.0),
+    new CameraComponent(74, 16 / 9, 0.1, 1000.0),
   );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
+
+  const q = quat.identity();
+  // Rotate -90 degrees around X so default forward (-Z) becomes -Y
+  quat.rotateX(q, -Math.PI / 2, q);
+  quat.rotateZ(q, -Math.PI / 24, q);
+  cameraTransform.setRotation(q);
 
   // Scene Lighting and Fog
   world.addResource(new SceneLightingComponent());
@@ -293,7 +300,7 @@ function frame(now: number) {
     isFreeCameraActive = !isFreeCameraActive;
   }
 
-  const camXform = world.getComponent(cameraEntity, TransformComponent)!;
+  const cameraTransform = world.getComponent(cameraEntity, TransformComponent)!;
 
   if (isFreeCameraActive) {
     cameraControllerSystem.update(world, dt);
@@ -303,43 +310,14 @@ function frame(now: number) {
     const progress = (elapsed % DURATION_MS) / DURATION_MS;
     const easedProgress = easeInOutCubic(progress);
 
-    // --- Camera Animation ---
-    // The grid of pillars should remain static.
-    // We animate the camera's position along a downward spiral path.
-
-    // Define the animation path parameters
-    const START_RADIUS = 0.0; // Start directly above the center
-    const END_RADIUS = 40.0;
-    const START_Y = 50.0; // Start high up
-    const END_Y = 5.0;
-    const START_ANGLE_RAD = -90 * (Math.PI / 180); // Start facing "down" the Z axis
-    const END_ANGLE_RAD = 120 * (Math.PI / 180);
-
-    // Interpolate parameters based on animation progress
-    const currentRadius =
-      START_RADIUS + (END_RADIUS - START_RADIUS) * easedProgress;
-    const currentAngle =
-      START_ANGLE_RAD + (END_ANGLE_RAD - START_ANGLE_RAD) * easedProgress;
+    const START_Y = 50; // same as initial y pos, important
+    const END_Y = 40.0;
     const currentY = START_Y + (END_Y - START_Y) * easedProgress;
 
-    // Calculate camera's X and Z position on the circle
-    const camX = Math.cos(currentAngle) * currentRadius;
-    const camZ = Math.sin(currentAngle) * currentRadius;
-
-    camXform.setPosition(camX, currentY, camZ);
-
-    // Keep the camera pointed at the center of the scene
-    const target = vec3.create(0, 0, 0);
-    const up = vec3.create(0, 1, 0);
-    const viewMatrix = mat4.lookAt(camXform.position, target, up);
-
-    // Invert the view matrix to get the camera's world matrix
-    const worldMatrix = mat4.invert(viewMatrix);
-    // extract the quaternion from the world matrix
-    const rotationQuat = quat.fromMat(worldMatrix);
-    camXform.setRotation(rotationQuat);
+    cameraTransform.setPosition(0, currentY, 0);
   }
 
+  // Animate lights
   const LIGHT_ANIM_DURATION_S = 8.0;
   const lightProgress =
     ((now / 1000) % LIGHT_ANIM_DURATION_S) / LIGHT_ANIM_DURATION_S;
