@@ -149,7 +149,7 @@ async function initWorker(
 
   // Environment Map & IBL
   const envMap = await resourceManager.createEnvironmentMap(
-    "/assets/hdris/citrus_orchard_road_puresky_4k.hdr",
+    "/assets/hdris/qwantani_night_puresky_4k.hdr",
     1024,
   );
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
