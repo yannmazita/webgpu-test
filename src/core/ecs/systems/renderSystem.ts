@@ -9,6 +9,7 @@ import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
 import { SkyboxComponent } from "../components/skyboxComponent";
+import { IBLComponent } from "../components/iblComponent";
 
 // A global resource for scene properties
 export class SceneLightingComponent {
@@ -59,6 +60,13 @@ export function renderSystem(
   const skyboxComp = world.getResource(SkyboxComponent);
   if (skyboxComp) {
     sceneData.skyboxMaterial = skyboxComp.material;
+  }
+
+  // IBL
+  const iblComp = world.getResource(IBLComponent);
+  if (iblComp) {
+    sceneData.iblComponent = iblComp;
+    sceneData.prefilteredMipLevels = iblComp.prefilteredMap.mipLevelCount;
   }
 
   // Collect all lights

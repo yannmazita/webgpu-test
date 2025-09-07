@@ -69,6 +69,7 @@ export class UniformManager {
     fogParams0: Vec4, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: Vec4, // reserved/extensible
     hdrEnabled: boolean,
+    prefilteredMipLevels: number,
   ): void {
     // camera pos
     this.sceneDataArray[0] = camera.inverseViewMatrix[12];
@@ -83,6 +84,8 @@ export class UniformManager {
     this.sceneDataArray.set(fogParams1, 16);
     // hdr flag
     this.sceneDataArray[20] = hdrEnabled ? 1.0 : 0.0;
+    // prefiltered_mip_levels
+    this.sceneDataArray[21] = prefilteredMipLevels;
 
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }

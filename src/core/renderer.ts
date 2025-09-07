@@ -48,6 +48,8 @@ interface DrawBatch {
 export class Renderer {
   /** The primary WebGPU device used for all GPU operations. */
   public device!: GPUDevice;
+  /** The default texture sampler for the renderer. */
+  public defaultSampler!: GPUSampler;
   /** The format of the canvas texture. */
   public canvasFormat!: GPUTextureFormat;
   /** The format of the depth texture. */
@@ -62,6 +64,8 @@ export class Renderer {
   private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
   private clusterBuilder!: ClusterBuilder;
+  private dummyTexture!: GPUTexture;
+  private dummyCubemapTexture!: GPUTexture;
 
   // Optimization managers
   private batchManager!: BatchManager;
@@ -178,6 +182,44 @@ export class Renderer {
     await this.setupDevice();
     this.setupContext();
 
+    // Create a default sampler
+    this.defaultSampler = this.device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+    });
+
+    // Create a 1x1 white texture for non-textured materials
+    this.dummyTexture = this.device.createTexture({
+      size: [1, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    this.device.queue.writeTexture(
+      { texture: this.dummyTexture },
+      new Uint8Array([255, 255, 255, 255]), // White pixel
+      { bytesPerRow: 4 },
+      [1, 1],
+    );
+
+    // Create a 1x1x6 black cubemap for fallback
+    this.dummyCubemapTexture = this.device.createTexture({
+      label: "DUMMY_CUBEMAP",
+      size: [1, 1, 6],
+      format: "rgba16float",
+      dimension: "2d",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    // Write black pixels to all 6 faces
+    const blackPixel = new Float16Array([0, 0, 0, 0]);
+    for (let i = 0; i < 6; i++) {
+      this.device.queue.writeTexture(
+        { texture: this.dummyCubemapTexture, origin: [0, 0, i] },
+        blackPixel.buffer,
+        { bytesPerRow: 8 },
+        { width: 1, height: 1 },
+      );
+    }
+
     // Determine environment (DOM canvas vs OffscreenCanvas)
     const isHTMLCanvas =
       typeof (this.canvas as any).getBoundingClientRect === "function";
@@ -265,29 +307,26 @@ export class Renderer {
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "read-only-storage" },
         }, // cluster indices (read in fs)
-      ],
-    });
-
-    // Build initial frame bind group including cluster buffers
-    this.frameBindGroup = this.device.createBindGroup({
-      label: "FRAME_BIND_GROUP",
-      layout: this.frameBindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
-        { binding: 1, resource: { buffer: this.lightStorageBuffer } },
-        { binding: 2, resource: { buffer: this.sceneDataBuffer } },
         {
-          binding: 3,
-          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
-        },
+          binding: 6,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "cube" },
+        }, // irradiance map
         {
-          binding: 4,
-          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
-        },
+          binding: 7,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "cube" },
+        }, // prefiltered map
         {
-          binding: 5,
-          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
-        },
+          binding: 8,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "2d" },
+        }, // brdf LUT
+        {
+          binding: 9,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {},
+        }, // ibl sampler
       ],
     });
 
@@ -493,6 +532,7 @@ export class Renderer {
       sceneData.fogParams0,
       sceneData.fogParams1,
       this.hdrSupported,
+      sceneData.prefilteredMipLevels,
     );
 
     // Lights SSBO packing
@@ -501,7 +541,7 @@ export class Renderer {
     const lightDataBuffer = this.uniformManager.getLightDataBuffer(lightCount);
 
     if (lightCount > this.lightStorageBufferCapacity) {
-      // Recreate GPU storage buffer and rebind
+      // Recreate GPU storage buffer
       this.lightStorageBuffer.destroy();
       this.lightStorageBufferCapacity = Math.ceil(lightCount * 1.5);
       const newSize = 16 + this.lightStorageBufferCapacity * lightStructSize;
@@ -510,28 +550,54 @@ export class Renderer {
         size: newSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-      this.frameBindGroup = this.device.createBindGroup({
-        label: "FRAME_BIND_GROUP (re-bound)",
-        layout: this.frameBindGroupLayout,
-        entries: [
-          { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
-          { binding: 1, resource: { buffer: this.lightStorageBuffer } },
-          { binding: 2, resource: { buffer: this.sceneDataBuffer } },
-          {
-            binding: 3,
-            resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
-          },
-          {
-            binding: 4,
-            resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
-          },
-          {
-            binding: 5,
-            resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
-          },
-        ],
-      });
     }
+
+    // We create the frame bind group every frame. This is cheap
+    // and ensures it's always valid and uses the latest resources.
+    const ibl = sceneData.iblComponent;
+    this.frameBindGroup = this.device.createBindGroup({
+      label: "FRAME_BIND_GROUP",
+      layout: this.frameBindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
+        { binding: 1, resource: { buffer: this.lightStorageBuffer } },
+        { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+        {
+          binding: 3,
+          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+        },
+        {
+          binding: 4,
+          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+        },
+        {
+          binding: 6,
+          resource: ibl
+            ? ibl.irradianceMap.createView({ dimension: "cube" })
+            : this.dummyCubemapTexture.createView({ dimension: "cube" }),
+        },
+        {
+          binding: 7,
+          resource: ibl
+            ? ibl.prefilteredMap.createView({ dimension: "cube" })
+            : this.dummyCubemapTexture.createView({ dimension: "cube" }),
+        },
+        {
+          binding: 8,
+          resource: ibl
+            ? ibl.brdfLut.createView()
+            : this.dummyTexture.createView(),
+        },
+        {
+          binding: 9,
+          resource: ibl ? ibl.sampler : this.defaultSampler,
+        },
+      ],
+    });
 
     this.clusterBuilder.updateParams(
       camera,

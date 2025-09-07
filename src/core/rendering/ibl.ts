@@ -71,7 +71,11 @@ export async function equirectangularToCubemap(
       { binding: 0, resource: equirectTexture.createView() },
       {
         binding: 1,
-        resource: cubemapTexture.createView({ dimension: "2d-array" }),
+        resource: cubemapTexture.createView({
+          dimension: "2d-array",
+          baseMipLevel: 0,
+          mipLevelCount: 1,
+        }),
       },
     ],
   });
@@ -273,7 +277,7 @@ export async function generateBrdfLut(
   const brdfLookupTable = device.createTexture({
     label: "IBL_BRDF_LUT",
     size: [LUT_SIZE, LUT_SIZE],
-    format: "rg16float",
+    format: "rgba16float",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
   });
 

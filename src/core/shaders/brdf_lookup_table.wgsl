@@ -1,7 +1,7 @@
 // src/core/shaders/brdf_lookup_table.wgsl
 const PI: f32 = 3.141592653589793;
 
-@group(0) @binding(0) var outputTexture: texture_storage_2d<rg16float, write>;
+@group(0) @binding(0) var outputTexture: texture_storage_2d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(

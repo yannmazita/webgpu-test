@@ -71,7 +71,7 @@ fn main(
         let NdotL = max(dot(N, L), 0.0);
 
         if (NdotL > 0.0) {
-            irradiance += textureSample(environmentMap, environmentSampler, L).rgb * NdotL;
+            irradiance += textureSampleLevel(environmentMap, environmentSampler, L, 0.0).rgb * NdotL;
         }
     }
     irradiance = PI * irradiance * inv_sample_count;

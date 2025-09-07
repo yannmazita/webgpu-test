@@ -1,3 +1,4 @@
+// src/core/shaders/pbr.wgsl
 #include "utils.wgsl"
 
 struct ClusterParams {
@@ -45,6 +46,9 @@ struct SceneUniforms {
     fogParams0: vec4<f32>, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: vec4<f32>, // reserved/extensible
     hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
+    prefiltered_mip_levels: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 struct Light {
@@ -77,6 +81,10 @@ struct PBRMaterialUniforms {
 @group(0) @binding(3) var<uniform> clusterParams: ClusterParams;
 @group(0) @binding(4) var<storage, read> clusterCounts: ClusterCounts;
 @group(0) @binding(5) var<storage, read> clusterLightIndices: ClusterLightIndices;
+@group(0) @binding(6) var irradianceMap: texture_cube<f32>;
+@group(0) @binding(7) var prefilteredMap: texture_cube<f32>;
+@group(0) @binding(8) var brdfLUT: texture_2d<f32>;
+@group(0) @binding(9) var iblSampler: sampler;
 
 // @group(1) - Per-material data
 @group(1) @binding(0) var albedoTexture: texture_2d<f32>;
@@ -296,6 +304,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Normals and view vector
     let N = getNormalFromMap(fi, normalIntensity);
     let V = normalize(scene.cameraPos.xyz - fi.worldPosition);
+    let R = reflect(-V, N);
 
     // Base reflectance
     var F0 = vec3<f32>(0.04);
@@ -353,14 +362,24 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         }
     }
 
-    // Ambient
-    let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-    var kD = 1.0 - kS;
-    kD *= 1.0 - metallic;
-    let irradiance = scene.ambientColor.rgb;
-    let diffuse = irradiance * albedo;
-    let ambientSpecular = irradiance * 0.1 * F0;
-    let ambient = (kD * diffuse + ambientSpecular) * ao;
+    // ===== Indirect Lighting (IBL) =====
+    let F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    
+    let kS = F;
+    var kD = vec3<f32>(1.0) - kS;
+    kD *= (1.0 - metallic);
+    
+    // Diffuse IBL
+    let irradiance = textureSample(irradianceMap, iblSampler, N).rgb;
+    let diffuseIBL = irradiance * albedo;
+    
+    // Specular IBL
+    let maxMipLevel = scene.prefiltered_mip_levels - 1.0;
+    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxMipLevel).rgb;
+    let brdf = textureSample(brdfLUT, iblSampler, vec2<f32>(max(dot(N, V), 0.0), roughness)).rg;
+    let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+    
+    let ambient = (kD * diffuseIBL + specularIBL) * ao;
 
     var color = ambient + Lo;
 
