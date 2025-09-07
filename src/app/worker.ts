@@ -336,6 +336,14 @@ function frame(now: number) {
 
   if (actionController.wasPressed("toggle_camera_mode")) {
     isFreeCameraActive = !isFreeCameraActive;
+    // When switching TO free camera, sync its state from the animation
+    if (isFreeCameraActive) {
+      const cameraTransform = world.getComponent(
+        cameraEntity,
+        TransformComponent,
+      )!;
+      cameraControllerSystem.syncFromTransform(cameraTransform);
+    }
   }
 
   const cameraTransform = world.getComponent(cameraEntity, TransformComponent)!;

@@ -27,10 +27,44 @@ export class CameraControllerSystem {
   }
 
   /**
+   * Synchronizes the controller's internal pitch and yaw with an existing
+   * transform's rotation.
+   *
+   * This is crucial for seamless switching from an animated camera to a
+   * user-controlled one, preventing a jarring "snap" in orientation. It
+   * decomposes the quaternion into the specific Euler angle sequence (Yaw,
+   * then Pitch) used by this controller.
+   *
+   * @param transform The TransformComponent to synchronize from.
+   */
+  public syncFromTransform(transform: TransformComponent): void {
+    const q = transform.rotation;
+    const x = q[0],
+      y = q[1],
+      z = q[2],
+      w = q[3];
+
+    // Decompose quaternion to get pitch (around local X) and yaw (around world Y)
+    // This specific decomposition matches the controller's rotation logic.
+    // Yaw from quaternion
+    const siny_cosp = 2 * (w * y + z * x);
+    const cosy_cosp = 1 - 2 * (y * y + z * z);
+    this.yaw = Math.atan2(siny_cosp, cosy_cosp);
+
+    // Pitch from quaternion
+    const sinp = 2 * (w * x - y * z);
+    if (Math.abs(sinp) >= 1) {
+      this.pitch = Math.sign(sinp) * (Math.PI / 2); // Use 90 degrees if looking straight up/down
+    } else {
+      this.pitch = Math.asin(sinp);
+    }
+  }
+
+  /**
    * Updates the camera's position and orientation based on user input.
    *
    * This method implements a first-person-style camera control scheme. It
-   * translates abstract user actions (e.g., 'move_forward', mouse movement)
+   * translates abstract user actions (like 'move_forward', mouse movement)
    * into changes in the camera's TransformComponent. This system is designed
    * to be frame-rate independent by using a delta time value for all
    * movements.
