@@ -147,12 +147,13 @@ async function initWorker(
 
   // --- Scene Setup ---
 
-  // Skybox
-  const skyboxMaterial = await resourceManager.createSkyboxMaterial(
+  // Environment Map & IBL
+  const envMap = await resourceManager.createEnvironmentMap(
     "/assets/hdris/citrus_orchard_road_puresky_4k.hdr",
     1024,
   );
-  world.addResource(new SkyboxComponent(skyboxMaterial));
+  world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
+  world.addResource(envMap.iblComponent);
 
   // Camera
   cameraEntity = world.createEntity();

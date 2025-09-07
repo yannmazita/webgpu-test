@@ -21,12 +21,23 @@ import {
 } from "./utils/primitives";
 import { UnlitGroundMaterial } from "./materials/unlitGroundMaterial";
 import { loadHDR } from "@/loaders/hdrLoader";
-import { equirectangularToCubemap } from "./rendering/ibl";
-import { SkyboxMaterial } from "./materials/skyboxMaterial";
+import {
+  equirectangularToCubemap,
+  generateBrdfLut,
+  generateIrradianceMap,
+  generatePrefilteredMap,
+} from "@/core/rendering/ibl";
+import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
+import { IBLComponent } from "@/core/ecs/components/iblComponent";
 
 export interface PBRMaterialSpec {
   type: "PBR";
   options: PBRMaterialOptions;
+}
+
+export interface EnvironmentMap {
+  skyboxMaterial: SkyboxMaterial;
+  iblComponent: IBLComponent;
 }
 
 /**
@@ -116,6 +127,8 @@ export class ResourceManager {
   private defaultSampler!: GPUSampler;
   /** The shader preprocessor for handling #includes. */
   private preprocessor: ShaderPreprocessor;
+  /** 2D bidirectional reflectance distribution lookup table texture */
+  private brdfLut: GPUTexture | null = null;
   /** Flags to ensure material static resources are initialized only once. */
   private pbrMaterialInitialized = false;
   private unlitGroundMaterialInitialized = false;
@@ -328,72 +341,101 @@ export class ResourceManager {
   }
 
   /**
-   * Loads an HDR environment map, converts it to a cubemap, and creates a SkyboxMaterial.
+   * Loads an HDR environment map, converts it to a cubemap, pre-computes IBL textures,
+   * and creates all necessary resources for environment lighting.
    * @param url The URL of the equirectangular .hdr file.
    * @param cubemapSize The resolution for each face of the resulting cubemap.
-   * @returns A promise that resolves to the created SkyboxMaterial.
+   * @returns A promise that resolves to an object containing the SkyboxMaterial and IBLComponent.
    */
-  public async createSkyboxMaterial(
+  public async createEnvironmentMap(
     url: string,
     cubemapSize = 512,
-  ): Promise<SkyboxMaterial> {
-    const materialKey = `SKYBOX:${url}:${cubemapSize}`;
-    const cached = this.materials.get(materialKey);
-    if (cached) return cached as SkyboxMaterial;
-
+  ): Promise<EnvironmentMap> {
     if (!this.skyboxMaterialInitialized) {
       await SkyboxMaterial.initialize(this.renderer.device, this.preprocessor);
       this.skyboxMaterialInitialized = true;
     }
 
-    // 1. Load HDR data (which is RGB)
+    // --- 1. Load and prepare equirectangular source texture ---
     const hdrData = await loadHDR(url);
-
-    // 2. Convert RGB float data to RGBA float data
     const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
     for (let i = 0; i < hdrData.width * hdrData.height; i++) {
-      rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0]; // R
-      rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1]; // G
-      rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2]; // B
-      rgbaData[i * 4 + 3] = 1.0; // A
+      rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
+      rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1];
+      rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
+      rgbaData[i * 4 + 3] = 1.0;
     }
-
-    // 3. Create a GPUTexture from the new RGBA data
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
       size: [hdrData.width, hdrData.height],
       format: "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-
-    // 4. Write the RGBA float data to the texture
     this.renderer.device.queue.writeTexture(
       { texture: equirectTexture },
       rgbaData.buffer,
-      { bytesPerRow: hdrData.width * 4 * 4 }, // width * components(4) * bytes_per_component(4)
+      { bytesPerRow: hdrData.width * 4 * 4 },
       { width: hdrData.width, height: hdrData.height },
     );
 
-    // 5. Convert to Cubemap on GPU
-    const cubemap = await equirectangularToCubemap(
+    // --- 2. Convert to base environment cubemap ---
+    const environmentMap = await equirectangularToCubemap(
       this.renderer.device,
       this.preprocessor,
       equirectTexture,
       cubemapSize,
     );
-    equirectTexture.destroy(); // We don't need the source anymore
+    equirectTexture.destroy();
 
-    // 6. Create the material
-    const material = new SkyboxMaterial(
+    // --- 3. Create Skybox Material ---
+    const skyboxSampler = this.renderer.device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      mipmapFilter: "linear",
+    });
+    const skyboxMaterial = new SkyboxMaterial(
       this.renderer.device,
-      cubemap,
-      this.defaultSampler,
+      environmentMap,
+      skyboxSampler,
+    );
+    _setHandle(skyboxMaterial, `SKYBOX:${url}:${cubemapSize}`);
+
+    // --- 4. Pre-compute IBL Textures ---
+    const irradianceMap = await generateIrradianceMap(
+      this.renderer.device,
+      this.preprocessor,
+      environmentMap,
+      skyboxSampler,
     );
 
-    _setHandle(material, materialKey);
+    const prefilteredMap = await generatePrefilteredMap(
+      this.renderer.device,
+      this.preprocessor,
+      environmentMap,
+      skyboxSampler,
+    );
 
-    this.materials.set(materialKey, material);
-    return material;
+    // BRDF LUT is scene-independent, so we generate and cache it once globally.
+    this.brdfLut ??= await generateBrdfLut(
+      this.renderer.device,
+      this.preprocessor,
+    );
+
+    // --- 5. Create IBL Component ---
+    const iblComponent = new IBLComponent(
+      irradianceMap,
+      prefilteredMap,
+      this.brdfLut,
+      skyboxSampler,
+    );
+
+    // We don't cache the entire EnvironmentMap object, just its components.
+    this.materials.set(
+      `SKYBOX:${url}:${cubemapSize}`,
+      skyboxMaterial as Material,
+    );
+
+    return { skyboxMaterial, iblComponent };
   }
 
   /**
