@@ -48,6 +48,7 @@ import {
 } from "@/core/action";
 import { PRNG } from "@/core/utils/prng";
 import { setParent } from "@/core/ecs/utils/hierarchy";
+import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -145,6 +146,13 @@ async function initWorker(
   sceneRenderData = new SceneRenderData();
 
   // --- Scene Setup ---
+
+  // Skybox
+  const skyboxMaterial = await resourceManager.createSkyboxMaterial(
+    "/assets/hdris/citrus_orchard_road_puresky_4k.hdr",
+    1024,
+  );
+  world.addResource(new SkyboxComponent(skyboxMaterial));
 
   // Camera
   cameraEntity = world.createEntity();

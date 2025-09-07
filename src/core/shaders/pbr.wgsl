@@ -44,6 +44,7 @@ struct SceneUniforms {
     fogColor: vec4<f32>,
     fogParams0: vec4<f32>, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: vec4<f32>, // reserved/extensible
+    hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
 }
 
 struct Light {
@@ -393,19 +394,11 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Add emissive color after fog so it cuts through
     color += emissive;
 
-    // Tone mapping + gamma
-    color = ACESFilmicToneMapping(color);
-    color = pow(color, vec3<f32>(1.0 / 2.2));
+    // Conditionally apply Tone mapping + gamma for SDR output
+    if (scene.hdr_enabled < 0.5) {
+        color = ACESFilmicToneMapping(color);
+        color = pow(color, vec3<f32>(1.0 / 2.2));
+    }
 
     return vec4<f32>(color, material.albedo.a);
-}
-
-// ACES Filmic Tone Mapping
-fn ACESFilmicToneMapping(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
 }

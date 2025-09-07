@@ -1,4 +1,5 @@
 // src/core/types/rendering.ts
+import { SkyboxMaterial } from "../materials/skyboxMaterial";
 import { Light, Renderable } from "./gpu";
 import { Vec4, vec4 } from "wgpu-matrix";
 
@@ -10,6 +11,7 @@ export class SceneRenderData {
   public renderables: Renderable[] = [];
   public lights: Light[] = [];
   public ambientColor: Vec4 = vec4.create();
+  public skyboxMaterial?: SkyboxMaterial;
 
   // fog parameters
   public fogColor: Vec4 = vec4.fromValues(0.6, 0.7, 0.8, 1.0);

@@ -29,3 +29,21 @@ fn mat3_inverse(m: mat3x3<f32>) -> mat3x3<f32> {
 
     return (1.0 / det) * adj;
 }
+
+/**
+ * ACES Filmic Tone Mapping Curve. A widely used and effective curve 
+ * for converting HDR to SDR.
+ *
+ * @params color The HDR color vector
+ * @returns The SDR color vector
+ */ 
+fn ACESFilmicToneMapping(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    let numerator = color * (a * color + b);
+    let denominator = color * (c * color + d) + e;
+    return clamp(numerator / denominator, vec3<f32>(0.0), vec3<f32>(1.0));
+}

@@ -52,6 +52,8 @@ export class Renderer {
   public canvasFormat!: GPUTextureFormat;
   /** The format of the depth texture. */
   public depthFormat!: GPUTextureFormat;
+  /** Does the adapter support HDR */
+  private hdrSupported = false;
 
   // Internal state management
   private canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -208,7 +210,7 @@ export class Renderer {
 
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
-      size: 20 * 4, // 20 floats (cameraPos(4)+ambient(4)+fogColor(4)+fogParams0(4)+fogParams1(4))
+      size: 24 * 4, // 24 floats to match sceneDataArray in UniformManager
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -372,7 +374,20 @@ export class Renderer {
 
     if (!adapter) throw new Error("Failed to get GPU adapter.");
     this.adapter = adapter;
-    this.device = await this.adapter.requestDevice();
+
+    // Check for HDR support
+    const requiredFeatures: GPUFeatureName[] = [];
+    if (this.adapter.features.has("shader-f16")) {
+      this.hdrSupported = true;
+      requiredFeatures.push("shader-f16");
+      console.log("HDR rendering supported (shader-f16) and enabled.");
+    } else {
+      console.log("HDR rendering not supported by adapter.");
+    }
+
+    this.device = await this.adapter.requestDevice({
+      requiredFeatures,
+    });
 
     // Diagnostics: detect software fallback
     // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
@@ -388,13 +403,25 @@ export class Renderer {
     // OffscreenCanvas also supports 'webgpu' context in workers; use a safe cast.
     const canvasAny = this.canvas as any;
     this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
-    this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-    this.context.configure({
+
+    // Choose format based on HDR support
+    this.canvasFormat = this.hdrSupported
+      ? "rgba16float"
+      : navigator.gpu.getPreferredCanvasFormat();
+
+    const config: GPUCanvasConfiguration = {
       device: this.device,
       format: this.canvasFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
       alphaMode: "premultiplied",
-    });
+    };
+
+    // Enable extended tone mapping for HDR
+    if (this.hdrSupported) {
+      (config as any).toneMapping = { mode: "extended" };
+    }
+
+    this.context.configure(config);
   }
 
   private createDepthTexture(): void {
@@ -451,6 +478,7 @@ export class Renderer {
       sceneData.fogColor,
       sceneData.fogParams0,
       sceneData.fogParams1,
+      this.hdrSupported,
     );
 
     // Lights SSBO packing
@@ -1015,6 +1043,21 @@ export class Renderer {
       1,
     );
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
+
+    // --- SKYBOX PASS ---
+    if (sceneData.skyboxMaterial) {
+      const skyboxMat = sceneData.skyboxMaterial;
+      const pipeline = skyboxMat.getPipeline(
+        [], // No mesh layout needed
+        Renderer.INSTANCE_DATA_LAYOUT,
+        this.frameBindGroupLayout,
+        this.canvasFormat,
+        this.depthFormat,
+      );
+      scenePassEncoder.setPipeline(pipeline);
+      scenePassEncoder.setBindGroup(1, skyboxMat.bindGroup);
+      scenePassEncoder.draw(3, 1, 0, 0); // Draw the fullscreen triangle
+    }
 
     Profiler.begin("Render.OpaquePass");
     this.stats.drawsOpaque = this._renderOpaquePass(

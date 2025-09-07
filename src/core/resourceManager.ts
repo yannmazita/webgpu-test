@@ -20,6 +20,9 @@ import {
   createIcosphereMeshData,
 } from "./utils/primitives";
 import { UnlitGroundMaterial } from "./materials/unlitGroundMaterial";
+import { loadHDR } from "@/loaders/hdrLoader";
+import { equirectangularToCubemap } from "./rendering/ibl";
+import { SkyboxMaterial } from "./materials/skyboxMaterial";
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -116,6 +119,7 @@ export class ResourceManager {
   /** Flags to ensure material static resources are initialized only once. */
   private pbrMaterialInitialized = false;
   private unlitGroundMaterialInitialized = false;
+  private skyboxMaterialInitialized = false;
 
   /**
    * Creates a new ResourceManager.
@@ -318,6 +322,69 @@ export class ResourceManager {
       texture,
       this.defaultSampler,
     );
+
+    this.materials.set(materialKey, material);
+    return material;
+  }
+
+  /**
+   * Loads an HDR environment map, converts it to a cubemap, and creates a SkyboxMaterial.
+   * @param url The URL of the equirectangular .hdr file.
+   * @param cubemapSize The resolution for each face of the resulting cubemap.
+   * @returns A promise that resolves to the created SkyboxMaterial.
+   */
+  public async createSkyboxMaterial(
+    url: string,
+    cubemapSize = 512,
+  ): Promise<SkyboxMaterial> {
+    const materialKey = `SKYBOX:${url}:${cubemapSize}`;
+    const cached = this.materials.get(materialKey);
+    if (cached) return cached as SkyboxMaterial;
+
+    if (!this.skyboxMaterialInitialized) {
+      await SkyboxMaterial.initialize(this.renderer.device, this.preprocessor);
+      this.skyboxMaterialInitialized = true;
+    }
+
+    // 1. Load HDR data
+    const hdrData = await loadHDR(url);
+
+    // 2. Create a GPUTexture from the float data
+    const equirectTexture = this.renderer.device.createTexture({
+      label: `EQUIRECTANGULAR_SRC:${url}`,
+      size: [hdrData.width, hdrData.height],
+      format: "rgba32float", // Use a high-precision format for the source
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT, // Required for copyExternalImageToTexture
+    });
+
+    // Write the float data to the texture
+    this.renderer.device.queue.writeTexture(
+      { texture: equirectTexture },
+      hdrData.data.buffer,
+      { bytesPerRow: hdrData.width * 4 * 4 }, // width * components * bytes_per_component
+      { width: hdrData.width, height: hdrData.height },
+    );
+
+    // 3. Convert to Cubemap on GPU
+    const cubemap = await equirectangularToCubemap(
+      this.renderer.device,
+      this.preprocessor,
+      equirectTexture,
+      cubemapSize,
+    );
+    equirectTexture.destroy(); // We don't need the source anymore
+
+    // 4. Create the material
+    const material = new SkyboxMaterial(
+      this.renderer.device,
+      cubemap,
+      this.defaultSampler,
+    );
+
+    _setHandle(material, materialKey);
 
     this.materials.set(materialKey, material);
     return material;
