@@ -43,11 +43,13 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     // Using the inverse view matrix to transform the clip-space position 
     // back into a direction (simple way to unproject and get the world-space 
     // view direction for a skybox)
-    let inv_view_proj = inverse(camera.viewProjectionMatrix);
-    let world_pos = inv_view_proj * out.clip_position;
     
     // The camera's world position is the 4th column of the inverse view matrix.
-    let camera_pos = inverse(camera.viewMatrix)[3].xyz;
+    let inv_view = mat4_inverse(camera.viewMatrix);
+    let camera_pos = inv_view[3].xyz;
+
+    let inv_view_proj = mat4_inverse(camera.viewProjectionMatrix);
+    let world_pos = inv_view_proj * out.clip_position;
 
     out.view_dir = normalize(world_pos.xyz / world_pos.w - camera_pos);
 
@@ -57,7 +59,7 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the cubemap with the view direction.
-    let color = textureSample(skyboxTexture, skyboxSampler, in.view_dir);
+    var color = textureSample(skyboxTexture, skyboxSampler, in.view_dir);
     
     // If HDR is not enabled, we must tone map the color to the SDR range.
     if (scene.hdr_enabled < 0.5) {

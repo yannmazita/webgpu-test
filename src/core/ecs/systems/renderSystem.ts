@@ -9,7 +9,6 @@ import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
 import { SkyboxComponent } from "../components/skyboxComponent";
-import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 
 // A global resource for scene properties
 export class SceneLightingComponent {

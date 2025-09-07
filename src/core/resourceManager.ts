@@ -346,29 +346,35 @@ export class ResourceManager {
       this.skyboxMaterialInitialized = true;
     }
 
-    // 1. Load HDR data
+    // 1. Load HDR data (which is RGB)
     const hdrData = await loadHDR(url);
 
-    // 2. Create a GPUTexture from the float data
+    // 2. Convert RGB float data to RGBA float data
+    const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
+    for (let i = 0; i < hdrData.width * hdrData.height; i++) {
+      rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0]; // R
+      rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1]; // G
+      rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2]; // B
+      rgbaData[i * 4 + 3] = 1.0; // A
+    }
+
+    // 3. Create a GPUTexture from the new RGBA data
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
       size: [hdrData.width, hdrData.height],
-      format: "rgba32float", // Use a high-precision format for the source
-      usage:
-        GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.COPY_DST |
-        GPUTextureUsage.RENDER_ATTACHMENT, // Required for copyExternalImageToTexture
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
-    // Write the float data to the texture
+    // 4. Write the RGBA float data to the texture
     this.renderer.device.queue.writeTexture(
       { texture: equirectTexture },
-      hdrData.data.buffer,
-      { bytesPerRow: hdrData.width * 4 * 4 }, // width * components * bytes_per_component
+      rgbaData.buffer,
+      { bytesPerRow: hdrData.width * 4 * 4 }, // width * components(4) * bytes_per_component(4)
       { width: hdrData.width, height: hdrData.height },
     );
 
-    // 3. Convert to Cubemap on GPU
+    // 5. Convert to Cubemap on GPU
     const cubemap = await equirectangularToCubemap(
       this.renderer.device,
       this.preprocessor,
@@ -377,7 +383,7 @@ export class ResourceManager {
     );
     equirectTexture.destroy(); // We don't need the source anymore
 
-    // 4. Create the material
+    // 6. Create the material
     const material = new SkyboxMaterial(
       this.renderer.device,
       cubemap,

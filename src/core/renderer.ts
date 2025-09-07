@@ -204,7 +204,7 @@ export class Renderer {
 
     this.cameraUniformBuffer = this.device.createBuffer({
       label: "CAMERA_UNIFORM_BUFFER",
-      size: 4 * 4 * 4,
+      size: 128, // 2 * mat4x4<f32> (viewProjection + view)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -237,7 +237,7 @@ export class Renderer {
       entries: [
         {
           binding: 0,
-          visibility: GPUShaderStage.VERTEX,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         }, // camera
         {
@@ -247,7 +247,7 @@ export class Renderer {
         }, // lights
         {
           binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         }, // scene
         {
@@ -404,10 +404,8 @@ export class Renderer {
     const canvasAny = this.canvas as any;
     this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
 
-    // Choose format based on HDR support
-    this.canvasFormat = this.hdrSupported
-      ? "rgba16float"
-      : navigator.gpu.getPreferredCanvasFormat();
+    // Default to the preferred SDR format
+    this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
 
     const config: GPUCanvasConfiguration = {
       device: this.device,
@@ -416,12 +414,28 @@ export class Renderer {
       alphaMode: "premultiplied",
     };
 
-    // Enable extended tone mapping for HDR
+    // Attempt to configure for HDR if supported by the adapter
     if (this.hdrSupported) {
-      (config as any).toneMapping = { mode: "extended" };
+      const hdrConfig: any = { ...config, format: "rgba16float" };
+      hdrConfig.toneMapping = { mode: "extended" };
+      try {
+        this.context.configure(hdrConfig);
+        // If successful, update the canvasFormat to the HDR format
+        this.canvasFormat = "rgba16float";
+        console.log("Successfully configured canvas for HDR output.");
+      } catch (e) {
+        console.warn(
+          "HDR canvas configuration failed. Falling back to SDR.",
+          e,
+        );
+        // If it fails, unset the hdrSupported flag and configure for SDR
+        this.hdrSupported = false;
+        this.context.configure(config);
+      }
+    } else {
+      // If not supported by adapter, just configure for SDR
+      this.context.configure(config);
     }
-
-    this.context.configure(config);
   }
 
   private createDepthTexture(): void {

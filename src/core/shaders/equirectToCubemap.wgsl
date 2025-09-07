@@ -61,7 +61,12 @@ fn main(
     let equirectUV = directionToUV(dir);
 
     // Sample the equirectangular texture
-    let color = textureLoad(equirectangularTexture, vec2<i32>(floor(equirectUV * vec2<f32>(textureDimensions(equirectangularTexture)))), 0);
+    let dims_f = vec2<f32>(textureDimensions(equirectangularTexture));
+    let color = textureLoad(
+        equirectangularTexture, 
+        vec2<i32>(floor(equirectUV * dims_f)),
+        0
+    );
 
     // Write the color to the corresponding face of the cubemap
     textureStore(cubemapTexture, global_id.xy, faceIndex, color);
