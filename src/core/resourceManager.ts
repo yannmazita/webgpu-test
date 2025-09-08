@@ -13,7 +13,7 @@ import { createGPUBuffer } from "./utils/webgpu";
 import { loadSTL } from "@/loaders/stlLoader";
 import { loadOBJ } from "@/loaders/objLoader";
 import { ShaderPreprocessor } from "./shaders/preprocessor";
-import { vec3 } from "wgpu-matrix";
+import { quat, vec3 } from "wgpu-matrix";
 import { PBRMaterial } from "./materials/pbrMaterial";
 import {
   createCubeMeshData,
@@ -29,6 +29,17 @@ import {
 } from "@/core/rendering/ibl";
 import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import {
+  getAccessorData,
+  GLTFPrimitive,
+  loadGLTF,
+  ParsedGLTF,
+} from "@/loaders/gltfLoader";
+import { TransformComponent } from "./ecs/components/transformComponent";
+import { Entity } from "./ecs/entity";
+import { World } from "./ecs/world";
+import { setParent } from "./ecs/utils/hierarchy";
+import { MeshRendererComponent } from "./ecs/components/meshRendererComponent";
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -459,13 +470,14 @@ export class ResourceManager {
    *
    * Supported handle formats:
    * - **Primitives:**
-   *   - `PRIM:cube` (default size 1.0)
-   *   - `PRIM:cube:size=2.5`
-   *   - `PRIM:icosphere` (default radius 0.5, subdivisions 2)
-   *   - `PRIM:icosphere:r=1.0,sub=3`
+   *   - "PRIM:cube" (default size 1.0)
+   *   - "PRIM:cube:size=2.5"
+   *   - "PRIM:icosphere" (default radius 0.5, subdivisions 2)
+   *   - "PRIM:icosphere:r=1.0,sub=3"
    * - **Model Files:**
-   *   - `OBJ:path/to/model.obj`
-   *   - `STL:path/to/model.stl`
+   *   - "OBJ:path/to/model.obj"
+   *   - "STL:path/to/model.stl"
+   *   -  "GLTF:url#meshName"
    */
   public async resolveMeshByHandle(handle: string): Promise<Mesh> {
     // Alias: if we already resolved this handle, return it
@@ -515,7 +527,291 @@ export class ResourceManager {
       return mesh;
     }
 
+    if (handle.startsWith("GLTF:")) {
+      // Format: GLTF:url#meshName
+      const parts = handle.substring(5).split("#");
+      const url = parts[0];
+      const meshName = parts[1];
+      if (!meshName) {
+        throw new Error(
+          "GLTF mesh handle requires a mesh name: GLTF:url#meshName",
+        );
+      }
+      // This loads the first primitive of the named mesh.
+      // For full scene loading, use loadSceneFromGLTF.
+      const { parsedGltf } = await loadGLTF(url);
+      const meshIndex = parsedGltf.json.meshes?.findIndex(
+        (m) => m.name === meshName,
+      );
+      if (meshIndex === undefined || meshIndex === -1) {
+        throw new Error(`Mesh "${meshName}" not found in ${url}`);
+      }
+      const gltfMesh = parsedGltf.json.meshes![meshIndex];
+      const primitive = gltfMesh.primitives[0];
+      const mesh = this.createMeshFromPrimitive(handle, parsedGltf, primitive);
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
+
     throw new Error(`Unsupported mesh handle: ${handle}`);
+  }
+
+  // ---------- Scene Loading ----------
+
+  /**
+   * Loads a glTF file and instantiates it into the world.
+   * @param world The ECS world to add entities to.
+   * @param url The URL of the .gltf or .glb file.
+   * @returns A promise that resolves to the root entity of the loaded scene.
+   */
+  public async loadSceneFromGLTF(world: World, url: string): Promise<Entity> {
+    const { parsedGltf: gltf, baseUri } = await loadGLTF(url);
+
+    // --- Pre-load all materials ---
+    const materialPromises =
+      gltf.json.materials?.map((mat) => {
+        const pbr = mat.pbrMetallicRoughness ?? {};
+        const options: PBRMaterialOptions = {
+          albedo: pbr.baseColorFactor,
+          metallic: pbr.metallicFactor,
+          roughness: pbr.roughnessFactor,
+          emissive: mat.emissiveFactor,
+          normalIntensity: mat.normalTexture?.scale,
+          occlusionStrength: mat.occlusionTexture?.strength,
+        };
+
+        if (pbr.baseColorTexture) {
+          options.albedoMap = this.getImageUri(
+            gltf,
+            pbr.baseColorTexture.index,
+            baseUri,
+          );
+        }
+        if (pbr.metallicRoughnessTexture) {
+          options.metallicRoughnessMap = this.getImageUri(
+            gltf,
+            pbr.metallicRoughnessTexture.index,
+            baseUri,
+          );
+        }
+        if (mat.normalTexture) {
+          options.normalMap = this.getImageUri(
+            gltf,
+            mat.normalTexture.index,
+            baseUri,
+          );
+        }
+        if (mat.emissiveTexture) {
+          options.emissiveMap = this.getImageUri(
+            gltf,
+            mat.emissiveTexture.index,
+            baseUri,
+          );
+        }
+        if (mat.occlusionTexture) {
+          options.occlusionMap = this.getImageUri(
+            gltf,
+            mat.occlusionTexture.index,
+            baseUri,
+          );
+        }
+        return this.createPBRMaterial(options);
+      }) ?? [];
+
+    const materials = await Promise.all(materialPromises);
+
+    // --- Instantiate scene graph ---
+    const sceneIndex = gltf.json.scene ?? 0;
+    const scene = gltf.json.scenes![sceneIndex];
+
+    // Create a root entity for the entire glTF scene
+    const sceneRootEntity = world.createEntity();
+    world.addComponent(sceneRootEntity, new TransformComponent());
+
+    const nodeToEntityMap = new Map<number, Entity>();
+
+    // Recursively instantiate nodes
+    for (const nodeIndex of scene.nodes) {
+      this.instantiateNode(
+        world,
+        gltf,
+        nodeIndex,
+        sceneRootEntity,
+        materials,
+        nodeToEntityMap,
+      );
+    }
+
+    return sceneRootEntity;
+  }
+
+  private instantiateNode(
+    world: World,
+    gltf: ParsedGLTF,
+    nodeIndex: number,
+    parentEntity: Entity,
+    materials: Material[],
+    nodeToEntityMap: Map<number, Entity>,
+  ): void {
+    const node = gltf.json.nodes![nodeIndex];
+    const entity = world.createEntity();
+    nodeToEntityMap.set(nodeIndex, entity);
+
+    // --- Transform ---
+    const transform = new TransformComponent();
+    if (node.matrix) {
+      // Decompose matrix for consistency, though less precise.
+      const pos = vec3.create();
+      const rot = quat.create();
+      const scl = vec3.create();
+      vec3.set(pos, node.matrix[12], node.matrix[13], node.matrix[14]);
+      // A full matrix decomposition is complex. This is a simplification just to push
+      // Right now we'll just handle translation from matrix.
+      // todo: proper implementation using mat4.getTranslation, getScaling, getRotation etc
+      transform.setPosition(pos);
+    } else {
+      if (node.translation)
+        transform.setPosition(vec3.fromValues(...node.translation));
+      if (node.rotation)
+        transform.setRotation(quat.fromValues(...node.rotation));
+      if (node.scale) transform.setScale(vec3.fromValues(...node.scale));
+    }
+    world.addComponent(entity, transform);
+    setParent(world, entity, parentEntity);
+
+    // --- Mesh Renderer ---
+    if (node.mesh !== undefined) {
+      const gltfMesh = gltf.json.meshes![node.mesh];
+      // If a mesh has multiple primitives, create a child entity for each.
+      // This correctly handles primitives with different materials.
+      const meshRootEntity =
+        gltfMesh.primitives.length > 1 ? world.createEntity() : entity;
+      if (gltfMesh.primitives.length > 1) {
+        world.addComponent(meshRootEntity, new TransformComponent());
+        setParent(world, meshRootEntity, entity);
+      }
+
+      for (let i = 0; i < gltfMesh.primitives.length; i++) {
+        const primitive = gltfMesh.primitives[i];
+        const primitiveEntity =
+          gltfMesh.primitives.length > 1
+            ? world.createEntity()
+            : meshRootEntity;
+        if (gltfMesh.primitives.length > 1) {
+          world.addComponent(primitiveEntity, new TransformComponent());
+          setParent(world, primitiveEntity, meshRootEntity);
+        }
+
+        // Get or create the mesh for this primitive
+        const meshCacheKey = `GLTF:${gltf.json.asset.version}#mesh${node.mesh}#primitive${i}`;
+        const mesh = this.createMeshFromPrimitive(
+          meshCacheKey,
+          gltf,
+          primitive,
+        );
+        this.meshes.set(meshCacheKey, mesh);
+        _setHandle(mesh, meshCacheKey);
+
+        // Get the material
+        const material =
+          primitive.material !== undefined
+            ? materials[primitive.material]
+            : materials[0]; // Fallback to default
+        world.addComponent(
+          primitiveEntity,
+          new MeshRendererComponent(mesh, material),
+        );
+      }
+    }
+
+    // --- Recurse for children ---
+    if (node.children) {
+      for (const childNodeIndex of node.children) {
+        this.instantiateNode(
+          world,
+          gltf,
+          childNodeIndex,
+          entity,
+          materials,
+          nodeToEntityMap,
+        );
+      }
+    }
+  }
+
+  private getImageUri(
+    gltf: ParsedGLTF,
+    textureIndex: number,
+    baseUri: string,
+  ): string | undefined {
+    const { json, buffers } = gltf;
+    const texture = json.textures?.[textureIndex];
+    if (texture?.source === undefined) return undefined;
+
+    const image = json.images?.[texture.source];
+    if (!image) return undefined;
+
+    if (image.uri) {
+      // Handle Data URI
+      if (image.uri.startsWith("data:")) {
+        return image.uri;
+      }
+      // Handle external URI
+      return new URL(image.uri, baseUri).href;
+    }
+
+    if (image.bufferView !== undefined && image.mimeType) {
+      // Handle embedded image data from bufferView
+      const bufferView = json.bufferViews![image.bufferView];
+      const buffer = buffers[bufferView.buffer];
+      const imageData = new Uint8Array(
+        buffer,
+        bufferView.byteOffset ?? 0,
+        bufferView.byteLength,
+      );
+      const blob = new Blob([imageData], { type: image.mimeType });
+      return URL.createObjectURL(blob);
+    }
+
+    return undefined;
+  }
+
+  private createMeshFromPrimitive(
+    key: string,
+    gltf: ParsedGLTF,
+    primitive: GLTFPrimitive,
+  ): Mesh {
+    if (this.meshes.has(key)) {
+      return this.meshes.get(key)!;
+    }
+
+    const posAccessor = primitive.attributes.POSITION;
+    const normAccessor = primitive.attributes.NORMAL;
+    const uvAccessor = primitive.attributes.TEXCOORD_0;
+    const indicesAccessor = primitive.indices;
+
+    if (posAccessor === undefined || indicesAccessor === undefined) {
+      throw new Error("GLTF primitive must have POSITION and indices.");
+    }
+
+    const positions = getAccessorData(gltf, posAccessor) as Float32Array;
+    const indices = getAccessorData(gltf, indicesAccessor) as
+      | Uint16Array
+      | Uint32Array;
+    const normals =
+      normAccessor !== undefined
+        ? (getAccessorData(gltf, normAccessor) as Float32Array)
+        : new Float32Array();
+    const texCoords =
+      uvAccessor !== undefined
+        ? (getAccessorData(gltf, uvAccessor) as Float32Array)
+        : new Float32Array();
+
+    const meshData: MeshData = { positions, normals, texCoords, indices };
+    const mesh = this.createMesh(key, meshData);
+    this.meshes.set(key, mesh);
+    return mesh;
   }
 
   // ---------- Low-level creation and loaders ----------
