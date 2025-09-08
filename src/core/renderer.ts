@@ -704,11 +704,11 @@ export class Renderer {
         lastMesh = mesh;
       }
 
-      // Always bind the instance buffer with the correct per-batch offset
       const instanceByteOffset =
         batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
+      // The instance buffer slot is dynamically placed after vertex attributes
       passEncoder.setVertexBuffer(
-        mesh.buffers.length,
+        mesh.layouts.length,
         this.instanceBuffer,
         instanceByteOffset,
       );
@@ -799,7 +799,7 @@ export class Renderer {
       }
     }
 
-    // Upload instance data for transparent objects at the given GPU offset
+    // Upload instance data for transparent objects
     this.device.queue.writeBuffer(
       this.instanceBuffer,
       instanceBufferOffset,
@@ -843,7 +843,7 @@ export class Renderer {
         instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
       const groupByteSize = count * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
-        mesh.buffers.length,
+        mesh.layouts.length,
         this.instanceBuffer,
         groupByteOffset,
         groupByteSize,
@@ -851,7 +851,6 @@ export class Renderer {
 
       if (mesh.indexBuffer) {
         passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-        // firstInstance must be 0 when using per-group buffer offsets
         passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
       } else {
         passEncoder.draw(mesh.vertexCount, count, 0, 0);

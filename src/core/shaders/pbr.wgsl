@@ -113,58 +113,23 @@ fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
     @location(2) inTexCoords: vec2<f32>,
-    @location(3) model_mat_col_0: vec4<f32>,
-    @location(4) model_mat_col_1: vec4<f32>,
-    @location(5) model_mat_col_2: vec4<f32>,
-    @location(6) model_mat_col_3: vec4<f32>,
-    @location(7) is_uniformly_scaled: f32,
-    @location(8) normal_mat_col_0: vec3<f32>,
-    @location(9) normal_mat_col_1: vec3<f32>,
-    @location(10) normal_mat_col_2: vec3<f32>,
+    // Instance Attributes for Model Matrix - Gap for future expansion
+    @location(11) model_mat_col_0: vec4<f32>,
+    @location(12) model_mat_col_1: vec4<f32>,
+    @location(13) model_mat_col_2: vec4<f32>,
+    @location(14) model_mat_col_3: vec4<f32>
 ) -> VertexOutput {
     var out: VertexOutput;
 
+    // Reconstruct and apply the model matrix
     let modelMatrix = mat4x4<f32>(
         model_mat_col_0, model_mat_col_1, model_mat_col_2, model_mat_col_3
     );
+    let worldPos = modelMatrix * vec4<f32>(inPos, 1.0);
 
-    // Transform position
-    let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
-    out.worldPosition = worldPos4.xyz;
-    out.clip_position = camera.viewProjectionMatrix * worldPos4;
+    // Transform to clip space
+    out.clip_position = camera.viewProjectionMatrix * worldPos;
     out.texCoords = inTexCoords;
-
-    // Transform normal
-    var worldNormal: vec3<f32>;
-    if (is_uniformly_scaled > 0.5) {
-        let modelMatrix3x3 = mat3x3<f32>(
-            modelMatrix[0].xyz,
-            modelMatrix[1].xyz,
-            modelMatrix[2].xyz
-        );
-        worldNormal = normalize(modelMatrix3x3 * inNormal);
-    } else {
-        let normalMatrix = mat3x3<f32>(
-            normal_mat_col_0,
-            normal_mat_col_1,
-            normal_mat_col_2
-        );
-        worldNormal = normalize(normalMatrix * inNormal);
-    }
-    out.worldNormal = worldNormal;
-
-    // Generate tangent and bitangent for normal mapping
-    // Simple approach: derive from normal and a reference vector
-    let up = vec3<f32>(0.0, 1.0, 0.0);
-    let right = vec3<f32>(1.0, 0.0, 0.0);
-    
-    // Choose the vector that's least parallel to the normal
-    let testDot = abs(dot(worldNormal, up));
-    let reference = select(up, right, testDot > 0.9);
-    
-    out.worldTangent = normalize(cross(worldNormal, reference));
-    out.worldBitangent = normalize(cross(worldNormal, out.worldTangent));
-
     return out;
 }
 

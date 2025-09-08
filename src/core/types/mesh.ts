@@ -9,4 +9,5 @@ export interface MeshData {
   normals: Float32Array;
   indices: Uint16Array | Uint32Array;
   texCoords?: Float32Array;
+  tangents?: Float32Array;
 }

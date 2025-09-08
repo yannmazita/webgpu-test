@@ -1,6 +1,10 @@
+// vite.config.ts
+
 import glsl from "vite-plugin-glsl";
 import { defineConfig } from "vite";
 import path from "path";
+import wasm from "vite-plugin-wasm";
+import topLevelAwait from "vite-plugin-top-level-await";
 
 const ReactCompilerConfig = {
   /* ... */
@@ -11,6 +15,9 @@ export default defineConfig({
     glsl({
       defaultExtension: "wgsl",
     }),
+    // Add these two plugins
+    wasm(),
+    topLevelAwait(),
   ],
   envDir: "./",
   resolve: {
@@ -19,9 +26,10 @@ export default defineConfig({
     },
   },
 
-  // jsimgui loads its own wasm files and we don't want Vite to try and process them.
+  // jsimgui and mikktspace load their own wasm files and we don't want
+  // Vite to try and process them.
   optimizeDeps: {
-    exclude: ["@mori2003/jsimgui"],
+    exclude: ["@mori2003/jsimgui", "mikktspace"],
   },
   server: {
     // These headers are required for SharedArrayBuffer, which is used by

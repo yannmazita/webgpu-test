@@ -40,6 +40,7 @@ import { Entity } from "./ecs/entity";
 import { World } from "./ecs/world";
 import { setParent } from "./ecs/utils/hierarchy";
 import { MeshRendererComponent } from "./ecs/components/meshRendererComponent";
+import { generateTangents } from "mikktspace";
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -831,34 +832,88 @@ export class ResourceManager {
       return this.meshes.get(key)!;
     }
 
+    const hasTexCoords = data.texCoords && data.texCoords.length > 0;
+    // We only generate tangents if UVs are present, as they are required for the calculation.
+    const needsTangents = hasTexCoords;
+
+    let finalPositions = data.positions;
+    let finalNormals = data.normals;
+    let finalTexCoords = data.texCoords;
+    let finalTangents: Float32Array | undefined;
+    let finalIndices: Uint16Array | Uint32Array | undefined = data.indices;
+    let finalVertexCount = data.positions.length / 3;
+
+    if (needsTangents) {
+      // MikkTSpace requires un-indexed geometry. We de-index the data here.
+      const indexCount = data.indices.length;
+      const deindexedPositions = new Float32Array(indexCount * 3);
+      const deindexedNormals = new Float32Array(indexCount * 3);
+      const deindexedTexCoords = new Float32Array(indexCount * 2);
+
+      for (let i = 0; i < indexCount; i++) {
+        const index = data.indices[i];
+        deindexedPositions.set(
+          data.positions.subarray(index * 3, index * 3 + 3),
+          i * 3,
+        );
+        deindexedNormals.set(
+          data.normals.subarray(index * 3, index * 3 + 3),
+          i * 3,
+        );
+        if (data.texCoords) {
+          deindexedTexCoords.set(
+            data.texCoords.subarray(index * 2, index * 2 + 2),
+            i * 2,
+          );
+        }
+      }
+
+      // Generate tangents using the wasm library
+      try {
+        finalTangents = generateTangents(
+          deindexedPositions,
+          deindexedNormals,
+          deindexedTexCoords,
+        );
+
+        // The mesh data is now the de-indexed version
+        finalPositions = deindexedPositions;
+        finalNormals = deindexedNormals;
+        finalTexCoords = deindexedTexCoords;
+        finalVertexCount = indexCount;
+        finalIndices = undefined; // Mark as un-indexed
+      } catch (e) {
+        console.error(`MikkTSpace failed for mesh "${key}". Falling back.`, e);
+        // If it fails, we keep the original indexed data and won't have tangents.
+        finalTangents = undefined;
+      }
+    }
+
     const buffers: GPUBuffer[] = [];
     const layouts: GPUVertexBufferLayout[] = [];
-    const vertexCount = data.positions.length / 3;
 
-    // Compute AABB from positions
+    // Compute AABB from original positions for culling
     const aabb = computeAABB(data.positions);
 
     // Position Buffer (shaderLocation: 0)
     buffers.push(
       createGPUBuffer(
         this.renderer.device,
-        data.positions,
+        finalPositions,
         GPUBufferUsage.VERTEX,
         `${key}-positions`,
       ),
     );
     layouts.push({
-      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT, // vec3<f32>
+      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT,
       attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
     });
 
     // Normal Buffer (shaderLocation: 1)
-    let normals = data.normals;
+    let normals = finalNormals;
     if (!normals || normals.length === 0) {
-      // If normals are missing, create a dummy buffer filled with zeros.
-      // Lighting will be incorrect but it prevents a crash.
       console.warn(`Mesh "${key}" is missing normals. Generating dummy data.`);
-      normals = new Float32Array(vertexCount * 3);
+      normals = new Float32Array(finalVertexCount * 3);
     }
     buffers.push(
       createGPUBuffer(
@@ -869,16 +924,14 @@ export class ResourceManager {
       ),
     );
     layouts.push({
-      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT, // vec3<f32>
+      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT,
       attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
     });
 
     // Texture Coordinate (UVs) Buffer (shaderLocation: 2)
-    // We must provide a buffer as this attribute is required by the shader.
-    // If the model format doesn't include UVs, we create a dummy buffer.
-    let texCoords = data.texCoords;
+    let texCoords = finalTexCoords;
     if (!texCoords || texCoords.length === 0) {
-      texCoords = new Float32Array(vertexCount * 2); // Filled with zeros
+      texCoords = new Float32Array(finalVertexCount * 2);
     }
     buffers.push(
       createGPUBuffer(
@@ -889,32 +942,48 @@ export class ResourceManager {
       ),
     );
     layouts.push({
-      arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT, // vec2<f32>
+      arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
       attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
     });
 
-    // Index buffer
-    const indexBuffer = createGPUBuffer(
-      this.renderer.device,
-      data.indices,
-      GPUBufferUsage.INDEX,
-      `${key}-indices`,
-    );
+    // Tangent Buffer (shaderLocation: 3) - Only if generated
+    if (finalTangents) {
+      buffers.push(
+        createGPUBuffer(
+          this.renderer.device,
+          finalTangents,
+          GPUBufferUsage.VERTEX,
+          `${key}-tangents`,
+        ),
+      );
+      layouts.push({
+        arrayStride: 4 * Float32Array.BYTES_PER_ELEMENT, // vec4<f32>
+        attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
+      });
+    }
+
+    // Index buffer (optional now)
+    const indexBuffer = finalIndices
+      ? createGPUBuffer(
+          this.renderer.device,
+          finalIndices,
+          GPUBufferUsage.INDEX,
+          `${key}-indices`,
+        )
+      : undefined;
 
     const mesh: Mesh = {
       buffers,
       layouts,
-      vertexCount: vertexCount,
+      vertexCount: finalVertexCount,
       indexBuffer,
-      indexCount: data.indices.length,
-      indexFormat: data.indices instanceof Uint16Array ? "uint16" : "uint32",
+      indexCount: finalIndices?.length,
+      indexFormat: finalIndices instanceof Uint16Array ? "uint16" : "uint32",
       aabb,
     };
 
-    // unique ID for batching cache keys
     (mesh as any).id = ResourceManager.nextMeshId++;
 
-    // Attach a best-effort handle if caller used a simple key
     let handle = key;
     if (key === "cube") handle = "PRIM:cube:size=1";
     if (key === "sphere") handle = "PRIM:icosphere:r=0.5,sub=2";
