@@ -19,6 +19,9 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
   ],
+  worker: {
+    plugins: () => [wasm(), topLevelAwait()],
+  },
   envDir: "./",
   resolve: {
     alias: {

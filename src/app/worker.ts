@@ -100,8 +100,11 @@ async function initWorker(
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
 ) {
+  console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
+  console.log("[Worker] Awaiting renderer init...");
   await renderer.init();
+  console.log("[Worker] Renderer initialized.");
 
   // Metrics setup
   metricsContext = createMetricsContext(sharedMetricsBuffer);
@@ -146,10 +149,13 @@ async function initWorker(
   // --- Scene Setup ---
 
   // Environment Map & IBL
+  console.log("[Worker] Awaiting environment map...");
+  // Environment Map & IBL
   const envMap = await resourceManager.createEnvironmentMap(
     "/assets/hdris/citrus_orchard_road_puresky_4k.hdr",
     1024,
   );
+  console.log("[Worker] Environment map created.");
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
   world.addResource(envMap.iblComponent);
 
@@ -169,23 +175,12 @@ async function initWorker(
   const right = vec3.normalize(vec3.cross(up, lookDirection));
   const correctedUp = vec3.cross(lookDirection, right);
 
+  // prettier-ignore
   const rotationMatrix = [
-    right[0],
-    correctedUp[0],
-    lookDirection[0],
-    0,
-    right[1],
-    correctedUp[1],
-    lookDirection[1],
-    0,
-    right[2],
-    correctedUp[2],
-    lookDirection[2],
-    0,
-    0,
-    0,
-    0,
-    1,
+    right[0],       right[1],       right[2],       0,
+    correctedUp[0], correctedUp[1], correctedUp[2], 0,
+    lookDirection[0], lookDirection[1], lookDirection[2], 0,
+    0,              0,              0,              1,
   ];
   const rotation = quat.fromMat(rotationMatrix);
   cameraTransform.setRotation(rotation);
@@ -202,7 +197,7 @@ async function initWorker(
   const groundMaterial = await resourceManager.createUnlitGroundMaterial({
     color: [0.1, 0.1, 0.12, 1.0],
   });
-  const groundMesh = resourceManager.createMesh(
+  const groundMesh = await resourceManager.createMesh(
     "ground_plane",
     createPlaneMeshData(20),
   );
@@ -216,10 +211,12 @@ async function initWorker(
 
   // Load the Damaged Helmet
   try {
+    console.log("[Worker] Awaiting GLTF scene load...");
     helmetEntity = await resourceManager.loadSceneFromGLTF(
       world,
       "/assets/models/gltf/DamagedHelmet.glb",
     );
+    console.log("[Worker] GLTF scene loaded.");
 
     // Position and scale the helmet appropriately
     const helmetTransform = world.getComponent(
@@ -237,7 +234,7 @@ async function initWorker(
       metallic: 0.1,
       roughness: 0.3,
     });
-    const sphereMesh = resourceManager.createMesh(
+    const sphereMesh = await resourceManager.createMesh(
       "fallback_sphere",
       createIcosphereMeshData(1.0, 3),
     );
@@ -251,7 +248,7 @@ async function initWorker(
   }
 
   // Lighting setup for helmet - Three-point lighting
-  const lightMeshWhite = resourceManager.createMesh(
+  const lightMeshWhite = await resourceManager.createMesh(
     "light_sphere",
     createIcosphereMeshData(0.05, 2),
   );
@@ -364,23 +361,12 @@ function frame(now: number) {
     const right = vec3.normalize(vec3.cross(up, lookDirection));
     const correctedUp = vec3.cross(lookDirection, right);
 
+    // prettier-ignore
     const rotationMatrix = [
-      right[0],
-      correctedUp[0],
-      lookDirection[0],
-      0,
-      right[1],
-      correctedUp[1],
-      lookDirection[1],
-      0,
-      right[2],
-      correctedUp[2],
-      lookDirection[2],
-      0,
-      0,
-      0,
-      0,
-      1,
+      right[0],       right[1],       right[2],       0,
+      correctedUp[0], correctedUp[1], correctedUp[2], 0,
+      lookDirection[0], lookDirection[1], lookDirection[2], 0,
+      0,              0,              0,              1,
     ];
     const rotation = quat.fromMat(rotationMatrix);
     cameraTransform.setRotation(rotation);

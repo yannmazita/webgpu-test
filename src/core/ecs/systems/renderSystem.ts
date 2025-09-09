@@ -102,6 +102,14 @@ export function renderSystem(
     const transform = world.getComponent(entity, TransformComponent)!;
     const meshRenderer = world.getComponent(entity, MeshRendererComponent)!;
 
+    if (typeof meshRenderer.mesh?.aabb === "undefined") {
+      console.error(
+        "CRITICAL ERROR in renderSystem: Invalid mesh found for entity",
+        entity,
+        meshRenderer.mesh,
+      );
+    }
+
     sceneData.renderables.push({
       mesh: meshRenderer.mesh,
       material: meshRenderer.material,

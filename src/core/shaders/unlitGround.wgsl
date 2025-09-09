@@ -25,11 +25,10 @@ fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
     @location(2) inTexCoords: vec2<f32>,
-    // Instance Attributes for Model Matrix
-    @location(3) model_mat_col_0: vec4<f32>,
-    @location(4) model_mat_col_1: vec4<f32>,
-    @location(5) model_mat_col_2: vec4<f32>,
-    @location(6) model_mat_col_3: vec4<f32>
+    @location(4) model_mat_col_0: vec4<f32>,
+    @location(5) model_mat_col_1: vec4<f32>,
+    @location(6) model_mat_col_2: vec4<f32>,
+    @location(7) model_mat_col_3: vec4<f32>
 ) -> VertexOutput {
     var out: VertexOutput;
 

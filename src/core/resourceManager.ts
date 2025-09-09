@@ -491,7 +491,7 @@ export class ResourceManager {
       const m = /size=([0-9]*\.?[0-9]+)/.exec(handle);
       if (m) size = parseFloat(m[1]);
       const data = createCubeMeshData(size);
-      const mesh = this.createMesh(handle, data);
+      const mesh = await this.createMesh(handle, data);
       _setHandle(mesh, handle);
       this.meshes.set(handle, mesh);
       return mesh;
@@ -506,7 +506,7 @@ export class ResourceManager {
       if (rm) r = parseFloat(rm[1]);
       if (sm) sub = parseInt(sm[1], 10);
       const data = createIcosphereMeshData(r, sub);
-      const mesh = this.createMesh(handle, data);
+      const mesh = await this.createMesh(handle, data);
       _setHandle(mesh, handle);
       this.meshes.set(handle, mesh);
       return mesh;
@@ -549,7 +549,11 @@ export class ResourceManager {
       }
       const gltfMesh = parsedGltf.json.meshes![meshIndex];
       const primitive = gltfMesh.primitives[0];
-      const mesh = this.createMeshFromPrimitive(handle, parsedGltf, primitive);
+      const mesh = await this.createMeshFromPrimitive(
+        handle,
+        parsedGltf,
+        primitive,
+      );
       _setHandle(mesh, handle);
       this.meshes.set(handle, mesh);
       return mesh;
@@ -634,7 +638,7 @@ export class ResourceManager {
 
     // Recursively instantiate nodes
     for (const nodeIndex of scene.nodes) {
-      this.instantiateNode(
+      await this.instantiateNode(
         world,
         gltf,
         nodeIndex,
@@ -647,14 +651,14 @@ export class ResourceManager {
     return sceneRootEntity;
   }
 
-  private instantiateNode(
+  private async instantiateNode(
     world: World,
     gltf: ParsedGLTF,
     nodeIndex: number,
     parentEntity: Entity,
     materials: Material[],
     nodeToEntityMap: Map<number, Entity>,
-  ): void {
+  ): Promise<void> {
     const node = gltf.json.nodes![nodeIndex];
     const entity = world.createEntity();
     nodeToEntityMap.set(nodeIndex, entity);
@@ -706,7 +710,7 @@ export class ResourceManager {
 
         // Get or create the mesh for this primitive
         const meshCacheKey = `GLTF:${gltf.json.asset.version}#mesh${node.mesh}#primitive${i}`;
-        const mesh = this.createMeshFromPrimitive(
+        const mesh = await this.createMeshFromPrimitive(
           meshCacheKey,
           gltf,
           primitive,
@@ -729,7 +733,7 @@ export class ResourceManager {
     // --- Recurse for children ---
     if (node.children) {
       for (const childNodeIndex of node.children) {
-        this.instantiateNode(
+        await this.instantiateNode(
           world,
           gltf,
           childNodeIndex,
@@ -778,11 +782,11 @@ export class ResourceManager {
     return undefined;
   }
 
-  private createMeshFromPrimitive(
+  private async createMeshFromPrimitive(
     key: string,
     gltf: ParsedGLTF,
     primitive: GLTFPrimitive,
-  ): Mesh {
+  ): Promise<Mesh> {
     if (this.meshes.has(key)) {
       return this.meshes.get(key)!;
     }
@@ -810,7 +814,7 @@ export class ResourceManager {
         : new Float32Array();
 
     const meshData: MeshData = { positions, normals, texCoords, indices };
-    const mesh = this.createMesh(key, meshData);
+    const mesh = await this.createMesh(key, meshData);
     this.meshes.set(key, mesh);
     return mesh;
   }
@@ -827,7 +831,7 @@ export class ResourceManager {
    *     texture coordinates.
    * @returns The created mesh.
    */
-  public createMesh(key: string, data: MeshData): Mesh {
+  public async createMesh(key: string, data: MeshData): Promise<Mesh> {
     if (this.meshes.has(key)) {
       return this.meshes.get(key)!;
     }
@@ -868,8 +872,10 @@ export class ResourceManager {
         }
       }
 
-      // Generate tangents using the wasm library
       try {
+        // dynamically import mikktspace to see if it causes problems
+        const { generateTangents } = await import("mikktspace");
+
         finalTangents = generateTangents(
           deindexedPositions,
           deindexedNormals,
@@ -1012,7 +1018,7 @@ export class ResourceManager {
       // STL format does not contain UVs, so createMesh will generate dummies.
     };
 
-    const mesh = this.createMesh(meshKey, meshData);
+    const mesh = await this.createMesh(meshKey, meshData);
     _setHandle(mesh, meshKey);
     return mesh;
   }
@@ -1036,7 +1042,7 @@ export class ResourceManager {
       texCoords: objGeometry.uvs,
     };
 
-    const mesh = this.createMesh(meshKey, meshData);
+    const mesh = await this.createMesh(meshKey, meshData);
     _setHandle(mesh, meshKey);
     return mesh;
   }

@@ -113,11 +113,15 @@ fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
     @location(2) inTexCoords: vec2<f32>,
-    // Instance Attributes for Model Matrix - Gap for future expansion
-    @location(11) model_mat_col_0: vec4<f32>,
-    @location(12) model_mat_col_1: vec4<f32>,
-    @location(13) model_mat_col_2: vec4<f32>,
-    @location(14) model_mat_col_3: vec4<f32>
+    @location(3) inTangent: vec4<f32>,
+    @location(4) model_mat_col_0: vec4<f32>,
+    @location(5) model_mat_col_1: vec4<f32>,
+    @location(6) model_mat_col_2: vec4<f32>,
+    @location(7) model_mat_col_3: vec4<f32>,
+    @location(8) is_uniformly_scaled: f32,
+    @location(9) normal_mat_col_0: vec3<f32>,
+    @location(10) normal_mat_col_1: vec3<f32>,
+    @location(11) normal_mat_col_2: vec3<f32>
 ) -> VertexOutput {
     var out: VertexOutput;
 

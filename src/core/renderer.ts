@@ -134,31 +134,31 @@ export class Renderer {
     arrayStride: Renderer.INSTANCE_BYTE_STRIDE,
     stepMode: "instance",
     attributes: [
-      // Model Matrix (mat4x4<f32>) - 16 floats
-      { shaderLocation: 3, offset: 0, format: "float32x4" },
-      { shaderLocation: 4, offset: 16, format: "float32x4" },
-      { shaderLocation: 5, offset: 32, format: "float32x4" },
-      { shaderLocation: 6, offset: 48, format: "float32x4" },
-      // is_uniformly_scaled (f32) - 1 float
+      // Model Matrix (mat4x4<f32>)
+      { shaderLocation: 4, offset: 0, format: "float32x4" },
+      { shaderLocation: 5, offset: 16, format: "float32x4" },
+      { shaderLocation: 6, offset: 32, format: "float32x4" },
+      { shaderLocation: 7, offset: 48, format: "float32x4" },
+      // is_uniformly_scaled (f32)
       {
-        shaderLocation: 7,
+        shaderLocation: 8,
         offset: Renderer.MAT4_FLOAT_COUNT * 4,
         format: "float32",
       },
-      // Normal Matrix (mat3x3<f32>) - 9 floats
+      // Normal Matrix (mat3x3<f32>)
       {
-        shaderLocation: 8,
+        shaderLocation: 9,
         offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT) * 4,
         format: "float32x3",
       },
       {
-        shaderLocation: 9,
+        shaderLocation: 10,
         offset:
           (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
         format: "float32x3",
       },
       {
-        shaderLocation: 10,
+        shaderLocation: 11,
         offset:
           (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
         format: "float32x3",
