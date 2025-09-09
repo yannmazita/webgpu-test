@@ -114,17 +114,9 @@ export class Renderer {
   private cssHeight = 0;
   private currentDPR = 1;
 
-  // Constants for instance buffer layout
-  private static readonly MAT4_FLOAT_COUNT = 16;
-  private static readonly MAT3_FLOAT_COUNT = 9;
-  private static readonly SCALAR_FLOAT_COUNT = 1;
-
   // The number of f32 values for a single instance.
-  // mat4(16) + flag(1) + mat3(9)
-  private static readonly INSTANCE_STRIDE_IN_FLOATS =
-    Renderer.MAT4_FLOAT_COUNT +
-    Renderer.SCALAR_FLOAT_COUNT +
-    Renderer.MAT3_FLOAT_COUNT;
+  // mat4(16) + flag(1) + 3 bytes of padding
+  private static readonly INSTANCE_STRIDE_IN_FLOATS = 20; // 16 for mat4 + 4 for vec4 alignment of the next element
 
   // The byte size for a single instance.
   private static readonly INSTANCE_BYTE_STRIDE =
@@ -139,29 +131,11 @@ export class Renderer {
       { shaderLocation: 5, offset: 16, format: "float32x4" },
       { shaderLocation: 6, offset: 32, format: "float32x4" },
       { shaderLocation: 7, offset: 48, format: "float32x4" },
-      // is_uniformly_scaled (f32)
+      // is_uniformly_scaled (u32) - u32 for clean packing
       {
         shaderLocation: 8,
-        offset: Renderer.MAT4_FLOAT_COUNT * 4,
-        format: "float32",
-      },
-      // Normal Matrix (mat3x3<f32>)
-      {
-        shaderLocation: 9,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT) * 4,
-        format: "float32x3",
-      },
-      {
-        shaderLocation: 10,
-        offset:
-          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
-        format: "float32x3",
-      },
-      {
-        shaderLocation: 11,
-        offset:
-          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
-        format: "float32x3",
+        offset: 64, // 16 * 4
+        format: "uint32",
       },
     ],
   };
@@ -757,46 +731,21 @@ export class Renderer {
       instanceBufferOffset,
       renderables.length * floatsPerInstance,
     );
+    const instanceUintView = new Uint32Array(
+      instanceDataView.buffer,
+      instanceDataView.byteOffset,
+    );
 
-    // Pack instance data: mat4 (16), flag (1), normal mat3 columns (9)
     for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled, normalMatrix } = renderables[i];
-      const off = i * floatsPerInstance;
+      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const floatOff = i * floatsPerInstance;
+      const uintOff = floatOff;
 
       // Model matrix
-      instanceDataView.set(modelMatrix, off);
+      instanceDataView.set(modelMatrix, floatOff);
 
       // is_uniformly_scaled flag
-      instanceDataView[off + 16] = isUniformlyScaled ? 1.0 : 0.0;
-
-      // Normal matrix columns (3x vec3)
-      if (isUniformlyScaled) {
-        // Derive from model matrix upper 3x3 (column-major)
-        instanceDataView[off + 17] = modelMatrix[0];
-        instanceDataView[off + 18] = modelMatrix[1];
-        instanceDataView[off + 19] = modelMatrix[2];
-
-        instanceDataView[off + 20] = modelMatrix[4];
-        instanceDataView[off + 21] = modelMatrix[5];
-        instanceDataView[off + 22] = modelMatrix[6];
-
-        instanceDataView[off + 23] = modelMatrix[8];
-        instanceDataView[off + 24] = modelMatrix[9];
-        instanceDataView[off + 25] = modelMatrix[10];
-      } else {
-        // Use precomputed normal matrix (column-major)
-        instanceDataView[off + 17] = normalMatrix[0];
-        instanceDataView[off + 18] = normalMatrix[1];
-        instanceDataView[off + 19] = normalMatrix[2];
-
-        instanceDataView[off + 20] = normalMatrix[3];
-        instanceDataView[off + 21] = normalMatrix[4];
-        instanceDataView[off + 22] = normalMatrix[5];
-
-        instanceDataView[off + 23] = normalMatrix[6];
-        instanceDataView[off + 24] = normalMatrix[7];
-        instanceDataView[off + 25] = normalMatrix[8];
-      }
+      instanceUintView[uintOff + 16] = isUniformlyScaled ? 1 : 0;
     }
 
     // Upload instance data for transparent objects
@@ -1004,48 +953,16 @@ export class Renderer {
 
         // Write instance data to the CPU-side buffer
         for (const instance of instances) {
-          const offset = totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+          const floatOffset =
+            totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+          const uintOffset = floatOffset; // Can alias the same buffer
 
           // modelMatrix (16 floats)
-          this.frameInstanceData.set(instance.modelMatrix, offset);
+          this.frameInstanceData.set(instance.modelMatrix, floatOffset);
 
-          // is_uniformly_scaled flag (1 float)
-          this.frameInstanceData[offset + 16] = instance.isUniformlyScaled
-            ? 1.0
-            : 0.0;
-
-          // normal matrix columns (3x vec3 = 9 floats) at offsets 17..25
-          if (instance.isUniformlyScaled) {
-            // Fast path: derive from upper 3x3 of model matrix
-            const m = instance.modelMatrix;
-            // col 0 -> indices 0,1,2
-            this.frameInstanceData[offset + 17] = m[0];
-            this.frameInstanceData[offset + 18] = m[1];
-            this.frameInstanceData[offset + 19] = m[2];
-            // col 1 -> indices 4,5,6
-            this.frameInstanceData[offset + 20] = m[4];
-            this.frameInstanceData[offset + 21] = m[5];
-            this.frameInstanceData[offset + 22] = m[6];
-            // col 2 -> indices 8,9,10
-            this.frameInstanceData[offset + 23] = m[8];
-            this.frameInstanceData[offset + 24] = m[9];
-            this.frameInstanceData[offset + 25] = m[10];
-          } else {
-            // Use precomputed normal matrix
-            const n = instance.normalMatrix;
-            // col 0
-            this.frameInstanceData[offset + 17] = n[0];
-            this.frameInstanceData[offset + 18] = n[1];
-            this.frameInstanceData[offset + 19] = n[2];
-            // col 1
-            this.frameInstanceData[offset + 20] = n[3];
-            this.frameInstanceData[offset + 21] = n[4];
-            this.frameInstanceData[offset + 22] = n[5];
-            // col 2
-            this.frameInstanceData[offset + 23] = n[6];
-            this.frameInstanceData[offset + 24] = n[7];
-            this.frameInstanceData[offset + 25] = n[8];
-          }
+          // is_uniformly_scaled flag (1 uint32)
+          const uint32View = new Uint32Array(this.frameInstanceData.buffer);
+          uint32View[uintOffset + 16] = instance.isUniformlyScaled ? 1 : 0;
 
           totalInstances++;
         }

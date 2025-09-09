@@ -118,22 +118,34 @@ fn vs_main(
     @location(5) model_mat_col_1: vec4<f32>,
     @location(6) model_mat_col_2: vec4<f32>,
     @location(7) model_mat_col_3: vec4<f32>,
-    @location(8) is_uniformly_scaled: f32,
-    @location(9) normal_mat_col_0: vec3<f32>,
-    @location(10) normal_mat_col_1: vec3<f32>,
-    @location(11) normal_mat_col_2: vec3<f32>
+    @location(8) is_uniformly_scaled: u32
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    // Reconstruct and apply the model matrix
     let modelMatrix = mat4x4<f32>(
         model_mat_col_0, model_mat_col_1, model_mat_col_2, model_mat_col_3
     );
-    let worldPos = modelMatrix * vec4<f32>(inPos, 1.0);
+    var modelMatrix3x3 = mat3x3<f32>(
+        modelMatrix[0].xyz,
+        modelMatrix[1].xyz,
+        modelMatrix[2].xyz
+    );
 
-    // Transform to clip space
-    out.clip_position = camera.viewProjectionMatrix * worldPos;
+    let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
+    out.worldPosition = worldPos4.xyz;
+    out.clip_position = camera.viewProjectionMatrix * worldPos4;
     out.texCoords = inTexCoords;
+
+    // calculate normal matrix and transform normals/tangents
+    if (is_uniformly_scaled == 0u) {
+        // For non-uniform scale, use inverse-transpose
+        modelMatrix3x3 = transpose(mat3_inverse(modelMatrix3x3));
+    }
+    
+    out.worldNormal = normalize(modelMatrix3x3 * inNormal);
+    out.worldTangent = normalize(modelMatrix3x3 * inTangent.xyz);
+    out.worldBitangent = normalize(cross(out.worldNormal, out.worldTangent) * inTangent.w);
+
     return out;
 }
 
