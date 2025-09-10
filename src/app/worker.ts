@@ -209,12 +209,13 @@ async function initWorker(
     new MeshRendererComponent(groundMesh, groundMaterial),
   );
 
-  // Load the Damaged Helmet
+  // Load the demo model
   try {
     console.log("[Worker] Awaiting GLTF scene load...");
     demoModelEntity = await resourceManager.loadSceneFromGLTF(
       world,
       "/assets/models/gltf/Box With Spaces/glTF/Box With Spaces.gltf",
+      //"/assets/models/gltf/DamagedHelmet.glb",
     );
     console.log("[Worker] GLTF scene loaded.");
 
@@ -226,7 +227,7 @@ async function initWorker(
     demoModelTransform.setPosition(0, 0, 0);
     demoModelTransform.setScale(1, 1, 1);
   } catch (error) {
-    console.error("Failed to load DamagedHelmet.glb:", error);
+    console.error("Failed to load model:", error);
     // Fallback: create a simple sphere
     demoModelEntity = world.createEntity();
     const fallbackMaterial = await resourceManager.createPBRMaterial({

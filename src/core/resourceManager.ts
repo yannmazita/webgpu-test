@@ -1021,7 +1021,7 @@ export class ResourceManager {
       await initMikkTSpace();
       if (mikktspace) {
         // MikkTSpace requires de-indexed geometry.
-        const vertexCount = data.positions.length / 3;
+        //const vertexCount = data.positions.length / 3;
         const indexCount = data.indices.length;
 
         const deindexedPositions = new Float32Array(indexCount * 3);
