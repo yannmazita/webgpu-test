@@ -125,8 +125,15 @@ export class PBRMaterial extends Material {
     const hasEmissiveMap = options.emissiveMap ? 1.0 : 0.0;
     const hasOcclusionMap = options.occlusionMap ? 1.0 : 0.0;
 
+    // UV set indices
+    const albedoUV = options.albedoUV ?? 0.0;
+    const metallicRoughnessUV = options.metallicRoughnessUV ?? 0.0;
+    const normalUV = options.normalUV ?? 0.0;
+    const emissiveUV = options.emissiveUV ?? 0.0;
+    const occlusionUV = options.occlusionUV ?? 0.0;
+
     // Pack data: 16-byte aligned for uniform buffer
-    const uniformData = new Float32Array(16); // 64 bytes total
+    const uniformData = new Float32Array(24); // 6 vec4s = 96 bytes
 
     // vec4: albedo
     uniformData.set(albedo, 0);
@@ -140,12 +147,23 @@ export class PBRMaterial extends Material {
     // vec4: emissive + padding
     uniformData.set([...emissive, 0.0], 8);
 
-    // vec4: texture flags
+    // vec4: texture flags (hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive)
     uniformData[12] = hasAlbedoMap;
     uniformData[13] = hasMetallicRoughnessMap;
     uniformData[14] = hasNormalMap;
     uniformData[15] = hasEmissiveMap;
-    // todo: hasOcclusionMap would go in next vec4
+
+    // vec4: texture UV indices (albedo, mr, normal, emissive)
+    uniformData[16] = albedoUV;
+    uniformData[17] = metallicRoughnessUV;
+    uniformData[18] = normalUV;
+    uniformData[19] = emissiveUV;
+
+    // vec4: texture flags 2 (hasOcclusion, occlusionUV, pad, pad)
+    uniformData[20] = hasOcclusionMap;
+    uniformData[21] = occlusionUV;
+    uniformData[22] = 0.0; // padding
+    uniformData[23] = 0.0; // padding
 
     return createGPUBuffer(
       device,

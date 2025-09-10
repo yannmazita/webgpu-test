@@ -72,6 +72,8 @@ struct PBRMaterialUniforms {
     metallicRoughnessNormalOcclusion: vec4<f32>, // metallic, roughness, normalIntensity, occlusionStrength
     emissive: vec4<f32>,
     textureFlags: vec4<f32>, // hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive
+    textureUVs: vec4<f32>, // albedoUV, mrUV, normalUV, emissiveUV
+    textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
 }
 
 // @group(0) - Per-frame data
@@ -105,15 +107,17 @@ struct VertexOutput {
     @location(1) worldNormal: vec3<f32>,
     @location(2) worldTangent: vec3<f32>,
     @location(3) worldBitangent: vec3<f32>,
-    @location(4) texCoords: vec2<f32>,
+    @location(4) texCoords0: vec2<f32>,
+    @location(5) texCoords1: vec2<f32>,
 }
 
 @vertex
 fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
-    @location(2) inTexCoords: vec2<f32>,
+    @location(2) inTexCoords0: vec2<f32>,
     @location(3) inTangent: vec4<f32>,
+    @location(9) inTexCoords1: vec2<f32>,
     @location(4) model_mat_col_0: vec4<f32>,
     @location(5) model_mat_col_1: vec4<f32>,
     @location(6) model_mat_col_2: vec4<f32>,
@@ -134,7 +138,8 @@ fn vs_main(
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
     out.worldPosition = worldPos4.xyz;
     out.clip_position = camera.viewProjectionMatrix * worldPos4;
-    out.texCoords = inTexCoords;
+    out.texCoords0 = inTexCoords0;
+    out.texCoords1 = inTexCoords1;
 
     // calculate normal matrix and transform normals/tangents
     if (is_uniformly_scaled == 0u) {
@@ -192,7 +197,12 @@ struct FragmentInput {
     @location(1) worldNormal: vec3<f32>,
     @location(2) worldTangent: vec3<f32>,
     @location(3) worldBitangent: vec3<f32>,
-    @location(4) texCoords: vec2<f32>,
+    @location(4) texCoords0: vec2<f32>,
+    @location(5) texCoords1: vec2<f32>,
+}
+
+fn pickUV(uvIndex: f32, uv0: vec2<f32>, uv1: vec2<f32>) -> vec2<f32> {
+    return mix(uv0, uv1, step(0.5, uvIndex));
 }
 
 // Unpack normal from normal map
@@ -201,7 +211,8 @@ fn getNormalFromMap(fi: FragmentInput, normalIntensity: f32) -> vec3<f32> {
         return normalize(fi.worldNormal);
     }
 
-    let tangentNormal = textureSample(normalTexture, materialSampler, fi.texCoords).xyz * 2.0 - 1.0;
+    let normalUV = pickUV(material.textureUVs.z, fi.texCoords0, fi.texCoords1);
+    let tangentNormal = textureSample(normalTexture, materialSampler, normalUV).xyz * 2.0 - 1.0;
 
     var adjustedNormal = tangentNormal;
     adjustedNormal.x *= normalIntensity;
@@ -267,20 +278,26 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     // Textures
     if (material.textureFlags.x > 0.5) {
-        let albedoSample = textureSample(albedoTexture, materialSampler, fi.texCoords);
+        let albedoUV = pickUV(material.textureUVs.x, fi.texCoords0, fi.texCoords1);
+        let albedoSample = textureSample(albedoTexture, materialSampler, albedoUV);
         albedo = albedo * albedoSample.rgb;
     }
     if (material.textureFlags.y > 0.5) {
-        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, fi.texCoords);
+        let mrUV = pickUV(material.textureUVs.y, fi.texCoords0, fi.texCoords1);
+        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, mrUV);
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }
     if (material.textureFlags.w > 0.5) {
-        let emissiveSample = textureSample(emissiveTexture, materialSampler, fi.texCoords);
+        let emissiveUV = pickUV(material.textureUVs.w, fi.texCoords0, fi.texCoords1);
+        let emissiveSample = textureSample(emissiveTexture, materialSampler, emissiveUV);
         emissive = emissive * emissiveSample.rgb;
     }
-    let occlusionSample = textureSample(occlusionTexture, materialSampler, fi.texCoords);
-    ao = mix(1.0, occlusionSample.r, occlusionStrength);
+    if (material.textureFlags2.x > 0.5) {
+        let occlusionUV = pickUV(material.textureFlags2.y, fi.texCoords0, fi.texCoords1);
+        let occlusionSample = textureSample(occlusionTexture, materialSampler, occlusionUV);
+        ao = mix(1.0, occlusionSample.r, occlusionStrength);
+    }
 
     // Normals and view vector
     let N = getNormalFromMap(fi, normalIntensity);
@@ -398,7 +415,9 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Conditionally apply Tone mapping + gamma for SDR output
     if (scene.hdr_enabled < 0.5) {
         color = ACESFilmicToneMapping(color);
-        color = pow(color, vec3<f32>(1.0 / 2.2));
+        //color = pow(color, vec3<f32>(1.0 / 2.2));
+        // no need to apply gamma here as it taken care of automatically
+        // by WebGPU (navigator.gpu.getPrefferedCanvasFormat() in js)
     }
 
     return vec4<f32>(color, material.albedo.a);

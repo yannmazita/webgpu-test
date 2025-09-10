@@ -86,10 +86,6 @@ export interface PipelineBatch {
   meshMap: Map<Mesh, InstanceData[]>;
 }
 
-/**
- * Options for creating a PBR material following glTF 2.0 standard.
- * All properties are optional with sensible defaults.
- */
 export interface PBRMaterialOptions {
   /**
    * Base color (albedo) in linear space [R, G, B, A].
@@ -163,6 +159,18 @@ export interface PBRMaterialOptions {
    * Ambient occlusion texture map URL.
    */
   occlusionMap?: string;
+
+  // --- NEW: UV Set Selectors ---
+  /** UV set index for the albedo map. Defaults to 0. */
+  albedoUV?: number;
+  /** UV set index for the metallic-roughness map. Defaults to 0. */
+  metallicRoughnessUV?: number;
+  /** UV set index for the normal map. Defaults to 0. */
+  normalUV?: number;
+  /** UV set index for the emissive map. Defaults to 0. */
+  emissiveUV?: number;
+  /** UV set index for the occlusion map. Defaults to 0. */
+  occlusionUV?: number;
 }
 
 /**

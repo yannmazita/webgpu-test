@@ -214,8 +214,9 @@ async function initWorker(
     console.log("[Worker] Awaiting GLTF scene load...");
     demoModelEntity = await resourceManager.loadSceneFromGLTF(
       world,
-      "/assets/models/gltf/Box With Spaces/glTF/Box With Spaces.gltf",
+      //"/assets/models/gltf/Box With Spaces/glTF/Box With Spaces.gltf",
       //"/assets/models/gltf/DamagedHelmet.glb",
+      "/assets/models/gltf/AntiqueCamera.glb",
     );
     console.log("[Worker] GLTF scene loaded.");
 

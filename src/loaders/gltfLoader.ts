@@ -51,14 +51,14 @@ export interface GLTFMaterial {
   name?: string;
   pbrMetallicRoughness?: {
     baseColorFactor?: [number, number, number, number];
-    baseColorTexture?: { index: number };
+    baseColorTexture?: { index: number; texCoord?: number };
     metallicFactor?: number;
     roughnessFactor?: number;
-    metallicRoughnessTexture?: { index: number };
+    metallicRoughnessTexture?: { index: number; texCoord?: number };
   };
-  normalTexture?: { index: number; scale?: number };
-  occlusionTexture?: { index: number; strength?: number };
-  emissiveTexture?: { index: number };
+  normalTexture?: { index: number; scale?: number; texCoord?: number };
+  occlusionTexture?: { index: number; strength?: number; texCoord?: number };
+  emissiveTexture?: { index: number; texCoord?: number };
   emissiveFactor?: [number, number, number];
   alphaMode?: "OPAQUE" | "MASK" | "BLEND";
   doubleSided?: boolean;
