@@ -75,7 +75,7 @@ let world: World | null = null;
 let sceneRenderData: SceneRenderData | null = null;
 
 let cameraEntity = -1;
-let helmetEntity = -1;
+let demoModelEntity = -1;
 let keyLightEntity = -1;
 let fillLightEntity = -1;
 let rimLightEntity = -1;
@@ -167,7 +167,7 @@ async function initWorker(
   world.addComponent(cameraEntity, new CameraComponent(45, 16 / 9, 0.1, 100.0));
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
-  // Point camera at origin (where helmet will be)
+  // Point camera at origin (where demoModel will be)
   const lookDirection = vec3.normalize(
     vec3.fromValues(-orbitRadius, -orbitHeight, 0),
   );
@@ -185,14 +185,14 @@ async function initWorker(
   const rotation = quat.fromMat(rotationMatrix);
   cameraTransform.setRotation(rotation);
 
-  // Scene Lighting and Fog - Lighter fog to better see the helmet
+  // Scene Lighting and Fog - Lighter fog to better see the demoModel
   world.addResource(new SceneLightingComponent());
   const sceneLighting = world.getResource(SceneLightingComponent)!;
   sceneLighting.ambientColor.set([0.4, 0.42, 0.5, 1.0]);
   sceneLighting.fogColor.set([0.8, 0.85, 0.9, 1.0]); // Light blue-gray
   sceneLighting.fogParams0.set([0.01, 0.0, 0.0, 1.0]); // Very light fog
 
-  // Ground Plane - Darker to contrast with helmet
+  // Ground Plane - Darker to contrast with demoModel
   const groundPlaneEntity = world.createEntity();
   const groundMaterial = await resourceManager.createUnlitGroundMaterial({
     color: [0.1, 0.1, 0.12, 1.0],
@@ -212,23 +212,23 @@ async function initWorker(
   // Load the Damaged Helmet
   try {
     console.log("[Worker] Awaiting GLTF scene load...");
-    helmetEntity = await resourceManager.loadSceneFromGLTF(
+    demoModelEntity = await resourceManager.loadSceneFromGLTF(
       world,
-      "/assets/models/gltf/DamagedHelmet.glb",
+      "/assets/models/gltf/Box With Spaces/glTF/Box With Spaces.gltf",
     );
     console.log("[Worker] GLTF scene loaded.");
 
-    // Position and scale the helmet appropriately
-    const helmetTransform = world.getComponent(
-      helmetEntity,
+    // Position and scale the demoModel appropriately
+    const demoModelTransform = world.getComponent(
+      demoModelEntity,
       TransformComponent,
     )!;
-    helmetTransform.setPosition(0, 0, 0);
-    helmetTransform.setScale(1, 1, 1);
+    demoModelTransform.setPosition(0, 0, 0);
+    demoModelTransform.setScale(1, 1, 1);
   } catch (error) {
     console.error("Failed to load DamagedHelmet.glb:", error);
     // Fallback: create a simple sphere
-    helmetEntity = world.createEntity();
+    demoModelEntity = world.createEntity();
     const fallbackMaterial = await resourceManager.createPBRMaterial({
       albedo: [0.8, 0.6, 0.4, 1],
       metallic: 0.1,
@@ -238,16 +238,16 @@ async function initWorker(
       "fallback_sphere",
       createIcosphereMeshData(1.0, 3),
     );
-    const helmetTransform = new TransformComponent();
-    helmetTransform.setPosition(0, 0, 0);
-    world.addComponent(helmetEntity, helmetTransform);
+    const demoModelTransform = new TransformComponent();
+    demoModelTransform.setPosition(0, 0, 0);
+    world.addComponent(demoModelEntity, demoModelTransform);
     world.addComponent(
-      helmetEntity,
+      demoModelEntity,
       new MeshRendererComponent(sphereMesh, fallbackMaterial),
     );
   }
 
-  // Lighting setup for helmet - Three-point lighting
+  // Lighting setup for model - Three-point lighting
   const lightMeshWhite = await resourceManager.createMesh(
     "light_sphere",
     createIcosphereMeshData(0.05, 2),
@@ -342,7 +342,7 @@ function frame(now: number) {
     // Free camera mode
     cameraControllerSystem.update(world, dt);
   } else {
-    // Orbital camera animation around the helmet
+    // Orbital camera animation around the model
     if (animationStartTime === 0) animationStartTime = now;
 
     const ORBIT_DURATION_MS = 20000; // 20 seconds for full orbit
@@ -355,7 +355,7 @@ function frame(now: number) {
 
     cameraTransform.setPosition(x, orbitHeight, z);
 
-    // Always look at the helmet (at origin)
+    // Always look at the demoModel (at origin)
     const lookDirection = vec3.normalize(vec3.fromValues(-x, -orbitHeight, -z));
     const up = vec3.fromValues(0, 1, 0);
     const right = vec3.normalize(vec3.cross(up, lookDirection));
@@ -372,17 +372,17 @@ function frame(now: number) {
     cameraTransform.setRotation(rotation);
   }
 
-  // Rotate the helmet slowly
-  if (helmetEntity !== -1) {
-    const helmetTransform = world.getComponent(
-      helmetEntity,
+  // Rotate the model slowly
+  if (demoModelEntity !== -1) {
+    const demoModelTransform = world.getComponent(
+      demoModelEntity,
       TransformComponent,
     );
-    if (helmetTransform) {
+    if (demoModelTransform) {
       const HELMET_ROTATION_SPEED = 0.3; // radians per second
       const rotationY = (now / 1000) * HELMET_ROTATION_SPEED;
       const rotation = quat.fromEuler(0, rotationY, 0, "xyz");
-      helmetTransform.setRotation(rotation);
+      demoModelTransform.setRotation(rotation);
     }
   }
 

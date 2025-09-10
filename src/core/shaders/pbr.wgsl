@@ -284,6 +284,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     // Normals and view vector
     let N = getNormalFromMap(fi, normalIntensity);
+    //let N = normalize(fi.worldNormal); // debug
     let V = normalize(scene.cameraPos.xyz - fi.worldPosition);
     let R = reflect(-V, N);
 

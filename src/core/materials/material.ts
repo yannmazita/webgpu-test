@@ -80,6 +80,33 @@ export class Material {
     canvasFormat: GPUTextureFormat,
     depthFormat: GPUTextureFormat,
   ): GPURenderPipeline {
+    // Validate that mesh layouts have expected shader locations
+    const expectedLocations = new Set<number>();
+    for (let bufferIdx = 0; bufferIdx < meshLayouts.length; bufferIdx++) {
+      const layout = meshLayouts[bufferIdx];
+      for (const attr of layout.attributes) {
+        if (expectedLocations.has(attr.shaderLocation)) {
+          throw new Error(
+            `Duplicate shader location ${attr.shaderLocation} in buffer ${bufferIdx}`,
+          );
+        }
+        expectedLocations.add(attr.shaderLocation);
+      }
+    }
+
+    // Log the vertex state configuration for debugging
+    console.log(`[Material ${this.id}] Creating pipeline with vertex state:`);
+    for (let i = 0; i < meshLayouts.length; i++) {
+      const layout = meshLayouts[i];
+      const locations = layout.attributes
+        .map((a) => `@location(${a.shaderLocation})`)
+        .join(", ");
+      console.log(
+        `  Buffer ${i}: stride=${layout.arrayStride}, locations=[${locations}]`,
+      );
+    }
+    console.log(`  Buffer ${meshLayouts.length}: Instance data`);
+
     const pipelineLayout = this.device.createPipelineLayout({
       bindGroupLayouts: [
         frameBindGroupLayout, // @group(0)
@@ -87,12 +114,23 @@ export class Material {
       ],
     });
 
+    // Create vertex buffers array with explicit ordering
+    const vertexBuffers: GPUVertexBufferLayout[] = [];
+
+    // First, add all mesh vertex buffers in order
+    for (let i = 0; i < meshLayouts.length; i++) {
+      vertexBuffers[i] = meshLayouts[i];
+    }
+
+    // Then add instance data buffer at the end
+    vertexBuffers[meshLayouts.length] = instanceDataLayout;
+
     return this.device.createRenderPipeline({
       layout: pipelineLayout,
       vertex: {
         module: this.shader.module,
         entryPoint: this.shader.vertexEntryPoint,
-        buffers: [...meshLayouts, instanceDataLayout],
+        buffers: vertexBuffers, // Use explicit array instead of spread
       },
       fragment: {
         module: this.shader.module,

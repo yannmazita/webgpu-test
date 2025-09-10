@@ -154,6 +154,14 @@ export class Renderer {
    */
   public async init(): Promise<void> {
     await this.setupDevice();
+
+    // Add error handling to catch WebGPU validation errors
+    this.device.addEventListener("uncapturederror", (event) => {
+      console.error("[WebGPU Error]", event.error);
+    });
+    // Push error scope to catch pipeline creation errors
+    this.device.pushErrorScope("validation");
+
     this.setupContext();
 
     // Create a default sampler
@@ -309,6 +317,12 @@ export class Renderer {
     this.frameInstanceData = new Float32Array(
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
     );
+
+    // Check for errors after init
+    const error = await this.device.popErrorScope();
+    if (error) {
+      console.error("[WebGPU Validation Error during init]", error);
+    }
   }
 
   private _setupResizeObserver(): void {
@@ -659,8 +673,14 @@ export class Renderer {
     let lastMesh: Mesh | null = null;
 
     for (const batch of batches) {
-      const mesh = batch.mesh; // ensure mesh is available for all bindings
+      const mesh = batch.mesh;
       passEncoder.setPipeline(batch.pipeline);
+
+      /*
+      if (import.meta.env.DEV && batch === batches[0]) {
+        this.validateMeshPipelineCompatibility(batch.mesh, batch.material);
+      }
+      */
 
       if (batch.material !== lastMaterial) {
         passEncoder.setBindGroup(1, batch.material.bindGroup);
@@ -668,26 +688,46 @@ export class Renderer {
       }
 
       if (mesh !== lastMesh) {
-        // Bind mesh vertex buffers only when mesh changes
+        // Validate expected buffer count
+        if (mesh.buffers.length !== mesh.layouts.length) {
+          console.error(
+            `[Renderer] Mesh buffer/layout mismatch: ${mesh.buffers.length} buffers, ${mesh.layouts.length} layouts`,
+          );
+        }
+
+        // Bind vertex buffers in exact order
         for (let i = 0; i < mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, mesh.buffers[i]);
         }
+
         if (mesh.indexBuffer) {
           passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
         }
         lastMesh = mesh;
       }
 
+      // Bind instance buffer to the slot after mesh buffers
+      const instanceSlot = mesh.buffers.length; // Should be 4
       const instanceByteOffset =
         batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
-      // The instance buffer slot is dynamically placed after vertex attributes
       passEncoder.setVertexBuffer(
-        mesh.layouts.length,
+        instanceSlot,
         this.instanceBuffer,
         instanceByteOffset,
       );
 
-      // Draw with firstInstance = 0 to avoid double-advancing
+      /*
+      if (batch === batches[0]) {
+        // Only log for first batch
+        console.log(`[Renderer] Drawing first batch:`);
+        console.log(`  Mesh vertex count: ${mesh.vertexCount}`);
+        console.log(`  Mesh index count: ${mesh.indexCount}`);
+        console.log(`  Instance count: ${batch.instanceCount}`);
+        console.log(`  Instance buffer offset: ${instanceByteOffset}`);
+      }
+      */
+
+      // Draw
       if (mesh.indexBuffer) {
         passEncoder.drawIndexed(mesh.indexCount!, batch.instanceCount, 0, 0, 0);
       } else {
@@ -695,7 +735,6 @@ export class Renderer {
       }
     }
 
-    // Return the number of batches, which equals the number of draw calls.
     return batches.length;
   }
 
@@ -790,12 +829,10 @@ export class Renderer {
       // Bind the instance buffer with a per-group byte offset and size
       const groupByteOffset =
         instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
-      const groupByteSize = count * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
         mesh.layouts.length,
         this.instanceBuffer,
         groupByteOffset,
-        groupByteSize,
       );
 
       if (mesh.indexBuffer) {
@@ -832,6 +869,28 @@ export class Renderer {
     );
     callback(uiPassEncoder);
     uiPassEncoder.end();
+  }
+
+  private validateMeshPipelineCompatibility(
+    mesh: Mesh,
+    material: Material,
+  ): void {
+    console.group(`[Renderer] Validating mesh-pipeline compatibility`);
+    console.log(`Mesh has ${mesh.buffers.length} buffers:`);
+
+    for (let i = 0; i < mesh.layouts.length; i++) {
+      const layout = mesh.layouts[i];
+      const attrs = layout.attributes
+        .map((a) => `@location(${a.shaderLocation}) ${a.format}`)
+        .join(", ");
+      console.log(
+        `  Slot ${i}: stride=${layout.arrayStride}, attrs=[${attrs}]`,
+      );
+    }
+
+    console.log(`Material ${material.id} expects these shader inputs`);
+    console.log(`Instance data will bind to slot ${mesh.layouts.length}`);
+    console.groupEnd();
   }
 
   /**

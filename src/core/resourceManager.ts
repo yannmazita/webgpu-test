@@ -40,7 +40,53 @@ import { Entity } from "./ecs/entity";
 import { World } from "./ecs/world";
 import { setParent } from "./ecs/utils/hierarchy";
 import { MeshRendererComponent } from "./ecs/components/meshRendererComponent";
-import { generateTangents } from "mikktspace";
+
+// MikkTSpace WASM loader and wrapper
+let mikktspace: {
+  generateTangents: (
+    pos: Float32Array,
+    norm: Float32Array,
+    uv: Float32Array,
+  ) => Float32Array;
+} | null = null;
+let mikktspacePromise: Promise<void> | null = null;
+
+async function initMikkTSpace() {
+  if (mikktspace || mikktspacePromise) return mikktspacePromise;
+
+  mikktspacePromise = new Promise(async (resolve, reject) => {
+    try {
+      // Try different import approaches
+      const module = await import("mikktspace");
+
+      // Handle different module formats
+      if (typeof module.default === "function") {
+        await module.default();
+        mikktspace = module;
+      } else if (typeof module.init === "function") {
+        await module.init();
+        mikktspace = module;
+      } else if (module.generateTangents) {
+        // Module might be pre-initialized
+        mikktspace = module;
+      } else {
+        console.warn(
+          "MikkTSpace module format not recognized:",
+          Object.keys(module),
+        );
+        mikktspace = module;
+      }
+
+      console.log("MikkTSpace initialized successfully.");
+      resolve();
+    } catch (e) {
+      console.error("Failed to initialize MikkTSpace:", e);
+      // just continue without tangent generation
+      resolve();
+    }
+  });
+  return mikktspacePromise;
+}
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -791,6 +837,18 @@ export class ResourceManager {
       return this.meshes.get(key)!;
     }
 
+    /*
+    // ---DEBUGGING---
+    // Instead of loading GLTF data, create a simple cube.
+    // This tests if the rest of the rendering pipeline is working.
+    console.log(`[DEBUG] Substituting mesh for key "${key}" with a cube.`);
+    const meshData = createCubeMeshData(1.0);
+    const mesh = await this.createMesh(key, meshData);
+    this.meshes.set(key, mesh);
+    return mesh;
+    // ---DEBUGGING---
+    */
+
     const posAccessor = primitive.attributes.POSITION;
     const normAccessor = primitive.attributes.NORMAL;
     const uvAccessor = primitive.attributes.TEXCOORD_0;
@@ -821,11 +879,121 @@ export class ResourceManager {
 
   // ---------- Low-level creation and loaders ----------
 
+  private validateMeshData(
+    key: string,
+    data: {
+      positions: Float32Array;
+      normals?: Float32Array;
+      texCoords?: Float32Array;
+      tangents?: Float32Array;
+      indices?: Uint16Array | Uint32Array;
+    },
+    vertexCount: number,
+  ): void {
+    console.group(`[ResourceManager] Validating mesh data for "${key}"`);
+
+    // Check positions
+    console.log(
+      `Positions: ${data.positions.length} floats (${data.positions.length / 3} vertices)`,
+    );
+    if (data.positions.length !== vertexCount * 3) {
+      console.error(
+        `Position count mismatch! Expected ${vertexCount * 3}, got ${data.positions.length}`,
+      );
+    }
+
+    // Sample first vertex
+    if (data.positions.length >= 3) {
+      console.log(
+        `  First position: [${data.positions[0].toFixed(2)}, ${data.positions[1].toFixed(2)}, ${data.positions[2].toFixed(2)}]`,
+      );
+    }
+
+    // Check for NaN/Infinity
+    for (let i = 0; i < Math.min(data.positions.length, 12); i++) {
+      if (!isFinite(data.positions[i])) {
+        console.error(`  Invalid position at index ${i}: ${data.positions[i]}`);
+      }
+    }
+
+    // Check normals
+    if (data.normals) {
+      console.log(`Normals: ${data.normals.length} floats`);
+      if (data.normals.length !== vertexCount * 3) {
+        console.error(
+          `Normal count mismatch! Expected ${vertexCount * 3}, got ${data.normals.length}`,
+        );
+      }
+      if (data.normals.length >= 3) {
+        console.log(
+          `  First normal: [${data.normals[0].toFixed(2)}, ${data.normals[1].toFixed(2)}, ${data.normals[2].toFixed(2)}]`,
+        );
+      }
+    }
+
+    // Check UVs
+    if (data.texCoords) {
+      console.log(`TexCoords: ${data.texCoords.length} floats`);
+      if (data.texCoords.length !== vertexCount * 2) {
+        console.error(
+          `TexCoord count mismatch! Expected ${vertexCount * 2}, got ${data.texCoords.length}`,
+        );
+      }
+      if (data.texCoords.length >= 2) {
+        console.log(
+          `  First UV: [${data.texCoords[0].toFixed(2)}, ${data.texCoords[1].toFixed(2)}]`,
+        );
+      }
+    }
+
+    // Check tangents
+    if (data.tangents) {
+      console.log(`Tangents: ${data.tangents.length} floats`);
+      if (data.tangents.length !== vertexCount * 4) {
+        console.error(
+          `Tangent count mismatch! Expected ${vertexCount * 4}, got ${data.tangents.length}`,
+        );
+      }
+      if (data.tangents.length >= 4) {
+        console.log(
+          `  First tangent: [${data.tangents[0].toFixed(2)}, ${data.tangents[1].toFixed(2)}, ${data.tangents[2].toFixed(2)}, ${data.tangents[3].toFixed(2)}]`,
+        );
+      }
+    }
+
+    // Check indices
+    if (data.indices) {
+      console.log(`Indices: ${data.indices.length}`);
+      const maxIndex = Math.max(
+        ...Array.from(
+          data.indices.slice(0, Math.min(100, data.indices.length)),
+        ),
+      );
+      const minIndex = Math.min(
+        ...Array.from(
+          data.indices.slice(0, Math.min(100, data.indices.length)),
+        ),
+      );
+      console.log(
+        `  Index range: ${minIndex} to ${maxIndex} (vertex count: ${vertexCount})`,
+      );
+      if (maxIndex >= vertexCount) {
+        console.error(
+          `Index out of bounds! Max index ${maxIndex} >= vertex count ${vertexCount}`,
+        );
+      }
+    }
+
+    console.groupEnd();
+  }
+
   /**
    * Creates a new mesh from the given mesh data.
    *
    * This is a low-level method that takes raw mesh data and creates the
-   * necessary GPU buffers.
+   * necessary GPU buffers. It now creates a single, interleaved vertex buffer
+   * for positions, normals, UVs, and tangents (AoS).
+   *
    * @param key A unique key to identify the mesh in the cache.
    * @param data The mesh data, including positions, normals, indices, and
    *     texture coordinates.
@@ -836,155 +1004,155 @@ export class ResourceManager {
       return this.meshes.get(key)!;
     }
 
+    // --- Data Preparation and Tangent Generation ---
+
     const hasTexCoords = data.texCoords && data.texCoords.length > 0;
-    // We only generate tangents if UVs are present, as they are required for the calculation.
-    const needsTangents = hasTexCoords;
+    const hasNormals = data.normals && data.normals.length > 0;
+    let canGenerateTangents =
+      hasTexCoords &&
+      hasNormals &&
+      data.positions.length > 0 &&
+      data.normals.length === data.positions.length &&
+      data.texCoords.length / 2 === data.positions.length / 3;
 
-    let finalPositions = data.positions;
-    let finalNormals = data.normals;
-    let finalTexCoords = data.texCoords;
-    let finalTangents: Float32Array | undefined;
-    let finalIndices: Uint16Array | Uint32Array | undefined = data.indices;
-    let finalVertexCount = data.positions.length / 3;
+    let tangents: Float32Array | undefined = data.tangents;
 
-    if (needsTangents) {
-      // MikkTSpace requires un-indexed geometry. We de-index the data here.
-      const indexCount = data.indices.length;
-      const deindexedPositions = new Float32Array(indexCount * 3);
-      const deindexedNormals = new Float32Array(indexCount * 3);
-      const deindexedTexCoords = new Float32Array(indexCount * 2);
+    if (canGenerateTangents && !tangents) {
+      await initMikkTSpace();
+      if (mikktspace) {
+        // MikkTSpace requires de-indexed geometry.
+        const vertexCount = data.positions.length / 3;
+        const indexCount = data.indices.length;
 
-      for (let i = 0; i < indexCount; i++) {
-        const index = data.indices[i];
-        deindexedPositions.set(
-          data.positions.subarray(index * 3, index * 3 + 3),
-          i * 3,
-        );
-        deindexedNormals.set(
-          data.normals.subarray(index * 3, index * 3 + 3),
-          i * 3,
-        );
-        if (data.texCoords) {
+        const deindexedPositions = new Float32Array(indexCount * 3);
+        const deindexedNormals = new Float32Array(indexCount * 3);
+        const deindexedTexCoords = new Float32Array(indexCount * 2);
+
+        for (let i = 0; i < indexCount; i++) {
+          const index = data.indices[i];
+          deindexedPositions.set(
+            data.positions.subarray(index * 3, index * 3 + 3),
+            i * 3,
+          );
+          deindexedNormals.set(
+            data.normals.subarray(index * 3, index * 3 + 3),
+            i * 3,
+          );
           deindexedTexCoords.set(
-            data.texCoords.subarray(index * 2, index * 2 + 2),
+            data.texCoords!.subarray(index * 2, index * 2 + 2),
             i * 2,
           );
         }
+
+        try {
+          console.log(
+            `[ResourceManager] Generating tangents for mesh "${key}"...`,
+          );
+          tangents = mikktspace.generateTangents(
+            deindexedPositions,
+            deindexedNormals,
+            deindexedTexCoords,
+          );
+          // After generating tangents on de-indexed data, we must use that data.
+          // We cannot re-index as the tangents correspond to the de-indexed vertices.
+          data.positions = deindexedPositions;
+          data.normals = deindexedNormals;
+          data.texCoords = deindexedTexCoords;
+          data.indices = new Uint32Array(indexCount).map((_, i) => i); // Create linear indices
+        } catch (e) {
+          console.error(`MikkTSpace failed for mesh "${key}".`, e);
+          canGenerateTangents = false;
+          tangents = undefined;
+        }
+      } else {
+        canGenerateTangents = false; // MikkTSpace not available
       }
+    }
 
-      try {
-        // dynamically import mikktspace to see if it causes problems
-        const { generateTangents } = await import("mikktspace");
+    // --- Interleaving Data ---
 
-        finalTangents = generateTangents(
-          deindexedPositions,
-          deindexedNormals,
-          deindexedTexCoords,
-        );
+    const vertexCount = data.positions.length / 3;
+    const strideInFloats = 12; // Pos(3) + Norm(3) + UV(2) + Tan(4)
+    const interleavedArray = new Float32Array(vertexCount * strideInFloats);
 
-        // The mesh data is now the de-indexed version
-        finalPositions = deindexedPositions;
-        finalNormals = deindexedNormals;
-        finalTexCoords = deindexedTexCoords;
-        finalVertexCount = indexCount;
-        finalIndices = undefined; // Mark as un-indexed
-      } catch (e) {
-        console.error(`MikkTSpace failed for mesh "${key}". Falling back.`, e);
-        // If it fails, we keep the original indexed data and won't have tangents.
-        finalTangents = undefined;
+    const positions = data.positions;
+    const normals =
+      data.normals && data.normals.length > 0
+        ? data.normals
+        : new Float32Array(vertexCount * 3)
+            .fill(0)
+            .map((_, i) => (i % 3 === 1 ? 1 : 0));
+    const texCoords =
+      data.texCoords && data.texCoords.length > 0
+        ? data.texCoords
+        : new Float32Array(vertexCount * 2);
+
+    if (!tangents) {
+      tangents = new Float32Array(vertexCount * 4);
+      for (let i = 0; i < vertexCount; i++) {
+        tangents[i * 4 + 0] = 1.0;
+        tangents[i * 4 + 3] = 1.0;
       }
     }
 
-    const buffers: GPUBuffer[] = [];
-    const layouts: GPUVertexBufferLayout[] = [];
-
-    // Compute AABB from original positions for culling
-    const aabb = computeAABB(data.positions);
-
-    // Position Buffer (shaderLocation: 0)
-    buffers.push(
-      createGPUBuffer(
-        this.renderer.device,
-        finalPositions,
-        GPUBufferUsage.VERTEX,
-        `${key}-positions`,
-      ),
-    );
-    layouts.push({
-      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT,
-      attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
-    });
-
-    // Normal Buffer (shaderLocation: 1)
-    let normals = finalNormals;
-    if (!normals || normals.length === 0) {
-      console.warn(`Mesh "${key}" is missing normals. Generating dummy data.`);
-      normals = new Float32Array(finalVertexCount * 3);
-    }
-    buffers.push(
-      createGPUBuffer(
-        this.renderer.device,
-        normals,
-        GPUBufferUsage.VERTEX,
-        `${key}-normals`,
-      ),
-    );
-    layouts.push({
-      arrayStride: 3 * Float32Array.BYTES_PER_ELEMENT,
-      attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
-    });
-
-    // Texture Coordinate (UVs) Buffer (shaderLocation: 2)
-    let texCoords = finalTexCoords;
-    if (!texCoords || texCoords.length === 0) {
-      texCoords = new Float32Array(finalVertexCount * 2);
-    }
-    buffers.push(
-      createGPUBuffer(
-        this.renderer.device,
-        texCoords,
-        GPUBufferUsage.VERTEX,
-        `${key}-uvs`,
-      ),
-    );
-    layouts.push({
-      arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
-      attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
-    });
-
-    // Tangent Buffer (shaderLocation: 3) - Only if generated
-    if (finalTangents) {
-      buffers.push(
-        createGPUBuffer(
-          this.renderer.device,
-          finalTangents,
-          GPUBufferUsage.VERTEX,
-          `${key}-tangents`,
-        ),
-      );
-      layouts.push({
-        arrayStride: 4 * Float32Array.BYTES_PER_ELEMENT, // vec4<f32>
-        attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
-      });
+    for (let i = 0; i < vertexCount; i++) {
+      const base = i * strideInFloats;
+      // Position (vec3)
+      interleavedArray[base + 0] = positions[i * 3 + 0];
+      interleavedArray[base + 1] = positions[i * 3 + 1];
+      interleavedArray[base + 2] = positions[i * 3 + 2];
+      // Normal (vec3)
+      interleavedArray[base + 3] = normals[i * 3 + 0];
+      interleavedArray[base + 4] = normals[i * 3 + 1];
+      interleavedArray[base + 5] = normals[i * 3 + 2];
+      // TexCoord (vec2)
+      interleavedArray[base + 6] = texCoords[i * 2 + 0];
+      interleavedArray[base + 7] = texCoords[i * 2 + 1];
+      // Tangent (vec4)
+      interleavedArray[base + 8] = tangents[i * 4 + 0];
+      interleavedArray[base + 9] = tangents[i * 4 + 1];
+      interleavedArray[base + 10] = tangents[i * 4 + 2];
+      interleavedArray[base + 11] = tangents[i * 4 + 3];
     }
 
-    // Index buffer (optional now)
-    const indexBuffer = finalIndices
+    // --- GPU Resource Creation ---
+
+    const vertexBuffer = createGPUBuffer(
+      this.renderer.device,
+      interleavedArray,
+      GPUBufferUsage.VERTEX,
+      `${key}-interleaved-vertex-buffer`,
+    );
+
+    const vertexBufferLayout: GPUVertexBufferLayout = {
+      arrayStride: strideInFloats * Float32Array.BYTES_PER_ELEMENT, // 48 bytes
+      stepMode: "vertex",
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: "float32x3" }, // Position
+        { shaderLocation: 1, offset: 12, format: "float32x3" }, // Normal
+        { shaderLocation: 2, offset: 24, format: "float32x2" }, // UV
+        { shaderLocation: 3, offset: 32, format: "float32x4" }, // Tangent
+      ],
+    };
+
+    const indexBuffer = data.indices
       ? createGPUBuffer(
           this.renderer.device,
-          finalIndices,
+          data.indices,
           GPUBufferUsage.INDEX,
           `${key}-indices`,
         )
       : undefined;
 
+    const aabb = computeAABB(data.positions);
+
     const mesh: Mesh = {
-      buffers,
-      layouts,
-      vertexCount: finalVertexCount,
+      buffers: [vertexBuffer],
+      layouts: [vertexBufferLayout],
+      vertexCount: vertexCount,
       indexBuffer,
-      indexCount: finalIndices?.length,
-      indexFormat: finalIndices instanceof Uint16Array ? "uint16" : "uint32",
+      indexCount: data.indices?.length,
+      indexFormat: data.indices instanceof Uint16Array ? "uint16" : "uint32",
       aabb,
     };
 
