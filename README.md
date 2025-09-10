@@ -4,15 +4,17 @@ Learning graphics programming with WebGPU.
 
 [engine_demo_10-10-25.webm](https://github.com/user-attachments/assets/687eebe7-262d-47d9-9501-beb678478a88)
 
+Press `C` to enable free camera look :)
 
 # Setup
 
 Simply install dependencies then run vite server:
 
-```bash 
+```bash
 npm install
 ```
-```bash 
+
+```bash
 npm run dev
 ```
 
