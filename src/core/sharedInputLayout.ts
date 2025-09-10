@@ -15,6 +15,7 @@ export const SUPPORTED_KEYS = [
   "ArrowDown",
   "ArrowLeft",
   "ArrowRight",
+  "KeyC",
 ] as const; // Use 'as const' for type safety
 
 // Create a map for quick lookups of the index of a key (and thus its offset).
@@ -40,5 +41,6 @@ export const MOUSE_POS_Y_OFFSET = 16; // 4 bytes
 // Start of the key states block (uint8s)
 export const KEYS_OFFSET = 20;
 
-// Total size needed for the buffer
-export const SHARED_BUFFER_SIZE = KEYS_OFFSET + SUPPORTED_KEYS.length;
+// Total size needed for the buffer, padded to a multiple of 4 for Int32Array views.
+export const SHARED_BUFFER_SIZE =
+  Math.ceil((KEYS_OFFSET + SUPPORTED_KEYS.length) / 4) * 4;

@@ -65,6 +65,15 @@ export function createCubeMeshData(size = 1.0): MeshData {
     20, 21, 22, 20, 22, 23, // left
   ]);
 
+  console.log(`[Primitives] Creating cube with size ${size}`);
+  console.log(
+    `  First position: [${positions[0]}, ${positions[1]}, ${positions[2]}]`,
+  );
+  console.log(`  First normal: [${normals[0]}, ${normals[1]}, ${normals[2]}]`);
+  console.log(`  First UV: [${texCoords[0]}, ${texCoords[1]}]`);
+  console.log(`  Position count: ${positions.length / 3} vertices`);
+  console.log(`  Index count: ${indices.length} indices`);
+
   return { positions, normals, texCoords, indices };
 }
 

@@ -22,10 +22,13 @@
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
-    "vite-plugin-glsl": "^1.5.1"
+    "vite-plugin-glsl": "^1.5.1",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0"
   },
   "dependencies": {
     "@tweakpane/core": "^2.0.5",
+    "mikktspace": "^1.1.1",
     "tweakpane": "^4.0.5",
     "wgpu-matrix": "^3.4.0"
   }

@@ -48,10 +48,14 @@ interface DrawBatch {
 export class Renderer {
   /** The primary WebGPU device used for all GPU operations. */
   public device!: GPUDevice;
+  /** The default texture sampler for the renderer. */
+  public defaultSampler!: GPUSampler;
   /** The format of the canvas texture. */
   public canvasFormat!: GPUTextureFormat;
   /** The format of the depth texture. */
   public depthFormat!: GPUTextureFormat;
+  /** Does the adapter support HDR */
+  private hdrSupported = false;
 
   // Internal state management
   private canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -60,6 +64,8 @@ export class Renderer {
   private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
   private clusterBuilder!: ClusterBuilder;
+  private dummyTexture!: GPUTexture;
+  private dummyCubemapTexture!: GPUTexture;
 
   // Optimization managers
   private batchManager!: BatchManager;
@@ -108,17 +114,9 @@ export class Renderer {
   private cssHeight = 0;
   private currentDPR = 1;
 
-  // Constants for instance buffer layout
-  private static readonly MAT4_FLOAT_COUNT = 16;
-  private static readonly MAT3_FLOAT_COUNT = 9;
-  private static readonly SCALAR_FLOAT_COUNT = 1;
-
   // The number of f32 values for a single instance.
-  // mat4(16) + flag(1) + mat3(9)
-  private static readonly INSTANCE_STRIDE_IN_FLOATS =
-    Renderer.MAT4_FLOAT_COUNT +
-    Renderer.SCALAR_FLOAT_COUNT +
-    Renderer.MAT3_FLOAT_COUNT;
+  // mat4(16) + flag(1) + 3 bytes of padding
+  private static readonly INSTANCE_STRIDE_IN_FLOATS = 20; // 16 for mat4 + 4 for vec4 alignment of the next element
 
   // The byte size for a single instance.
   private static readonly INSTANCE_BYTE_STRIDE =
@@ -128,34 +126,16 @@ export class Renderer {
     arrayStride: Renderer.INSTANCE_BYTE_STRIDE,
     stepMode: "instance",
     attributes: [
-      // Model Matrix (mat4x4<f32>) - 16 floats
-      { shaderLocation: 3, offset: 0, format: "float32x4" },
-      { shaderLocation: 4, offset: 16, format: "float32x4" },
-      { shaderLocation: 5, offset: 32, format: "float32x4" },
-      { shaderLocation: 6, offset: 48, format: "float32x4" },
-      // is_uniformly_scaled (f32) - 1 float
-      {
-        shaderLocation: 7,
-        offset: Renderer.MAT4_FLOAT_COUNT * 4,
-        format: "float32",
-      },
-      // Normal Matrix (mat3x3<f32>) - 9 floats
+      // Model Matrix (mat4x4<f32>)
+      { shaderLocation: 4, offset: 0, format: "float32x4" },
+      { shaderLocation: 5, offset: 16, format: "float32x4" },
+      { shaderLocation: 6, offset: 32, format: "float32x4" },
+      { shaderLocation: 7, offset: 48, format: "float32x4" },
+      // is_uniformly_scaled (u32) - u32 for clean packing
       {
         shaderLocation: 8,
-        offset: (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT) * 4,
-        format: "float32x3",
-      },
-      {
-        shaderLocation: 9,
-        offset:
-          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 3) * 4,
-        format: "float32x3",
-      },
-      {
-        shaderLocation: 10,
-        offset:
-          (Renderer.MAT4_FLOAT_COUNT + Renderer.SCALAR_FLOAT_COUNT + 6) * 4,
-        format: "float32x3",
+        offset: 64, // 16 * 4
+        format: "uint32",
       },
     ],
   };
@@ -174,7 +154,53 @@ export class Renderer {
    */
   public async init(): Promise<void> {
     await this.setupDevice();
+
+    // Add error handling to catch WebGPU validation errors
+    this.device.addEventListener("uncapturederror", (event) => {
+      console.error("[WebGPU Error]", event.error);
+    });
+    // Push error scope to catch pipeline creation errors
+    this.device.pushErrorScope("validation");
+
     this.setupContext();
+
+    // Create a default sampler
+    this.defaultSampler = this.device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+    });
+
+    // Create a 1x1 white texture for non-textured materials
+    this.dummyTexture = this.device.createTexture({
+      size: [1, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    this.device.queue.writeTexture(
+      { texture: this.dummyTexture },
+      new Uint8Array([255, 255, 255, 255]), // White pixel
+      { bytesPerRow: 4 },
+      [1, 1],
+    );
+
+    // Create a 1x1x6 black cubemap for fallback
+    this.dummyCubemapTexture = this.device.createTexture({
+      label: "DUMMY_CUBEMAP",
+      size: [1, 1, 6],
+      format: "rgba16float",
+      dimension: "2d",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    // Write black pixels to all 6 faces
+    const blackPixel = new Float16Array([0, 0, 0, 0]);
+    for (let i = 0; i < 6; i++) {
+      this.device.queue.writeTexture(
+        { texture: this.dummyCubemapTexture, origin: [0, 0, i] },
+        blackPixel.buffer,
+        { bytesPerRow: 8 },
+        { width: 1, height: 1 },
+      );
+    }
 
     // Determine environment (DOM canvas vs OffscreenCanvas)
     const isHTMLCanvas =
@@ -202,13 +228,13 @@ export class Renderer {
 
     this.cameraUniformBuffer = this.device.createBuffer({
       label: "CAMERA_UNIFORM_BUFFER",
-      size: 4 * 4 * 4,
+      size: 128, // 2 * mat4x4<f32> (viewProjection + view)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
-      size: 20 * 4, // 20 floats (cameraPos(4)+ambient(4)+fogColor(4)+fogParams0(4)+fogParams1(4))
+      size: 24 * 4, // 24 floats to match sceneDataArray in UniformManager
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -235,7 +261,7 @@ export class Renderer {
       entries: [
         {
           binding: 0,
-          visibility: GPUShaderStage.VERTEX,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         }, // camera
         {
@@ -245,7 +271,7 @@ export class Renderer {
         }, // lights
         {
           binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         }, // scene
         {
@@ -263,29 +289,26 @@ export class Renderer {
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "read-only-storage" },
         }, // cluster indices (read in fs)
-      ],
-    });
-
-    // Build initial frame bind group including cluster buffers
-    this.frameBindGroup = this.device.createBindGroup({
-      label: "FRAME_BIND_GROUP",
-      layout: this.frameBindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
-        { binding: 1, resource: { buffer: this.lightStorageBuffer } },
-        { binding: 2, resource: { buffer: this.sceneDataBuffer } },
         {
-          binding: 3,
-          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
-        },
+          binding: 6,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "cube" },
+        }, // irradiance map
         {
-          binding: 4,
-          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
-        },
+          binding: 7,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "cube" },
+        }, // prefiltered map
         {
-          binding: 5,
-          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
-        },
+          binding: 8,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { viewDimension: "2d" },
+        }, // brdf LUT
+        {
+          binding: 9,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {},
+        }, // ibl sampler
       ],
     });
 
@@ -294,6 +317,12 @@ export class Renderer {
     this.frameInstanceData = new Float32Array(
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
     );
+
+    // Check for errors after init
+    const error = await this.device.popErrorScope();
+    if (error) {
+      console.error("[WebGPU Validation Error during init]", error);
+    }
   }
 
   private _setupResizeObserver(): void {
@@ -372,7 +401,20 @@ export class Renderer {
 
     if (!adapter) throw new Error("Failed to get GPU adapter.");
     this.adapter = adapter;
-    this.device = await this.adapter.requestDevice();
+
+    // Check for HDR support
+    const requiredFeatures: GPUFeatureName[] = [];
+    if (this.adapter.features.has("shader-f16")) {
+      this.hdrSupported = true;
+      requiredFeatures.push("shader-f16");
+      console.log("HDR rendering supported (shader-f16) and enabled.");
+    } else {
+      console.log("HDR rendering not supported by adapter.");
+    }
+
+    this.device = await this.adapter.requestDevice({
+      requiredFeatures,
+    });
 
     // Diagnostics: detect software fallback
     // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
@@ -388,13 +430,39 @@ export class Renderer {
     // OffscreenCanvas also supports 'webgpu' context in workers; use a safe cast.
     const canvasAny = this.canvas as any;
     this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
+
+    // Default to the preferred SDR format
     this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-    this.context.configure({
+
+    const config: GPUCanvasConfiguration = {
       device: this.device,
       format: this.canvasFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
       alphaMode: "premultiplied",
-    });
+    };
+
+    // Attempt to configure for HDR if supported by the adapter
+    if (this.hdrSupported) {
+      const hdrConfig: any = { ...config, format: "rgba16float" };
+      hdrConfig.toneMapping = { mode: "extended" };
+      try {
+        this.context.configure(hdrConfig);
+        // If successful, update the canvasFormat to the HDR format
+        this.canvasFormat = "rgba16float";
+        console.log("Successfully configured canvas for HDR output.");
+      } catch (e) {
+        console.warn(
+          "HDR canvas configuration failed. Falling back to SDR.",
+          e,
+        );
+        // If it fails, unset the hdrSupported flag and configure for SDR
+        this.hdrSupported = false;
+        this.context.configure(config);
+      }
+    } else {
+      // If not supported by adapter, just configure for SDR
+      this.context.configure(config);
+    }
   }
 
   private createDepthTexture(): void {
@@ -451,6 +519,8 @@ export class Renderer {
       sceneData.fogColor,
       sceneData.fogParams0,
       sceneData.fogParams1,
+      this.hdrSupported,
+      sceneData.prefilteredMipLevels,
     );
 
     // Lights SSBO packing
@@ -459,7 +529,7 @@ export class Renderer {
     const lightDataBuffer = this.uniformManager.getLightDataBuffer(lightCount);
 
     if (lightCount > this.lightStorageBufferCapacity) {
-      // Recreate GPU storage buffer and rebind
+      // Recreate GPU storage buffer
       this.lightStorageBuffer.destroy();
       this.lightStorageBufferCapacity = Math.ceil(lightCount * 1.5);
       const newSize = 16 + this.lightStorageBufferCapacity * lightStructSize;
@@ -468,28 +538,54 @@ export class Renderer {
         size: newSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-      this.frameBindGroup = this.device.createBindGroup({
-        label: "FRAME_BIND_GROUP (re-bound)",
-        layout: this.frameBindGroupLayout,
-        entries: [
-          { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
-          { binding: 1, resource: { buffer: this.lightStorageBuffer } },
-          { binding: 2, resource: { buffer: this.sceneDataBuffer } },
-          {
-            binding: 3,
-            resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
-          },
-          {
-            binding: 4,
-            resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
-          },
-          {
-            binding: 5,
-            resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
-          },
-        ],
-      });
     }
+
+    // We create the frame bind group every frame. This is cheap
+    // and ensures it's always valid and uses the latest resources.
+    const ibl = sceneData.iblComponent;
+    this.frameBindGroup = this.device.createBindGroup({
+      label: "FRAME_BIND_GROUP",
+      layout: this.frameBindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: this.cameraUniformBuffer } },
+        { binding: 1, resource: { buffer: this.lightStorageBuffer } },
+        { binding: 2, resource: { buffer: this.sceneDataBuffer } },
+        {
+          binding: 3,
+          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+        },
+        {
+          binding: 4,
+          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+        },
+        {
+          binding: 6,
+          resource: ibl
+            ? ibl.irradianceMap.createView({ dimension: "cube" })
+            : this.dummyCubemapTexture.createView({ dimension: "cube" }),
+        },
+        {
+          binding: 7,
+          resource: ibl
+            ? ibl.prefilteredMap.createView({ dimension: "cube" })
+            : this.dummyCubemapTexture.createView({ dimension: "cube" }),
+        },
+        {
+          binding: 8,
+          resource: ibl
+            ? ibl.brdfLut.createView()
+            : this.dummyTexture.createView(),
+        },
+        {
+          binding: 9,
+          resource: ibl ? ibl.sampler : this.defaultSampler,
+        },
+      ],
+    });
 
     this.clusterBuilder.updateParams(
       camera,
@@ -577,8 +673,14 @@ export class Renderer {
     let lastMesh: Mesh | null = null;
 
     for (const batch of batches) {
-      const mesh = batch.mesh; // ensure mesh is available for all bindings
+      const mesh = batch.mesh;
       passEncoder.setPipeline(batch.pipeline);
+
+      /*
+      if (import.meta.env.DEV && batch === batches[0]) {
+        this.validateMeshPipelineCompatibility(batch.mesh, batch.material);
+      }
+      */
 
       if (batch.material !== lastMaterial) {
         passEncoder.setBindGroup(1, batch.material.bindGroup);
@@ -586,26 +688,46 @@ export class Renderer {
       }
 
       if (mesh !== lastMesh) {
-        // Bind mesh vertex buffers only when mesh changes
+        // Validate expected buffer count
+        if (mesh.buffers.length !== mesh.layouts.length) {
+          console.error(
+            `[Renderer] Mesh buffer/layout mismatch: ${mesh.buffers.length} buffers, ${mesh.layouts.length} layouts`,
+          );
+        }
+
+        // Bind vertex buffers in exact order
         for (let i = 0; i < mesh.buffers.length; i++) {
           passEncoder.setVertexBuffer(i, mesh.buffers[i]);
         }
+
         if (mesh.indexBuffer) {
           passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
         }
         lastMesh = mesh;
       }
 
-      // Always bind the instance buffer with the correct per-batch offset
+      // Bind instance buffer to the slot after mesh buffers
+      const instanceSlot = mesh.buffers.length; // Should be 4
       const instanceByteOffset =
         batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
-        mesh.buffers.length,
+        instanceSlot,
         this.instanceBuffer,
         instanceByteOffset,
       );
 
-      // Draw with firstInstance = 0 to avoid double-advancing
+      /*
+      if (batch === batches[0]) {
+        // Only log for first batch
+        console.log(`[Renderer] Drawing first batch:`);
+        console.log(`  Mesh vertex count: ${mesh.vertexCount}`);
+        console.log(`  Mesh index count: ${mesh.indexCount}`);
+        console.log(`  Instance count: ${batch.instanceCount}`);
+        console.log(`  Instance buffer offset: ${instanceByteOffset}`);
+      }
+      */
+
+      // Draw
       if (mesh.indexBuffer) {
         passEncoder.drawIndexed(mesh.indexCount!, batch.instanceCount, 0, 0, 0);
       } else {
@@ -613,7 +735,6 @@ export class Renderer {
       }
     }
 
-    // Return the number of batches, which equals the number of draw calls.
     return batches.length;
   }
 
@@ -649,49 +770,24 @@ export class Renderer {
       instanceBufferOffset,
       renderables.length * floatsPerInstance,
     );
+    const instanceUintView = new Uint32Array(
+      instanceDataView.buffer,
+      instanceDataView.byteOffset,
+    );
 
-    // Pack instance data: mat4 (16), flag (1), normal mat3 columns (9)
     for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled, normalMatrix } = renderables[i];
-      const off = i * floatsPerInstance;
+      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const floatOff = i * floatsPerInstance;
+      const uintOff = floatOff;
 
       // Model matrix
-      instanceDataView.set(modelMatrix, off);
+      instanceDataView.set(modelMatrix, floatOff);
 
       // is_uniformly_scaled flag
-      instanceDataView[off + 16] = isUniformlyScaled ? 1.0 : 0.0;
-
-      // Normal matrix columns (3x vec3)
-      if (isUniformlyScaled) {
-        // Derive from model matrix upper 3x3 (column-major)
-        instanceDataView[off + 17] = modelMatrix[0];
-        instanceDataView[off + 18] = modelMatrix[1];
-        instanceDataView[off + 19] = modelMatrix[2];
-
-        instanceDataView[off + 20] = modelMatrix[4];
-        instanceDataView[off + 21] = modelMatrix[5];
-        instanceDataView[off + 22] = modelMatrix[6];
-
-        instanceDataView[off + 23] = modelMatrix[8];
-        instanceDataView[off + 24] = modelMatrix[9];
-        instanceDataView[off + 25] = modelMatrix[10];
-      } else {
-        // Use precomputed normal matrix (column-major)
-        instanceDataView[off + 17] = normalMatrix[0];
-        instanceDataView[off + 18] = normalMatrix[1];
-        instanceDataView[off + 19] = normalMatrix[2];
-
-        instanceDataView[off + 20] = normalMatrix[3];
-        instanceDataView[off + 21] = normalMatrix[4];
-        instanceDataView[off + 22] = normalMatrix[5];
-
-        instanceDataView[off + 23] = normalMatrix[6];
-        instanceDataView[off + 24] = normalMatrix[7];
-        instanceDataView[off + 25] = normalMatrix[8];
-      }
+      instanceUintView[uintOff + 16] = isUniformlyScaled ? 1 : 0;
     }
 
-    // Upload instance data for transparent objects at the given GPU offset
+    // Upload instance data for transparent objects
     this.device.queue.writeBuffer(
       this.instanceBuffer,
       instanceBufferOffset,
@@ -733,17 +829,14 @@ export class Renderer {
       // Bind the instance buffer with a per-group byte offset and size
       const groupByteOffset =
         instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
-      const groupByteSize = count * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
-        mesh.buffers.length,
+        mesh.layouts.length,
         this.instanceBuffer,
         groupByteOffset,
-        groupByteSize,
       );
 
       if (mesh.indexBuffer) {
         passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-        // firstInstance must be 0 when using per-group buffer offsets
         passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
       } else {
         passEncoder.draw(mesh.vertexCount, count, 0, 0);
@@ -776,6 +869,28 @@ export class Renderer {
     );
     callback(uiPassEncoder);
     uiPassEncoder.end();
+  }
+
+  private validateMeshPipelineCompatibility(
+    mesh: Mesh,
+    material: Material,
+  ): void {
+    console.group(`[Renderer] Validating mesh-pipeline compatibility`);
+    console.log(`Mesh has ${mesh.buffers.length} buffers:`);
+
+    for (let i = 0; i < mesh.layouts.length; i++) {
+      const layout = mesh.layouts[i];
+      const attrs = layout.attributes
+        .map((a) => `@location(${a.shaderLocation}) ${a.format}`)
+        .join(", ");
+      console.log(
+        `  Slot ${i}: stride=${layout.arrayStride}, attrs=[${attrs}]`,
+      );
+    }
+
+    console.log(`Material ${material.id} expects these shader inputs`);
+    console.log(`Instance data will bind to slot ${mesh.layouts.length}`);
+    console.groupEnd();
   }
 
   /**
@@ -818,7 +933,6 @@ export class Renderer {
     this._updateFrameUniforms(camera, sceneData.lights, sceneData);
     Profiler.end("Render.UpdateUniforms");
 
-    Profiler.begin("Render.FrustumCullAndSeparate");
     Profiler.begin("Render.FrustumCullAndSeparate");
     // Use pre-allocated arrays to avoid GC
     this.visibleRenderables.length = 0;
@@ -898,48 +1012,16 @@ export class Renderer {
 
         // Write instance data to the CPU-side buffer
         for (const instance of instances) {
-          const offset = totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+          const floatOffset =
+            totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
+          const uintOffset = floatOffset; // Can alias the same buffer
 
           // modelMatrix (16 floats)
-          this.frameInstanceData.set(instance.modelMatrix, offset);
+          this.frameInstanceData.set(instance.modelMatrix, floatOffset);
 
-          // is_uniformly_scaled flag (1 float)
-          this.frameInstanceData[offset + 16] = instance.isUniformlyScaled
-            ? 1.0
-            : 0.0;
-
-          // normal matrix columns (3x vec3 = 9 floats) at offsets 17..25
-          if (instance.isUniformlyScaled) {
-            // Fast path: derive from upper 3x3 of model matrix
-            const m = instance.modelMatrix;
-            // col 0 -> indices 0,1,2
-            this.frameInstanceData[offset + 17] = m[0];
-            this.frameInstanceData[offset + 18] = m[1];
-            this.frameInstanceData[offset + 19] = m[2];
-            // col 1 -> indices 4,5,6
-            this.frameInstanceData[offset + 20] = m[4];
-            this.frameInstanceData[offset + 21] = m[5];
-            this.frameInstanceData[offset + 22] = m[6];
-            // col 2 -> indices 8,9,10
-            this.frameInstanceData[offset + 23] = m[8];
-            this.frameInstanceData[offset + 24] = m[9];
-            this.frameInstanceData[offset + 25] = m[10];
-          } else {
-            // Use precomputed normal matrix
-            const n = instance.normalMatrix;
-            // col 0
-            this.frameInstanceData[offset + 17] = n[0];
-            this.frameInstanceData[offset + 18] = n[1];
-            this.frameInstanceData[offset + 19] = n[2];
-            // col 1
-            this.frameInstanceData[offset + 20] = n[3];
-            this.frameInstanceData[offset + 21] = n[4];
-            this.frameInstanceData[offset + 22] = n[5];
-            // col 2
-            this.frameInstanceData[offset + 23] = n[6];
-            this.frameInstanceData[offset + 24] = n[7];
-            this.frameInstanceData[offset + 25] = n[8];
-          }
+          // is_uniformly_scaled flag (1 uint32)
+          const uint32View = new Uint32Array(this.frameInstanceData.buffer);
+          uint32View[uintOffset + 16] = instance.isUniformlyScaled ? 1 : 0;
 
           totalInstances++;
         }
@@ -1015,6 +1097,21 @@ export class Renderer {
       1,
     );
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
+
+    // --- SKYBOX PASS ---
+    if (sceneData.skyboxMaterial) {
+      const skyboxMat = sceneData.skyboxMaterial;
+      const pipeline = skyboxMat.getPipeline(
+        [], // No mesh layout needed
+        Renderer.INSTANCE_DATA_LAYOUT,
+        this.frameBindGroupLayout,
+        this.canvasFormat,
+        this.depthFormat,
+      );
+      scenePassEncoder.setPipeline(pipeline);
+      scenePassEncoder.setBindGroup(1, skyboxMat.bindGroup);
+      scenePassEncoder.draw(3, 1, 0, 0); // Draw the fullscreen triangle
+    }
 
     Profiler.begin("Render.OpaquePass");
     this.stats.drawsOpaque = this._renderOpaquePass(

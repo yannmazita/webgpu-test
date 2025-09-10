@@ -1,3 +1,4 @@
+// src/core/shaders/pbr.wgsl
 #include "utils.wgsl"
 
 struct ClusterParams {
@@ -44,6 +45,10 @@ struct SceneUniforms {
     fogColor: vec4<f32>,
     fogParams0: vec4<f32>, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: vec4<f32>, // reserved/extensible
+    hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
+    prefiltered_mip_levels: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 struct Light {
@@ -67,6 +72,8 @@ struct PBRMaterialUniforms {
     metallicRoughnessNormalOcclusion: vec4<f32>, // metallic, roughness, normalIntensity, occlusionStrength
     emissive: vec4<f32>,
     textureFlags: vec4<f32>, // hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive
+    textureUVs: vec4<f32>, // albedoUV, mrUV, normalUV, emissiveUV
+    textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
 }
 
 // @group(0) - Per-frame data
@@ -76,6 +83,10 @@ struct PBRMaterialUniforms {
 @group(0) @binding(3) var<uniform> clusterParams: ClusterParams;
 @group(0) @binding(4) var<storage, read> clusterCounts: ClusterCounts;
 @group(0) @binding(5) var<storage, read> clusterLightIndices: ClusterLightIndices;
+@group(0) @binding(6) var irradianceMap: texture_cube<f32>;
+@group(0) @binding(7) var prefilteredMap: texture_cube<f32>;
+@group(0) @binding(8) var brdfLUT: texture_2d<f32>;
+@group(0) @binding(9) var iblSampler: sampler;
 
 // @group(1) - Per-material data
 @group(1) @binding(0) var albedoTexture: texture_2d<f32>;
@@ -96,65 +107,49 @@ struct VertexOutput {
     @location(1) worldNormal: vec3<f32>,
     @location(2) worldTangent: vec3<f32>,
     @location(3) worldBitangent: vec3<f32>,
-    @location(4) texCoords: vec2<f32>,
+    @location(4) texCoords0: vec2<f32>,
+    @location(5) texCoords1: vec2<f32>,
 }
 
 @vertex
 fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
-    @location(2) inTexCoords: vec2<f32>,
-    @location(3) model_mat_col_0: vec4<f32>,
-    @location(4) model_mat_col_1: vec4<f32>,
-    @location(5) model_mat_col_2: vec4<f32>,
-    @location(6) model_mat_col_3: vec4<f32>,
-    @location(7) is_uniformly_scaled: f32,
-    @location(8) normal_mat_col_0: vec3<f32>,
-    @location(9) normal_mat_col_1: vec3<f32>,
-    @location(10) normal_mat_col_2: vec3<f32>,
+    @location(2) inTexCoords0: vec2<f32>,
+    @location(3) inTangent: vec4<f32>,
+    @location(9) inTexCoords1: vec2<f32>,
+    @location(4) model_mat_col_0: vec4<f32>,
+    @location(5) model_mat_col_1: vec4<f32>,
+    @location(6) model_mat_col_2: vec4<f32>,
+    @location(7) model_mat_col_3: vec4<f32>,
+    @location(8) is_uniformly_scaled: u32
 ) -> VertexOutput {
     var out: VertexOutput;
 
     let modelMatrix = mat4x4<f32>(
         model_mat_col_0, model_mat_col_1, model_mat_col_2, model_mat_col_3
     );
+    var modelMatrix3x3 = mat3x3<f32>(
+        modelMatrix[0].xyz,
+        modelMatrix[1].xyz,
+        modelMatrix[2].xyz
+    );
 
-    // Transform position
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
     out.worldPosition = worldPos4.xyz;
     out.clip_position = camera.viewProjectionMatrix * worldPos4;
-    out.texCoords = inTexCoords;
+    out.texCoords0 = inTexCoords0;
+    out.texCoords1 = inTexCoords1;
 
-    // Transform normal
-    var worldNormal: vec3<f32>;
-    if (is_uniformly_scaled > 0.5) {
-        let modelMatrix3x3 = mat3x3<f32>(
-            modelMatrix[0].xyz,
-            modelMatrix[1].xyz,
-            modelMatrix[2].xyz
-        );
-        worldNormal = normalize(modelMatrix3x3 * inNormal);
-    } else {
-        let normalMatrix = mat3x3<f32>(
-            normal_mat_col_0,
-            normal_mat_col_1,
-            normal_mat_col_2
-        );
-        worldNormal = normalize(normalMatrix * inNormal);
+    // calculate normal matrix and transform normals/tangents
+    if (is_uniformly_scaled == 0u) {
+        // For non-uniform scale, use inverse-transpose
+        modelMatrix3x3 = transpose(mat3_inverse(modelMatrix3x3));
     }
-    out.worldNormal = worldNormal;
-
-    // Generate tangent and bitangent for normal mapping
-    // Simple approach: derive from normal and a reference vector
-    let up = vec3<f32>(0.0, 1.0, 0.0);
-    let right = vec3<f32>(1.0, 0.0, 0.0);
     
-    // Choose the vector that's least parallel to the normal
-    let testDot = abs(dot(worldNormal, up));
-    let reference = select(up, right, testDot > 0.9);
-    
-    out.worldTangent = normalize(cross(worldNormal, reference));
-    out.worldBitangent = normalize(cross(worldNormal, out.worldTangent));
+    out.worldNormal = normalize(modelMatrix3x3 * inNormal);
+    out.worldTangent = normalize(modelMatrix3x3 * inTangent.xyz);
+    out.worldBitangent = normalize(cross(out.worldNormal, out.worldTangent) * inTangent.w);
 
     return out;
 }
@@ -202,7 +197,12 @@ struct FragmentInput {
     @location(1) worldNormal: vec3<f32>,
     @location(2) worldTangent: vec3<f32>,
     @location(3) worldBitangent: vec3<f32>,
-    @location(4) texCoords: vec2<f32>,
+    @location(4) texCoords0: vec2<f32>,
+    @location(5) texCoords1: vec2<f32>,
+}
+
+fn pickUV(uvIndex: f32, uv0: vec2<f32>, uv1: vec2<f32>) -> vec2<f32> {
+    return mix(uv0, uv1, step(0.5, uvIndex));
 }
 
 // Unpack normal from normal map
@@ -211,7 +211,8 @@ fn getNormalFromMap(fi: FragmentInput, normalIntensity: f32) -> vec3<f32> {
         return normalize(fi.worldNormal);
     }
 
-    let tangentNormal = textureSample(normalTexture, materialSampler, fi.texCoords).xyz * 2.0 - 1.0;
+    let normalUV = pickUV(material.textureUVs.z, fi.texCoords0, fi.texCoords1);
+    let tangentNormal = textureSample(normalTexture, materialSampler, normalUV).xyz * 2.0 - 1.0;
 
     var adjustedNormal = tangentNormal;
     adjustedNormal.x *= normalIntensity;
@@ -277,24 +278,32 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     // Textures
     if (material.textureFlags.x > 0.5) {
-        let albedoSample = textureSample(albedoTexture, materialSampler, fi.texCoords);
+        let albedoUV = pickUV(material.textureUVs.x, fi.texCoords0, fi.texCoords1);
+        let albedoSample = textureSample(albedoTexture, materialSampler, albedoUV);
         albedo = albedo * albedoSample.rgb;
     }
     if (material.textureFlags.y > 0.5) {
-        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, fi.texCoords);
+        let mrUV = pickUV(material.textureUVs.y, fi.texCoords0, fi.texCoords1);
+        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, mrUV);
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }
     if (material.textureFlags.w > 0.5) {
-        let emissiveSample = textureSample(emissiveTexture, materialSampler, fi.texCoords);
+        let emissiveUV = pickUV(material.textureUVs.w, fi.texCoords0, fi.texCoords1);
+        let emissiveSample = textureSample(emissiveTexture, materialSampler, emissiveUV);
         emissive = emissive * emissiveSample.rgb;
     }
-    let occlusionSample = textureSample(occlusionTexture, materialSampler, fi.texCoords);
-    ao = mix(1.0, occlusionSample.r, occlusionStrength);
+    if (material.textureFlags2.x > 0.5) {
+        let occlusionUV = pickUV(material.textureFlags2.y, fi.texCoords0, fi.texCoords1);
+        let occlusionSample = textureSample(occlusionTexture, materialSampler, occlusionUV);
+        ao = mix(1.0, occlusionSample.r, occlusionStrength);
+    }
 
     // Normals and view vector
     let N = getNormalFromMap(fi, normalIntensity);
+    //let N = normalize(fi.worldNormal); // debug
     let V = normalize(scene.cameraPos.xyz - fi.worldPosition);
+    let R = reflect(-V, N);
 
     // Base reflectance
     var F0 = vec3<f32>(0.04);
@@ -352,14 +361,24 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         }
     }
 
-    // Ambient
-    let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-    var kD = 1.0 - kS;
-    kD *= 1.0 - metallic;
-    let irradiance = scene.ambientColor.rgb;
-    let diffuse = irradiance * albedo;
-    let ambientSpecular = irradiance * 0.1 * F0;
-    let ambient = (kD * diffuse + ambientSpecular) * ao;
+    // ===== Indirect Lighting (IBL) =====
+    let F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    
+    let kS = F;
+    var kD = vec3<f32>(1.0) - kS;
+    kD *= (1.0 - metallic);
+    
+    // Diffuse IBL
+    let irradiance = textureSample(irradianceMap, iblSampler, N).rgb;
+    let diffuseIBL = irradiance * albedo;
+    
+    // Specular IBL
+    let maxMipLevel = scene.prefiltered_mip_levels - 1.0;
+    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxMipLevel).rgb;
+    let brdf = textureSample(brdfLUT, iblSampler, vec2<f32>(max(dot(N, V), 0.0), roughness)).rg;
+    let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+    
+    let ambient = (kD * diffuseIBL + specularIBL) * ao;
 
     var color = ambient + Lo;
 
@@ -393,19 +412,13 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Add emissive color after fog so it cuts through
     color += emissive;
 
-    // Tone mapping + gamma
-    color = ACESFilmicToneMapping(color);
-    color = pow(color, vec3<f32>(1.0 / 2.2));
+    // Conditionally apply Tone mapping + gamma for SDR output
+    if (scene.hdr_enabled < 0.5) {
+        color = ACESFilmicToneMapping(color);
+        //color = pow(color, vec3<f32>(1.0 / 2.2));
+        // no need to apply gamma here as it taken care of automatically
+        // by WebGPU (navigator.gpu.getPrefferedCanvasFormat() in js)
+    }
 
     return vec4<f32>(color, material.albedo.a);
-}
-
-// ACES Filmic Tone Mapping
-fn ACESFilmicToneMapping(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
 }

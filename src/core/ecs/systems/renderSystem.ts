@@ -8,6 +8,8 @@ import { MeshRendererComponent } from "../components/meshRendererComponent";
 import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
+import { SkyboxComponent } from "../components/skyboxComponent";
+import { IBLComponent } from "../components/iblComponent";
 
 // A global resource for scene properties
 export class SceneLightingComponent {
@@ -54,6 +56,19 @@ export function renderSystem(
   // Clear the reusable data container for the new frame's data
   sceneData.clear();
 
+  // Skybox
+  const skyboxComp = world.getResource(SkyboxComponent);
+  if (skyboxComp) {
+    sceneData.skyboxMaterial = skyboxComp.material;
+  }
+
+  // IBL
+  const iblComp = world.getResource(IBLComponent);
+  if (iblComp) {
+    sceneData.iblComponent = iblComp;
+    sceneData.prefilteredMipLevels = iblComp.prefilteredMap.mipLevelCount;
+  }
+
   // Collect all lights
   const lightQuery = world.query([LightComponent, TransformComponent]);
   for (const entity of lightQuery) {
@@ -86,6 +101,14 @@ export function renderSystem(
   for (const entity of renderableQuery) {
     const transform = world.getComponent(entity, TransformComponent)!;
     const meshRenderer = world.getComponent(entity, MeshRendererComponent)!;
+
+    if (typeof meshRenderer.mesh?.aabb === "undefined") {
+      console.error(
+        "CRITICAL ERROR in renderSystem: Invalid mesh found for entity",
+        entity,
+        meshRenderer.mesh,
+      );
+    }
 
     sceneData.renderables.push({
       mesh: meshRenderer.mesh,

@@ -2,7 +2,7 @@
 
 Learning graphics programming with WebGPU.
 
-[engine_demo.webm](https://github.com/user-attachments/assets/4e7b428d-3904-4638-b476-10a2e75d9396)
+[engine_demo_10-10-25.webm](https://github.com/user-attachments/assets/687eebe7-262d-47d9-9501-beb678478a88)
 
 
 # Setup

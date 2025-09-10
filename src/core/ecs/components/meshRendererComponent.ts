@@ -8,6 +8,7 @@ export class MeshRendererComponent implements IComponent {
   public material: Material;
 
   constructor(mesh: Mesh, material: Material) {
+    console.log("Creating MeshRendererComponent with mesh:", mesh);
     this.mesh = mesh;
     this.material = material;
   }

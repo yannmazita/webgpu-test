@@ -8,12 +8,14 @@ import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 export class UniformManager {
   // Pre-allocated arrays/buffers
   private sceneDataArray: Float32Array;
+  private cameraDataArray: Float32Array;
   private lightDataBuffer: ArrayBuffer;
   private lightStorageBufferCapacity: number;
 
   constructor() {
-    // cameraPos(4) + ambient(4) + fogColor(4) + fogParams0(4) + fogParams1(4) = 20 floats
-    this.sceneDataArray = new Float32Array(20);
+    // cameraPos(4) + ambient(4) + fogColor(4) + fogParams0(4) + fogParams1(4) + hdr_enabled(1) + padding(3) = 24 floats
+    this.sceneDataArray = new Float32Array(24);
+    this.cameraDataArray = new Float32Array(32); // For 2 matrices
     this.lightStorageBufferCapacity = 4;
     const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT; // 3 vec4 per light
     const bufferSize = 16 + this.lightStorageBufferCapacity * lightStructSize; // 16-byte header
@@ -35,11 +37,12 @@ export class UniformManager {
     buffer: GPUBuffer,
     camera: CameraComponent,
   ): void {
-    device.queue.writeBuffer(
-      buffer,
-      0,
-      camera.viewProjectionMatrix as Float32Array,
-    );
+    // Copy view-projection matrix to the start of the array
+    this.cameraDataArray.set(camera.viewProjectionMatrix, 0);
+    // Copy view matrix after the first matrix (16 floats offset)
+    this.cameraDataArray.set(camera.viewMatrix, 16);
+
+    device.queue.writeBuffer(buffer, 0, this.cameraDataArray);
   }
 
   /**
@@ -65,6 +68,8 @@ export class UniformManager {
     fogColor: Vec4,
     fogParams0: Vec4, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: Vec4, // reserved/extensible
+    hdrEnabled: boolean,
+    prefilteredMipLevels: number,
   ): void {
     // camera pos
     this.sceneDataArray[0] = camera.inverseViewMatrix[12];
@@ -77,6 +82,10 @@ export class UniformManager {
     this.sceneDataArray.set(fogColor, 8);
     this.sceneDataArray.set(fogParams0, 12);
     this.sceneDataArray.set(fogParams1, 16);
+    // hdr flag
+    this.sceneDataArray[20] = hdrEnabled ? 1.0 : 0.0;
+    // prefiltered_mip_levels
+    this.sceneDataArray[21] = prefilteredMipLevels;
 
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }
