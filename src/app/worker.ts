@@ -192,6 +192,7 @@ async function initWorker(
   sceneLighting.fogColor.set([0.8, 0.85, 0.9, 1.0]); // Light blue-gray
   sceneLighting.fogParams0.set([0.01, 0.0, 0.0, 1.0]); // Very light fog
 
+  /*
   // Ground Plane - Darker to contrast with demoModel
   const groundPlaneEntity = world.createEntity();
   const groundMaterial = await resourceManager.createUnlitGroundMaterial({
@@ -208,6 +209,7 @@ async function initWorker(
     groundPlaneEntity,
     new MeshRendererComponent(groundMesh, groundMaterial),
   );
+  */
 
   // Load the demo model
   try {
@@ -215,9 +217,10 @@ async function initWorker(
     demoModelEntity = await resourceManager.loadSceneFromGLTF(
       world,
       //"/assets/models/gltf/khronos-samples/Box With Spaces/glTF/Box With Spaces.gltf",
-      //"/assets/models/gltf/khronos-samples/DamagedHelmet.glb",
       //"/assets/models/gltf/khronos-samples/AntiqueCamera.glb",
-      "/assets/models/gltf/khronos-samples/BoomBox.glb",
+      //"/assets/models/gltf/khronos-samples/BoomBox.glb",
+      //"/assets/models/gltf/khronos-samples/CompareNormal.glb",
+      "/assets/models/gltf/khronos-samples/CompareAmbientOcclusion.glb",
     );
     console.log("[Worker] GLTF scene loaded.");
 
