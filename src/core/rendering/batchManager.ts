@@ -17,7 +17,7 @@ export class BatchManager {
   // Pre-allocated arrays for instance data to avoid per-frame allocations
   private instanceDataPool: Float32Array;
   private instanceDataPoolSize: number;
-  private readonly INSTANCE_STRIDE_IN_FLOATS = 26; // stride to match renderer
+  private readonly INSTANCE_STRIDE_IN_FLOATS = 20; // stride to match renderer
 
   // Track if batches need rebuilding
   private batchesDirty = true;
@@ -155,7 +155,6 @@ export class BatchManager {
       pipelineBatch.meshMap.get(mesh)!.push({
         modelMatrix,
         isUniformlyScaled,
-        normalMatrix,
       });
     }
 
@@ -189,7 +188,6 @@ export class BatchManager {
         instances.push({
           modelMatrix: r.modelMatrix,
           isUniformlyScaled: r.isUniformlyScaled,
-          normalMatrix: r.normalMatrix,
         });
       }
     }
