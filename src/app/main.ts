@@ -32,9 +32,9 @@ const handleKeyDown = (e: KeyboardEvent): void => {
 const handleKeyUp = (e: KeyboardEvent): void => {
   updateKeyState(inputContext, e.code, false);
 };
-const handleCanvasClick = (): void => {
+const handleCanvasClick = async (): Promise<void> => {
   if (!isPointerLockedState) {
-    canvas.requestPointerLock();
+    await canvas.requestPointerLock();
   }
 };
 const handlePointerLockChange = (): void => {
@@ -74,7 +74,7 @@ const handleMouseMove = (e: MouseEvent): void => {
 document.addEventListener("keydown", handleKeyDown);
 document.addEventListener("keyup", handleKeyUp);
 document.addEventListener("pointerlockchange", handlePointerLockChange);
-canvas.addEventListener("click", handleCanvasClick);
+canvas.addEventListener("click", handleCanvasClick); // eslint-disable-line
 document.addEventListener("mousemove", handleMouseMove);
 
 // --- HUD Setup ---
