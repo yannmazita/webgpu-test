@@ -18,7 +18,7 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import { SceneRenderData } from "@/core/types/rendering";
 import { createIcosphereMeshData } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
-import { quat, vec3 } from "wgpu-matrix";
+import { mat4, quat, vec3 } from "wgpu-matrix";
 import { IInputSource } from "@/core/iinputSource";
 import {
   createInputContext,
@@ -162,28 +162,32 @@ async function initWorker(
   // Camera
   cameraEntity = world.createEntity();
   const cameraTransform = new TransformComponent();
-  cameraTransform.setPosition(orbitRadius, orbitHeight, 0);
+
+  const initialX = orbitRadius;
+  const initialY = orbitHeight;
+  const initialZ = 0;
+
+  // Camera position
+  const eye = vec3.fromValues(initialX, initialY, initialZ);
+  const target = vec3.fromValues(0, 0, 0);
+  const up = vec3.fromValues(0, 1, 0);
+
+  // Build lookAt (view matrix)
+  const view = mat4.lookAt(eye, target, up);
+
+  // Convert to world transform
+  const worldFromView = mat4.invert(view);
+
+  // Extract rotation
+  const rotation = quat.fromMat(worldFromView);
+
+  // Apply position + rotation
+  cameraTransform.setPosition(initialX, initialY, initialZ);
+  cameraTransform.setRotation(rotation);
+
   world.addComponent(cameraEntity, cameraTransform);
   world.addComponent(cameraEntity, new CameraComponent(45, 16 / 9, 0.1, 100.0));
   world.addComponent(cameraEntity, new MainCameraTagComponent());
-
-  // Point camera at origin (where demoModel will be)
-  const lookDirection = vec3.normalize(
-    vec3.fromValues(-orbitRadius, -orbitHeight, 0),
-  );
-  const up = vec3.fromValues(0, 1, 0);
-  const right = vec3.normalize(vec3.cross(up, lookDirection));
-  const correctedUp = vec3.cross(lookDirection, right);
-
-  // prettier-ignore
-  const rotationMatrix = [
-    right[0],       right[1],       right[2],       0,
-    correctedUp[0], correctedUp[1], correctedUp[2], 0,
-    lookDirection[0], lookDirection[1], lookDirection[2], 0,
-    0,              0,              0,              1,
-  ];
-  const rotation = quat.fromMat(rotationMatrix);
-  cameraTransform.setRotation(rotation);
 
   // Scene Lighting and Fog - Lighter fog to better see the demoModel
   world.addResource(new SceneLightingComponent());
@@ -359,26 +363,27 @@ function frame(now: number) {
     const elapsed = (now - animationStartTime) % ORBIT_DURATION_MS;
     const t = elapsed / ORBIT_DURATION_MS; // normalized [0,1)
 
-    const angle = t * Math.PI * 2; // Full 360-degree rotation
+    const angle = t * Math.PI * 2; // full 360 orbit
     const x = Math.cos(angle) * orbitRadius;
     const z = Math.sin(angle) * orbitRadius;
+    const y = orbitHeight;
 
-    cameraTransform.setPosition(x, orbitHeight, z);
-
-    // Always look at the demoModel (at origin)
-    const lookDirection = vec3.normalize(vec3.fromValues(-x, -orbitHeight, -z));
+    // Camera position
+    const eye = vec3.fromValues(x, y, z);
+    const target = vec3.fromValues(0, 0, 0);
     const up = vec3.fromValues(0, 1, 0);
-    const right = vec3.normalize(vec3.cross(up, lookDirection));
-    const correctedUp = vec3.cross(lookDirection, right);
 
-    // prettier-ignore
-    const rotationMatrix = [
-      right[0],       right[1],       right[2],       0,
-      correctedUp[0], correctedUp[1], correctedUp[2], 0,
-      lookDirection[0], lookDirection[1], lookDirection[2], 0,
-      0,              0,              0,              1,
-    ];
-    const rotation = quat.fromMat(rotationMatrix);
+    // Build a lookAt *view* matrix
+    const view = mat4.lookAt(eye, target, up);
+
+    // Convert to world transform by inverting the view matrix
+    const worldFromView = mat4.invert(view);
+
+    // Extract orientation (upper 3×3) and convert to quaternion
+    const rotation = quat.fromMat(worldFromView);
+
+    // Apply position + rotation to the camera
+    cameraTransform.setPosition(x, y, z);
     cameraTransform.setRotation(rotation);
   }
 
