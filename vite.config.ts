@@ -15,7 +15,6 @@ export default defineConfig({
     glsl({
       defaultExtension: "wgsl",
     }),
-    // Add these two plugins
     wasm(),
     topLevelAwait(),
   ],

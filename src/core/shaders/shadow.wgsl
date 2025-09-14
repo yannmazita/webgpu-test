@@ -9,7 +9,7 @@ struct ShadowUniforms {
   params0: vec4<f32>,     // intensity, pcfRadius, mapSize, depthBias
 };
 
-@group(0) @binding(12) var<uniform> shadow: ShadowUniforms;
+@group(0) @binding(0) var<uniform> shadow: ShadowUniforms;
 
 struct VSOut {
   @builtin(position) position: vec4<f32>,

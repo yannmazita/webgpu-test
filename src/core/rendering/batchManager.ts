@@ -136,7 +136,7 @@ export class BatchManager {
     this.opaqueBatches.clear();
 
     for (const renderable of opaqueRenderables) {
-      const { mesh, material, modelMatrix, isUniformlyScaled, normalMatrix } =
+      const { mesh, material, modelMatrix, isUniformlyScaled, receiveShadows } =
         renderable;
       const pipeline = getPipeline(material, mesh);
 
@@ -155,6 +155,7 @@ export class BatchManager {
       pipelineBatch.meshMap.get(mesh)!.push({
         modelMatrix,
         isUniformlyScaled,
+        receiveShadows: receiveShadows !== false,
       });
     }
 
@@ -188,6 +189,7 @@ export class BatchManager {
         instances.push({
           modelMatrix: r.modelMatrix,
           isUniformlyScaled: r.isUniformlyScaled,
+          receiveShadows: r.receiveShadows !== false,
         });
       }
     }

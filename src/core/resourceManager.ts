@@ -630,7 +630,7 @@ export class ResourceManager {
           emissive: mat.emissiveFactor,
           normalIntensity: mat.normalTexture?.scale,
           occlusionStrength: mat.occlusionTexture?.strength,
-          // --- NEW: Set UV indices ---
+          // --- Set UV indices ---
           albedoUV: pbr.baseColorTexture?.texCoord ?? 0,
           metallicRoughnessUV: pbr.metallicRoughnessTexture?.texCoord ?? 0,
           normalUV: mat.normalTexture?.texCoord ?? 0,
@@ -1055,7 +1055,7 @@ export class ResourceManager {
     let finalPositions = data.positions;
     let finalNormals = data.normals;
     let finalTexCoords = data.texCoords;
-    let finalTexCoords1 = data.texCoords1;
+    const finalTexCoords1 = data.texCoords1;
     let finalTangents: Float32Array | undefined; // <<< FIX: DECLARED HERE
     let finalIndices: Uint16Array | Uint32Array | undefined = data.indices;
     let finalVertexCount = data.positions.length / 3;
@@ -1091,7 +1091,7 @@ export class ResourceManager {
         for (let i = 0; i < indexCount; i++) {
           const index = data.indices[i];
 
-          // Add bounds checking
+          // Bounds checking
           if (index >= vertexCount) {
             console.error(
               `[ResourceManager] Invalid index ${index} in mesh "${key}" (vertex count: ${vertexCount})`,
@@ -1232,13 +1232,32 @@ export class ResourceManager {
       }
     }
 
+    // --- Buffer 4: Texture Coordinates 1 (shaderLocation: 9) ---
+    let texCoords1 = finalTexCoords1;
+    if (!texCoords1 || texCoords1.length === 0) {
+      texCoords1 = new Float32Array(finalVertexCount * 2);
+    }
+
+    if (!finalTangents) {
+      console.warn(
+        `[ResourceManager] Mesh "${key}" has no tangents. Creating default [1,0,0,1].`,
+      );
+      finalTangents = new Float32Array(finalVertexCount * 4);
+      for (let i = 0; i < finalVertexCount; i++) {
+        finalTangents[i * 4 + 0] = 1.0; // Tangent.x
+        finalTangents[i * 4 + 1] = 0.0; // Tangent.y
+        finalTangents[i * 4 + 2] = 0.0; // Tangent.z
+        finalTangents[i * 4 + 3] = 1.0; // Handedness
+      }
+    }
+
     this.validateMeshData(
       key,
       {
         positions: finalPositions,
         normals: finalNormals,
         texCoords: finalTexCoords,
-        texCoords1: finalTexCoords1,
+        texCoords1: texCoords1,
         tangents: finalTangents,
         indices: finalIndices,
       },
@@ -1327,18 +1346,6 @@ export class ResourceManager {
     };
 
     // Buffer 3: Tangent (shaderLocation: 3)
-    if (!finalTangents) {
-      console.warn(
-        `[ResourceManager] Mesh "${key}" has no tangents. Creating default [1,0,0,1].`,
-      );
-      finalTangents = new Float32Array(finalVertexCount * 4);
-      for (let i = 0; i < finalVertexCount; i++) {
-        finalTangents[i * 4 + 0] = 1.0; // Tangent.x
-        finalTangents[i * 4 + 1] = 0.0; // Tangent.y
-        finalTangents[i * 4 + 2] = 0.0; // Tangent.z
-        finalTangents[i * 4 + 3] = 1.0; // Handedness
-      }
-    }
     buffers[3] = createGPUBuffer(
       this.renderer.device,
       finalTangents,
@@ -1357,11 +1364,7 @@ export class ResourceManager {
       ],
     };
 
-    // --- NEW: Buffer 4: Texture Coordinates 1 (shaderLocation: 9) ---
-    let texCoords1 = finalTexCoords1;
-    if (!texCoords1 || texCoords1.length === 0) {
-      texCoords1 = new Float32Array(finalVertexCount * 2);
-    }
+    // --- Buffer 4: Texture Coordinates 1 (shaderLocation: 9) ---
     buffers[4] = createGPUBuffer(
       this.renderer.device,
       texCoords1,

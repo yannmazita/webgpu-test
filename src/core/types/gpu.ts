@@ -77,6 +77,8 @@ export interface Renderable {
 export interface InstanceData {
   modelMatrix: Mat4;
   isUniformlyScaled: boolean;
+  /** Per-instance shadow receiving flag; packed into instance flags bitfield. */
+  receiveShadows: boolean;
 }
 
 /**

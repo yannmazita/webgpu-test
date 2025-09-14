@@ -37,6 +37,7 @@ struct ClusterLightIndices {
 // Frame-level uniforms
 struct CameraUniforms {
     viewProjectionMatrix: mat4x4<f32>,
+    viewMatrix: mat4x4<f32>,
 }
 
 struct SceneUniforms {
@@ -76,6 +77,13 @@ struct PBRMaterialUniforms {
     textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
 }
 
+struct ShadowUniforms {
+    lightViewProj: mat4x4<f32>,
+    lightDir: vec4<f32>,    // xyz used
+    lightColor: vec4<f32>,  // rgb used
+    params0: vec4<f32>,     // intensity, pcfRadius, mapSize, depthBias
+}
+
 // @group(0) - Per-frame data
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 @group(0) @binding(1) var<storage, read> lightsBuffer: LightsBuffer;
@@ -87,6 +95,9 @@ struct PBRMaterialUniforms {
 @group(0) @binding(7) var prefilteredMap: texture_cube<f32>;
 @group(0) @binding(8) var brdfLUT: texture_2d<f32>;
 @group(0) @binding(9) var iblSampler: sampler;
+@group(0) @binding(10) var shadowMap: texture_depth_2d;
+@group(0) @binding(11) var shadowSampler: sampler_comparison;
+@group(0) @binding(12) var<uniform> shadow: ShadowUniforms;
 
 // @group(1) - Per-material data
 @group(1) @binding(0) var albedoTexture: texture_2d<f32>;
@@ -109,6 +120,7 @@ struct VertexOutput {
     @location(3) worldBitangent: vec3<f32>,
     @location(4) texCoords0: vec2<f32>,
     @location(5) texCoords1: vec2<f32>,
+    @location(6) @interpolate(flat) instanceFlags: u32,
 }
 
 @vertex
@@ -122,7 +134,7 @@ fn vs_main(
     @location(5) model_mat_col_1: vec4<f32>,
     @location(6) model_mat_col_2: vec4<f32>,
     @location(7) model_mat_col_3: vec4<f32>,
-    @location(8) is_uniformly_scaled: u32
+    @location(8) instanceFlags: u32
 ) -> VertexOutput {
     var out: VertexOutput;
 
@@ -142,7 +154,8 @@ fn vs_main(
     out.texCoords1 = inTexCoords1;
 
     // calculate normal matrix and transform normals/tangents
-    if (is_uniformly_scaled == 0u) {
+    let isUniformScale = (instanceFlags & 1u) != 0u;
+    if (!isUniformScale) {
         // For non-uniform scale, use inverse-transpose
         modelMatrix3x3 = transpose(mat3_inverse(modelMatrix3x3));
     }
@@ -150,6 +163,7 @@ fn vs_main(
     out.worldNormal = normalize(modelMatrix3x3 * inNormal);
     out.worldTangent = normalize(modelMatrix3x3 * inTangent.xyz);
     out.worldBitangent = normalize(cross(out.worldNormal, out.worldTangent) * inTangent.w);
+    out.instanceFlags = instanceFlags;
 
     return out;
 }
@@ -199,6 +213,7 @@ struct FragmentInput {
     @location(3) worldBitangent: vec3<f32>,
     @location(4) texCoords0: vec2<f32>,
     @location(5) texCoords1: vec2<f32>,
+    @location(6) @interpolate(flat) instanceFlags: u32,
 }
 
 fn pickUV(uvIndex: f32, uv0: vec2<f32>, uv1: vec2<f32>) -> vec2<f32> {
@@ -263,6 +278,33 @@ fn calculateLightContribution(
     let diffuse = kD * albedo / 3.14159265;
 
     return (diffuse + specular) * lightColor * NdotL;
+}
+
+fn projectToShadowSpace(worldPos: vec3<f32>) -> vec3<f32> {
+    let wp = vec4<f32>(worldPos, 1.0);
+    let sp = shadow.lightViewProj * wp;
+    let ndc = sp.xyz / sp.w;
+    // WebGPU NDC z in [0,1], orthographic/perspective handled by matrix
+    let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+    let depth = ndc.z;
+    return vec3<f32>(uv, depth);
+}
+
+fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32) -> f32 {
+    // The sampler is set to clamp-to-edge, so this out-of-bounds coords are handled
+    // automatically on the gpu
+    let texel = vec2<f32>(1.0 / mapSize);
+    var sum = 0.0;
+    var taps = 0.0;
+    // 3x3 kernel centered
+    for (var j: i32 = -1; j <= 1; j = j + 1) {
+        for (var i: i32 = -1; i <= 1; i = i + 1) {
+            let offs = vec2<f32>(f32(i), f32(j)) * texel * pcfRadius;
+            sum += textureSampleCompare(shadowMap, shadowSampler, uv + offs, depth);
+            taps += 1.0;
+        }
+    }
+    return sum / taps;
 }
 
 @fragment
@@ -360,6 +402,28 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
             Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, radiance);
         }
     }
+
+    // ===== Directional Sun Light with Shadow =====
+    let intensity = shadow.params0.x;
+    let pcfRadius = shadow.params0.y;
+    let mapSize = shadow.params0.z;
+    let depthBias = shadow.params0.w;
+    // Decode receiveShadows from instance flags (bit 1)
+    let receiveShadowsFloat = select(0.0, 1.0, (fi.instanceFlags & 2u) != 0u);
+    let Ls = normalize(-shadow.lightDir.xyz);
+    let sunColor = shadow.lightColor.rgb * intensity;
+    
+    // Always sample shadow map to maintain uniform control flow
+    let sh = projectToShadowSpace(fi.worldPosition);
+    let cmpDepth = sh.z - depthBias;
+    let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, pcfRadius, mapSize);
+    // Mix between full light (1.0) and shadowed based on receiveShadows flag
+    let shadowFactor = mix(1.0, shadowSample, receiveShadowsFloat);
+    
+    // Sun BRDF contribution
+    let sunTerm = calculateLightContribution(Ls, N, V, F0, albedo, metallic, roughness, sunColor);
+    Lo += sunTerm * shadowFactor;
+
 
     // ===== Indirect Lighting (IBL) =====
     let F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);

@@ -161,7 +161,7 @@ export class Renderer {
   public async init(): Promise<void> {
     await this.setupDevice();
 
-    // Add error handling to catch WebGPU validation errors
+    // catch WebGPU validation errors
     this.device.addEventListener("uncapturederror", (event) => {
       console.error("[WebGPU Error]", event.error);
     });
@@ -342,7 +342,6 @@ export class Renderer {
     // Initialize the shadow subsystem with current mesh/instance layouts
     this.shadowSubsystem = new ShadowSubsystem(this.device);
     await this.shadowSubsystem.init(
-      this.frameBindGroupLayout,
       // Use any mesh's layouts as a template; they are consistent across meshes.
       // We don't have meshes at init time; we can pass an example layout. Reuse the PBR layout expectation:
       [
@@ -842,7 +841,7 @@ export class Renderer {
       return db - da;
     });
 
-    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS; // 26
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
     const instanceDataView = new Float32Array(
       this.frameInstanceData.buffer,
       instanceBufferOffset,
@@ -854,15 +853,16 @@ export class Renderer {
     );
 
     for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const { modelMatrix, isUniformlyScaled, receiveShadows } = renderables[i];
       const floatOff = i * floatsPerInstance;
       const uintOff = floatOff;
 
       // Model matrix
       instanceDataView.set(modelMatrix, floatOff);
 
-      // is_uniformly_scaled flag
-      instanceUintView[uintOff + 16] = isUniformlyScaled ? 1 : 0;
+      const flags =
+        (isUniformlyScaled ? 1 : 0) | (((receiveShadows ?? true) ? 1 : 0) << 1);
+      instanceUintView[uintOff + 16] = flags;
     }
 
     // Upload instance data for transparent objects
@@ -1063,24 +1063,32 @@ export class Renderer {
     this.ensureCpuInstanceCapacity(requiredInstanceCapacity);
     this._prepareInstanceBuffer(requiredInstanceCapacity);
 
-    // --- Main Command Encoder for the entire frame ---
-    const commandEncoder = this.device.createCommandEncoder({
-      label: "FRAME_COMMAND_ENCODER",
-    });
+    // --- Command Buffers for the frame ---
+    const commandBuffers: GPUCommandBuffer[] = [];
 
     // 1. Cluster Compute Pass
-    this.clusterBuilder.record(commandEncoder, this.stats.lightCount);
+    const clusterEncoder = this.device.createCommandEncoder({
+      label: "CLUSTER_COMMAND_ENCODER",
+    });
+    this.clusterBuilder.record(clusterEncoder, this.stats.lightCount);
+    commandBuffers.push(clusterEncoder.finish());
 
     // 2. Shadow Pass
     if (shadowCasterCount > 0 && shadowSettings) {
       Profiler.begin("Render.ShadowPass");
+      const shadowEncoder = this.device.createCommandEncoder({
+        label: "SHADOW_COMMAND_ENCODER",
+      });
       // Pack and upload instance data for shadow casters
       const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
       const u32 = new Uint32Array(this.frameInstanceData.buffer);
       for (let i = 0; i < shadowCasterCount; i++) {
         const floatOffset = i * floatsPerInstance;
         this.frameInstanceData.set(shadowCasters[i].modelMatrix, floatOffset);
-        u32[floatOffset + 16] = shadowCasters[i].isUniformlyScaled ? 1 : 0;
+        const flags =
+          (shadowCasters[i].isUniformlyScaled ? 1 : 0) |
+          ((shadowCasters[i].receiveShadows !== false ? 1 : 0) << 1);
+        u32[floatOffset + 16] = flags;
       }
       this.device.queue.writeBuffer(
         this.instanceBuffer,
@@ -1092,14 +1100,19 @@ export class Renderer {
 
       // Record the pass
       this.shadowSubsystem.recordShadowPass(
-        commandEncoder,
-        this.frameBindGroup,
+        shadowEncoder,
         shadowSettings.mapSize,
         shadowCasters,
         this.instanceBuffer,
       );
+      commandBuffers.push(shadowEncoder.finish());
       Profiler.end("Render.ShadowPass");
     }
+
+    // --- Main Command Encoder for Scene and UI ---
+    const mainEncoder = this.device.createCommandEncoder({
+      label: "MAIN_COMMAND_ENCODER",
+    });
 
     // 3. Main Scene Pass
     // Get or build opaque batches
@@ -1137,7 +1150,10 @@ export class Renderer {
             currentInstanceOffset * Renderer.INSTANCE_STRIDE_IN_FLOATS;
           this.frameInstanceData.set(instance.modelMatrix, floatOffset);
           const u32 = new Uint32Array(this.frameInstanceData.buffer);
-          u32[floatOffset + 16] = instance.isUniformlyScaled ? 1 : 0;
+          const flags =
+            (instance.isUniformlyScaled ? 1 : 0) |
+            ((instance.receiveShadows ? 1 : 0) << 1);
+          u32[floatOffset + 16] = flags;
           currentInstanceOffset++;
         }
       }
@@ -1177,7 +1193,7 @@ export class Renderer {
       depthAttachment.stencilStoreOp = "discard";
     }
 
-    const scenePassEncoder = commandEncoder.beginRenderPass({
+    const scenePassEncoder = mainEncoder.beginRenderPass({
       colorAttachments: [
         {
           view: textureView,
@@ -1241,12 +1257,14 @@ export class Renderer {
 
     // 4. UI Pass
     if (postSceneDrawCallback) {
-      this._renderUIPass(commandEncoder, textureView, postSceneDrawCallback);
+      this._renderUIPass(mainEncoder, textureView, postSceneDrawCallback);
     }
+
+    commandBuffers.push(mainEncoder.finish());
 
     // 5. Submit all recorded commands
     Profiler.begin("Render.Submit");
-    this.device.queue.submit([commandEncoder.finish()]);
+    this.device.queue.submit(commandBuffers);
     this.clusterBuilder.onSubmitted();
     Profiler.end("Render.Submit");
 
