@@ -131,7 +131,7 @@ worker.postMessage(
   [offscreen],
 );
 
-// Event-driven resize messages
+// Frame-driven resize polling
 let lastCssW = 0;
 let lastCssH = 0;
 let dpr = window.devicePixelRatio || 1;
@@ -140,6 +140,12 @@ const sendResize = () => {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   const currDpr = window.devicePixelRatio || 1;
+
+  // Don't send a resize message if the canvas isn't laid out yet
+  if (w === 0 || h === 0) {
+    return;
+  }
+
   if (w !== lastCssW || h !== lastCssH || currDpr !== dpr) {
     lastCssW = w;
     lastCssH = h;
@@ -153,12 +159,6 @@ const sendResize = () => {
   }
 };
 
-// Initial and observed resize
-const ro = new ResizeObserver(() => sendResize());
-ro.observe(canvas);
-window.addEventListener("resize", sendResize);
-sendResize();
-
 // Listen for worker acks
 let canSendFrame = false;
 worker.addEventListener("message", (ev) => {
@@ -168,8 +168,6 @@ worker.addEventListener("message", (ev) => {
   if (msg.type === "READY") {
     // Worker finished initialization; allow first frame
     canSendFrame = true;
-    // Send a resize in case one hasn't been sent yet
-    sendResize();
     return;
   }
 
@@ -181,6 +179,10 @@ worker.addEventListener("message", (ev) => {
 });
 
 const tick = (now: number) => {
+  // Always check for resize at the start of a frame.
+  // sendResize() is cheap and only posts a message when dimensions change.
+  sendResize();
+
   if (canSendFrame) {
     canSendFrame = false;
     // The FRAME message is just a timing signal.
