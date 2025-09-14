@@ -10,6 +10,10 @@ import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
 import { SkyboxComponent } from "../components/skyboxComponent";
 import { IBLComponent } from "../components/iblComponent";
+import {
+  SceneSunComponent,
+  ShadowSettingsComponent,
+} from "../components/sunComponent";
 
 // A global resource for scene properties
 export class SceneLightingComponent {
@@ -69,6 +73,10 @@ export function renderSystem(
     sceneData.prefilteredMipLevels = iblComp.prefilteredMap.mipLevelCount;
   }
 
+  // Sun and Shadows
+  const sun = world.getResource(SceneSunComponent);
+  const shadowSettings = world.getResource(ShadowSettingsComponent);
+
   // Collect all lights
   const lightQuery = world.query([LightComponent, TransformComponent]);
   for (const entity of lightQuery) {
@@ -115,9 +123,16 @@ export function renderSystem(
       material: meshRenderer.material,
       modelMatrix: transform.worldMatrix,
       isUniformlyScaled: transform.isUniformlyScaled,
-      normalMatrix: transform.normalMatrix,
+      castShadows: meshRenderer.castShadows,
+      receiveShadows: meshRenderer.receiveShadows,
     });
   }
 
-  renderer.render(cameraComponent, sceneData, postSceneDrawCallback);
+  renderer.render(
+    cameraComponent,
+    sceneData,
+    postSceneDrawCallback,
+    sun,
+    shadowSettings,
+  );
 }

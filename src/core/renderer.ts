@@ -9,6 +9,11 @@ import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
 import { testAABBFrustum, transformAABB } from "./utils/bounds";
 import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
+import { ShadowSubsystem } from "@/core/rendering/shadow";
+import {
+  SceneSunComponent,
+  ShadowSettingsComponent,
+} from "@/core/ecs/components/sunComponent";
 
 export interface RendererStats {
   canvasWidth: number;
@@ -70,6 +75,7 @@ export class Renderer {
   // Optimization managers
   private batchManager!: BatchManager;
   private uniformManager!: UniformManager;
+  private shadowSubsystem!: ShadowSubsystem;
 
   // Per-frame data
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -155,7 +161,7 @@ export class Renderer {
   public async init(): Promise<void> {
     await this.setupDevice();
 
-    // Add error handling to catch WebGPU validation errors
+    // catch WebGPU validation errors
     this.device.addEventListener("uncapturederror", (event) => {
       console.error("[WebGPU Error]", event.error);
     });
@@ -309,6 +315,21 @@ export class Renderer {
           visibility: GPUShaderStage.FRAGMENT,
           sampler: {},
         }, // ibl sampler
+        {
+          binding: 10,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: "depth", viewDimension: "2d" },
+        }, // shadow map (depth)
+        {
+          binding: 11,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: { type: "comparison" },
+        }, // shadow compare sampler
+        {
+          binding: 12,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        }, // shadow uniforms (light VP, dir/color, params)
       ],
     });
 
@@ -316,6 +337,47 @@ export class Renderer {
     this.uniformManager = new UniformManager();
     this.frameInstanceData = new Float32Array(
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
+    );
+
+    // Initialize the shadow subsystem with current mesh/instance layouts
+    this.shadowSubsystem = new ShadowSubsystem(this.device);
+    await this.shadowSubsystem.init(
+      // Use any mesh's layouts as a template; they are consistent across meshes.
+      // We don't have meshes at init time; we can pass an example layout. Reuse the PBR layout expectation:
+      [
+        // Positions
+        {
+          arrayStride: 12,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
+        },
+        // Normals
+        {
+          arrayStride: 12,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
+        },
+        // UV0
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
+        },
+        // Tangents
+        {
+          arrayStride: 16,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
+        },
+        // UV1
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 9, offset: 0, format: "float32x2" }],
+        },
+      ],
+      Renderer.INSTANCE_DATA_LAYOUT,
+      "depth32float",
     );
 
     // Check for errors after init
@@ -504,7 +566,14 @@ export class Renderer {
     camera: CameraComponent,
     lights: Light[],
     sceneData: SceneRenderData,
+    sun?: SceneSunComponent,
+    shadowSettings?: ShadowSettingsComponent,
   ): void {
+    // Update sun shadow uniforms first (if available)
+    if (sun && sun.enabled && shadowSettings) {
+      this.shadowSubsystem.updatePerFrame(camera, sun, shadowSettings);
+    }
+
     // Camera + scene uniforms
     this.uniformManager.updateCameraUniform(
       this.device,
@@ -543,6 +612,8 @@ export class Renderer {
     // We create the frame bind group every frame. This is cheap
     // and ensures it's always valid and uses the latest resources.
     const ibl = sceneData.iblComponent;
+    const shadowBindings = this.shadowSubsystem.getFrameBindings();
+
     this.frameBindGroup = this.device.createBindGroup({
       label: "FRAME_BIND_GROUP",
       layout: this.frameBindGroupLayout,
@@ -583,6 +654,12 @@ export class Renderer {
         {
           binding: 9,
           resource: ibl ? ibl.sampler : this.defaultSampler,
+        },
+        { binding: 10, resource: shadowBindings.shadowMapView },
+        { binding: 11, resource: shadowBindings.shadowSampler },
+        {
+          binding: 12,
+          resource: { buffer: shadowBindings.shadowUniformBuffer },
         },
       ],
     });
@@ -764,7 +841,7 @@ export class Renderer {
       return db - da;
     });
 
-    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS; // 26
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
     const instanceDataView = new Float32Array(
       this.frameInstanceData.buffer,
       instanceBufferOffset,
@@ -776,15 +853,16 @@ export class Renderer {
     );
 
     for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled } = renderables[i];
+      const { modelMatrix, isUniformlyScaled, receiveShadows } = renderables[i];
       const floatOff = i * floatsPerInstance;
       const uintOff = floatOff;
 
       // Model matrix
       instanceDataView.set(modelMatrix, floatOff);
 
-      // is_uniformly_scaled flag
-      instanceUintView[uintOff + 16] = isUniformlyScaled ? 1 : 0;
+      const flags =
+        (isUniformlyScaled ? 1 : 0) | (((receiveShadows ?? true) ? 1 : 0) << 1);
+      instanceUintView[uintOff + 16] = flags;
     }
 
     // Upload instance data for transparent objects
@@ -908,6 +986,8 @@ export class Renderer {
     camera: CameraComponent,
     sceneData: SceneRenderData,
     postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
+    sun?: SceneSunComponent,
+    shadowSettings?: ShadowSettingsComponent,
   ): void {
     const tStart = performance.now();
 
@@ -916,9 +996,7 @@ export class Renderer {
     this._handleResize(camera);
     Profiler.end("Render.HandleResize");
 
-    // Skip rendering if the canvas is not visible.
     if (this.canvas.width === 0 || this.canvas.height === 0) {
-      // Still update stats for a consistent output.
       this.stats.canvasWidth = this.canvas.width;
       this.stats.canvasHeight = this.canvas.height;
       this.stats.cpuTotalUs = Math.max(
@@ -929,16 +1007,21 @@ export class Renderer {
       return;
     }
 
+    // Update all frame uniforms, including shadow matrices. This creates the frameBindGroup.
     Profiler.begin("Render.UpdateUniforms");
-    this._updateFrameUniforms(camera, sceneData.lights, sceneData);
+    this._updateFrameUniforms(
+      camera,
+      sceneData.lights,
+      sceneData,
+      sun,
+      shadowSettings,
+    );
     Profiler.end("Render.UpdateUniforms");
 
+    // Frustum cull and separate opaque/transparent lists for the main camera view.
     Profiler.begin("Render.FrustumCullAndSeparate");
-    // Use pre-allocated arrays to avoid GC
     this.visibleRenderables.length = 0;
     this.transparentRenderables.length = 0;
-
-    // Cull objects against the camera frustum and separate into opaque/transparent lists.
     for (const r of sceneData.renderables) {
       if (this._isInFrustum(r, camera)) {
         if (r.material.isTransparent) {
@@ -948,21 +1031,92 @@ export class Renderer {
         }
       }
     }
-    // Update stats with the counts after culling.
     this.stats.visibleOpaque = this.visibleRenderables.length;
     this.stats.visibleTransparent = this.transparentRenderables.length;
     this.stats.lightCount = sceneData.lights.length;
     this.stats.canvasWidth = this.canvas.width;
     this.stats.canvasHeight = this.canvas.height;
-
     const cls = this.clusterBuilder.getLastStats();
     this.stats.clusterAvgLpcX1000 = cls.avgLpcX1000;
     this.stats.clusterMaxLpc = cls.maxLpc;
     this.stats.clusterOverflows = cls.overflow;
     Profiler.end("Render.FrustumCullAndSeparate");
 
+    // --- Prepare Shadow Casters ---
+    const shadowCasters =
+      sun && sun.enabled && sun.castsShadows && shadowSettings
+        ? sceneData.renderables.filter(
+            (r) => r.castShadows !== false && !r.material.isTransparent,
+          )
+        : [];
+    const shadowCasterCount = shadowCasters.length;
+
+    // --- Prepare Main Pass Renderables ---
+    const opaqueInstanceTotal = this.visibleRenderables.length;
+    const transparentInstanceTotal = this.transparentRenderables.length;
+
+    // --- Ensure GPU/CPU Buffers are large enough for EITHER pass ---
+    const requiredInstanceCapacity = Math.max(
+      shadowCasterCount,
+      opaqueInstanceTotal + transparentInstanceTotal,
+    );
+    this.ensureCpuInstanceCapacity(requiredInstanceCapacity);
+    this._prepareInstanceBuffer(requiredInstanceCapacity);
+
+    // --- Command Buffers for the frame ---
+    const commandBuffers: GPUCommandBuffer[] = [];
+
+    // 1. Cluster Compute Pass
+    const clusterEncoder = this.device.createCommandEncoder({
+      label: "CLUSTER_COMMAND_ENCODER",
+    });
+    this.clusterBuilder.record(clusterEncoder, this.stats.lightCount);
+    commandBuffers.push(clusterEncoder.finish());
+
+    // 2. Shadow Pass
+    if (shadowCasterCount > 0 && shadowSettings) {
+      Profiler.begin("Render.ShadowPass");
+      const shadowEncoder = this.device.createCommandEncoder({
+        label: "SHADOW_COMMAND_ENCODER",
+      });
+      // Pack and upload instance data for shadow casters
+      const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
+      const u32 = new Uint32Array(this.frameInstanceData.buffer);
+      for (let i = 0; i < shadowCasterCount; i++) {
+        const floatOffset = i * floatsPerInstance;
+        this.frameInstanceData.set(shadowCasters[i].modelMatrix, floatOffset);
+        const flags =
+          (shadowCasters[i].isUniformlyScaled ? 1 : 0) |
+          ((shadowCasters[i].receiveShadows !== false ? 1 : 0) << 1);
+        u32[floatOffset + 16] = flags;
+      }
+      this.device.queue.writeBuffer(
+        this.instanceBuffer,
+        0,
+        this.frameInstanceData.buffer,
+        0,
+        shadowCasterCount * Renderer.INSTANCE_BYTE_STRIDE,
+      );
+
+      // Record the pass
+      this.shadowSubsystem.recordShadowPass(
+        shadowEncoder,
+        shadowSettings.mapSize,
+        shadowCasters,
+        this.instanceBuffer,
+      );
+      commandBuffers.push(shadowEncoder.finish());
+      Profiler.end("Render.ShadowPass");
+    }
+
+    // --- Main Command Encoder for Scene and UI ---
+    const mainEncoder = this.device.createCommandEncoder({
+      label: "MAIN_COMMAND_ENCODER",
+    });
+
+    // 3. Main Scene Pass
+    // Get or build opaque batches
     Profiler.begin("Render.Batching");
-    // 1) Build/retrieve opaque batches structure (no writes yet)
     const getPipelineCallback = (material: Material, mesh: Mesh) =>
       material.getPipeline(
         mesh.layouts,
@@ -971,69 +1125,45 @@ export class Renderer {
         this.canvasFormat,
         this.depthFormat,
       );
-
     const opaquePipelineBatches = this.batchManager.getOpaqueBatches(
       this.visibleRenderables,
       getPipelineCallback,
     );
 
-    // 2) Compute total instance counts first (opaque + transparent)
-    let opaqueInstanceTotal = 0;
-    for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
-      for (const instances of pipelineBatch.meshMap.values()) {
-        opaqueInstanceTotal += instances.length;
-      }
-    }
-    const transparentInstanceTotal = this.transparentRenderables.length;
-    const totalRequiredInstances =
-      opaqueInstanceTotal + transparentInstanceTotal;
-
-    // 3) Ensure CPU and GPU capacities for the whole frame
-    this.ensureCpuInstanceCapacity(totalRequiredInstances);
-    this._prepareInstanceBuffer(totalRequiredInstances);
-
-    // 4) Clear the pre-allocated draw batch array (we'll fill it next)
+    // Pack opaque instance data and create draw batches
     this.opaqueBatches.length = 0;
-
-    // 5) Now fill opaque instance data and draw-batch metadata
-    let totalInstances = 0;
-    for (const [pipeline, pipelineBatch] of opaquePipelineBatches.entries()) {
+    let currentInstanceOffset = 0;
+    for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
       for (const [mesh, instances] of pipelineBatch.meshMap.entries()) {
         if (instances.length === 0) continue;
 
-        // Create a DrawBatch for our render pass
         this.opaqueBatches.push({
-          pipeline,
+          pipeline: getPipelineCallback(pipelineBatch.material, mesh),
           material: pipelineBatch.material,
           mesh,
           instanceCount: instances.length,
-          firstInstance: totalInstances,
+          firstInstance: currentInstanceOffset,
         });
 
-        // Write instance data to the CPU-side buffer
         for (const instance of instances) {
           const floatOffset =
-            totalInstances * Renderer.INSTANCE_STRIDE_IN_FLOATS;
-          const uintOffset = floatOffset; // Can alias the same buffer
-
-          // modelMatrix (16 floats)
+            currentInstanceOffset * Renderer.INSTANCE_STRIDE_IN_FLOATS;
           this.frameInstanceData.set(instance.modelMatrix, floatOffset);
-
-          // is_uniformly_scaled flag (1 uint32)
-          const uint32View = new Uint32Array(this.frameInstanceData.buffer);
-          uint32View[uintOffset + 16] = instance.isUniformlyScaled ? 1 : 0;
-
-          totalInstances++;
+          const u32 = new Uint32Array(this.frameInstanceData.buffer);
+          const flags =
+            (instance.isUniformlyScaled ? 1 : 0) |
+            ((instance.receiveShadows ? 1 : 0) << 1);
+          u32[floatOffset + 16] = flags;
+          currentInstanceOffset++;
         }
       }
     }
-    // Record instance counts for stats
     this.stats.instancesOpaque = opaqueInstanceTotal;
     this.stats.instancesTransparent = transparentInstanceTotal;
     Profiler.end("Render.Batching");
 
+    // Upload instance data for the main pass (opaque part)
     Profiler.begin("Render.WriteInstanceBuffer");
-    // Upload only the opaque region at offset 0
     if (opaqueInstanceTotal > 0) {
       this.device.queue.writeBuffer(
         this.instanceBuffer,
@@ -1045,33 +1175,25 @@ export class Renderer {
     }
     Profiler.end("Render.WriteInstanceBuffer");
 
-    const commandEncoder = this.device.createCommandEncoder();
+    // --- Begin Main Render Pass ---
     const textureView = this.context.getCurrentTexture().createView();
-
-    // Record clustered compute passes before scene render
-    this.clusterBuilder.record(commandEncoder, this.stats.lightCount);
-
-    // Determine if current depth format includes a stencil aspect
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
-      this.depthFormat === ("depth32float-stencil8" as GPUTextureFormat);
+      (this.depthFormat as string) === "depth32float-stencil8";
 
     const depthAttachment: GPURenderPassDepthStencilAttachment = {
       view: this.depthTexture.createView(),
-      depthClearValue: 1,
+      depthClearValue: 1.0,
       depthLoadOp: "clear",
       depthStoreOp: "store",
     };
-
-    // If format has stencil, WebGPU requires stencilLoadOp and stencilStoreOp
     if (hasStencil) {
-      // We don't use stencil yet; clear then discard to avoid any overhead
       depthAttachment.stencilClearValue = 0;
       depthAttachment.stencilLoadOp = "clear";
       depthAttachment.stencilStoreOp = "discard";
     }
 
-    const scenePassEncoder = commandEncoder.beginRenderPass({
+    const scenePassEncoder = mainEncoder.beginRenderPass({
       colorAttachments: [
         {
           view: textureView,
@@ -1098,11 +1220,11 @@ export class Renderer {
     );
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
 
-    // --- SKYBOX PASS ---
+    // Draw Skybox
     if (sceneData.skyboxMaterial) {
       const skyboxMat = sceneData.skyboxMaterial;
       const pipeline = skyboxMat.getPipeline(
-        [], // No mesh layout needed
+        [],
         Renderer.INSTANCE_DATA_LAYOUT,
         this.frameBindGroupLayout,
         this.canvasFormat,
@@ -1110,9 +1232,10 @@ export class Renderer {
       );
       scenePassEncoder.setPipeline(pipeline);
       scenePassEncoder.setBindGroup(1, skyboxMat.bindGroup);
-      scenePassEncoder.draw(3, 1, 0, 0); // Draw the fullscreen triangle
+      scenePassEncoder.draw(3, 1, 0, 0);
     }
 
+    // Draw Opaque
     Profiler.begin("Render.OpaquePass");
     this.stats.drawsOpaque = this._renderOpaquePass(
       scenePassEncoder,
@@ -1120,33 +1243,35 @@ export class Renderer {
     );
     Profiler.end("Render.OpaquePass");
 
-    // When calling the transparent pass, change the offset to use the opaque count
+    // Draw Transparent
     Profiler.begin("Render.TransparentPass");
     this.stats.drawsTransparent = this._renderTransparentPass(
       scenePassEncoder,
       this.transparentRenderables,
       camera,
-      opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE, // start after opaque
+      opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE,
     );
     Profiler.end("Render.TransparentPass");
+
     scenePassEncoder.end();
 
+    // 4. UI Pass
     if (postSceneDrawCallback) {
-      this._renderUIPass(commandEncoder, textureView, postSceneDrawCallback);
+      this._renderUIPass(mainEncoder, textureView, postSceneDrawCallback);
     }
 
+    commandBuffers.push(mainEncoder.finish());
+
+    // 5. Submit all recorded commands
     Profiler.begin("Render.Submit");
-    this.device.queue.submit([commandEncoder.finish()]);
-    // Notify clusterBuilder that a copy was submitted so it can map asynchronously
+    this.device.queue.submit(commandBuffers);
     this.clusterBuilder.onSubmitted();
     Profiler.end("Render.Submit");
 
-    // CPU total time for this render
     this.stats.cpuTotalUs = Math.max(
       0,
       Math.round((performance.now() - tStart) * 1000),
     );
-
     Profiler.end("Render.Total");
   }
 
