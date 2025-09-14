@@ -67,6 +67,8 @@ export interface Renderable {
   modelMatrix: Mat4;
   material: Material;
   isUniformlyScaled: boolean;
+  castShadows?: boolean;
+  receiveShadows?: boolean;
 }
 
 /**

@@ -115,7 +115,8 @@ export function renderSystem(
       material: meshRenderer.material,
       modelMatrix: transform.worldMatrix,
       isUniformlyScaled: transform.isUniformlyScaled,
-      normalMatrix: transform.normalMatrix,
+      castShadows: meshRenderer.castShadows,
+      receiveShadows: meshRenderer.receiveShadows,
     });
   }
 

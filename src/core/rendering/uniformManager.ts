@@ -48,17 +48,8 @@ export class UniformManager {
   /**
    * Updates the scene uniform buffer with scene-wide data.
    *
-   * This method packs various scene-wide data, such as camera position,
-   * ambient color, and fog parameters, into a single uniform buffer. This
-   * data is then available to all shaders in the scene.
-   *
-   * @param device The GPU device.
-   * @param buffer The scene uniform buffer.
-   * @param camera The camera component.
-   * @param ambientColor The ambient color of the scene.
-   * @param fogColor The color of the fog.
-   * @param fogParams0 The primary fog parameters.
-   * @param fogParams1 The secondary fog parameters.
+   * Backward compatible: hdrEnabled and prefilteredMipLevels are optional.
+   * If omitted, HDR is considered disabled and prefiltered mips = 0.
    */
   public updateSceneUniform(
     device: GPUDevice,
@@ -68,8 +59,8 @@ export class UniformManager {
     fogColor: Vec4,
     fogParams0: Vec4, // [distanceDensity, height, heightFalloff, enableFlags]
     fogParams1: Vec4, // reserved/extensible
-    hdrEnabled: boolean,
-    prefilteredMipLevels: number,
+    hdrEnabled?: boolean,
+    prefilteredMipLevels?: number,
   ): void {
     // camera pos
     this.sceneDataArray[0] = camera.inverseViewMatrix[12];
@@ -82,10 +73,10 @@ export class UniformManager {
     this.sceneDataArray.set(fogColor, 8);
     this.sceneDataArray.set(fogParams0, 12);
     this.sceneDataArray.set(fogParams1, 16);
-    // hdr flag
+    // hdr flag (default false if not provided)
     this.sceneDataArray[20] = hdrEnabled ? 1.0 : 0.0;
-    // prefiltered_mip_levels
-    this.sceneDataArray[21] = prefilteredMipLevels;
+    // prefiltered_mip_levels (default 0 if not provided)
+    this.sceneDataArray[21] = prefilteredMipLevels ?? 0;
 
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }

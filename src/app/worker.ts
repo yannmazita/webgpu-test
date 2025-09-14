@@ -16,10 +16,7 @@ import {
 } from "@/core/ecs/systems/renderSystem";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { SceneRenderData } from "@/core/types/rendering";
-import {
-  createIcosphereMeshData,
-  createPlaneMeshData,
-} from "@/core/utils/primitives";
+import { createIcosphereMeshData } from "@/core/utils/primitives";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
 import { quat, vec3 } from "wgpu-matrix";
 import { IInputSource } from "@/core/iinputSource";
@@ -46,6 +43,10 @@ import {
   wasActionPressed,
 } from "@/core/action";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
+import {
+  SceneSunComponent,
+  ShadowSettingsComponent,
+} from "@/core/ecs/components/sunComponent";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -92,8 +93,8 @@ let metricsFrameId = 0;
 // State for dt and camera orbit
 let lastFrameTime = 0;
 let animationStartTime = 0;
-let orbitRadius = 3.0;
-let orbitHeight = 1.0;
+const orbitRadius = 3.0;
+const orbitHeight = 1.0;
 
 async function initWorker(
   offscreen: OffscreenCanvas,
@@ -150,7 +151,6 @@ async function initWorker(
 
   // Environment Map & IBL
   console.log("[Worker] Awaiting environment map...");
-  // Environment Map & IBL
   const envMap = await resourceManager.createEnvironmentMap(
     "/assets/hdris/citrus_orchard_road_puresky_4k.hdr",
     1024,
@@ -312,6 +312,10 @@ async function initWorker(
     rimLightEntity,
     new MeshRendererComponent(lightMeshWhite, lightMaterialWhite),
   );
+
+  // Sun and shadows
+  world.addResource(new SceneSunComponent());
+  world.addResource(new ShadowSettingsComponent());
 
   (self as any).postMessage({ type: "READY" });
 }
