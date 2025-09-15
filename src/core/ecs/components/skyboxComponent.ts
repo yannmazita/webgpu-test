@@ -1,5 +1,5 @@
 // src/core/ecs/components/skyboxComponent.ts
-import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
+import { MaterialInstance } from "@/core/materials/materialInstance";
 import { IComponent } from "../component";
 
 /**
@@ -7,9 +7,9 @@ import { IComponent } from "../component";
  * It's typically added as a resource to the world.
  */
 export class SkyboxComponent implements IComponent {
-  public material: SkyboxMaterial;
+  public material: MaterialInstance;
 
-  constructor(material: SkyboxMaterial) {
+  constructor(material: MaterialInstance) {
     this.material = material;
   }
 }

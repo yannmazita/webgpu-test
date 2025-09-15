@@ -3,6 +3,7 @@ import { Material } from "./material";
 import skyboxShaderUrl from "@/core/shaders/skybox.wgsl?url";
 import { Shader } from "@/core/shaders/shader";
 import { ShaderPreprocessor } from "../shaders/preprocessor";
+import { MaterialInstance } from "./materialInstance";
 
 export class SkyboxMaterial extends Material {
   private static shader: Shader | null = null;
@@ -34,20 +35,27 @@ export class SkyboxMaterial extends Material {
     });
   }
 
-  constructor(
-    device: GPUDevice,
-    cubemapTexture: GPUTexture,
-    sampler: GPUSampler,
-  ) {
+  private constructor(device: GPUDevice) {
     if (!SkyboxMaterial.shader || !SkyboxMaterial.layout) {
       throw new Error(
         "SkyboxMaterial not initialized. Call SkyboxMaterial.initialize() first.",
       );
     }
+    // Skybox is not transparent
+    super(device, SkyboxMaterial.shader, SkyboxMaterial.layout, false);
+  }
 
-    const bindGroup = device.createBindGroup({
-      label: "SKYBOX_MATERIAL_BIND_GROUP",
-      layout: SkyboxMaterial.layout,
+  public static createTemplate(device: GPUDevice): SkyboxMaterial {
+    return new SkyboxMaterial(device);
+  }
+
+  public createInstance(
+    cubemapTexture: GPUTexture,
+    sampler: GPUSampler,
+  ): MaterialInstance {
+    const bindGroup = this.device.createBindGroup({
+      label: "SKYBOX_MATERIAL_INSTANCE_BIND_GROUP",
+      layout: this.materialBindGroupLayout,
       entries: [
         {
           binding: 0,
@@ -57,13 +65,17 @@ export class SkyboxMaterial extends Material {
       ],
     });
 
-    // Skybox is not transparent
-    super(
-      device,
-      SkyboxMaterial.shader,
-      SkyboxMaterial.layout,
+    // Skybox has no uniform buffer that needs updating.
+    const dummyUniformBuffer = this.device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.UNIFORM,
+    });
+
+    return new MaterialInstance(
+      this.device,
+      this,
+      dummyUniformBuffer,
       bindGroup,
-      false,
     );
   }
 

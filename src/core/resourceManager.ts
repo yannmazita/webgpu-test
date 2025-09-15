@@ -10,10 +10,10 @@ import {
 import { MeshData } from "./types/mesh";
 import { createTextureFromImage } from "./utils/texture";
 import { createGPUBuffer } from "./utils/webgpu";
-import { loadSTL } from "@/loaders/stlLoader";
 import { loadOBJ } from "@/loaders/objLoader";
+import { loadSTL } from "@/loaders/stlLoader";
 import { ShaderPreprocessor } from "./shaders/preprocessor";
-import { quat, vec3 } from "wgpu-matrix";
+import { mat4, quat, vec3 } from "wgpu-matrix";
 import { PBRMaterial } from "./materials/pbrMaterial";
 import {
   createCubeMeshData,
@@ -31,6 +31,7 @@ import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import {
   getAccessorData,
+  GLTFMaterial,
   GLTFPrimitive,
   loadGLTF,
   ParsedGLTF,
@@ -47,6 +48,7 @@ import {
 } from "@/core/types/animation";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { GLTFAnimation } from "@/loaders/gltfLoader";
+import { MaterialInstance } from "./materials/materialInstance";
 
 // MikkTSpace WASM loader and wrapper
 let mikktspace: {
@@ -105,6 +107,17 @@ export interface EnvironmentMap {
   iblComponent: IBLComponent;
 }
 
+// Define a context object type for clarity
+interface NodeInstantiationContext {
+  gltf: ParsedGLTF;
+  baseUri: string;
+  materialTemplates: PBRMaterial[];
+  animatedMaterialIndices: Set<number>;
+  nodeToEntityMap: Map<number, Entity>;
+  materialToEntitiesMap: Map<number, Entity[]>;
+  staticMaterialInstanceCache: Map<number, MaterialInstance>;
+}
+
 /**
  * Computes the axis-aligned bounding box from vertex positions.
  * @param positions Flattened array of vertex positions [x,y,z,x,y,z,...]
@@ -112,26 +125,14 @@ export interface EnvironmentMap {
  */
 function computeAABB(positions: Float32Array): AABB {
   if (positions.length === 0) {
-    // Empty mesh - return degenerate AABB
-    return {
-      min: vec3.create(0, 0, 0),
-      max: vec3.create(0, 0, 0),
-    };
+    return { min: vec3.create(0, 0, 0), max: vec3.create(0, 0, 0) };
   }
-
-  let minX = Infinity,
-    minY = Infinity,
-    minZ = Infinity;
-  let maxX = -Infinity,
-    maxY = -Infinity,
-    maxZ = -Infinity;
-
-  // Process every 3 floats as one vertex
+  let minX = Infinity, minY = Infinity, minZ = Infinity; // prettier-ignore
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity; // prettier-ignore
   for (let i = 0; i < positions.length; i += 3) {
-    const x = positions[i];
-    const y = positions[i + 1];
-    const z = positions[i + 2];
-
+    const x = positions[i],
+      y = positions[i + 1],
+      z = positions[i + 2];
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
     if (y < minY) minY = y;
@@ -139,14 +140,13 @@ function computeAABB(positions: Float32Array): AABB {
     if (z < minZ) minZ = z;
     if (z > maxZ) maxZ = z;
   }
-
   return {
     min: vec3.create(minX, minY, minZ),
     max: vec3.create(maxX, maxY, maxZ),
   };
 }
 
-// Internal helpers for attaching stable metadata to runtime objects without polluting JSON
+// Internal helpers for attaching stable metadata
 function _defineHidden<T extends object>(
   obj: T,
   key: string,
@@ -163,47 +163,31 @@ function _setHandle(obj: object, handle: string): void {
   _defineHidden(obj, "__handle", handle);
 }
 function _getHandle(obj: any): string | undefined {
-  return obj && typeof obj === "object" ? obj.__handle : undefined;
+  return obj?.__handle;
 }
 function _setPbrOptions(obj: object, options: PBRMaterialOptions): void {
   _defineHidden(obj, "__pbrOptions", options);
 }
 function _getPbrOptions(obj: any): PBRMaterialOptions | undefined {
-  return obj && typeof obj === "object" ? obj.__pbrOptions : undefined;
+  return obj?.__pbrOptions;
 }
 
 /**
  * Manages the creation, loading, and caching of GPU resources.
- *
- * This class acts as a factory and cache for assets like materials (textures)
- * and meshes (vertex data). It prevents redundant GPU memory allocations
- * and texture loading, improving performance and simplifying resource access.
  */
 export class ResourceManager {
   private static nextMeshId = 0;
-  /** A reference to the main renderer instance. */
   private renderer: Renderer;
-  /** A cache for Material objects keyed by their deterministic "materialKey". */
   private materials = new Map<string, Material>();
-  /** A cache for Mesh objects keyed by a unique string identifier or handle. */
   private meshes = new Map<string, Mesh>();
-  /** A 1x1 white texture for materials with no textures. */
   private dummyTexture!: GPUTexture;
   private defaultSampler!: GPUSampler;
-  /** The shader preprocessor for handling #includes. */
   private preprocessor: ShaderPreprocessor;
-  /** 2D bidirectional reflectance distribution lookup table texture */
   private brdfLut: GPUTexture | null = null;
-  /** Flags to ensure material static resources are initialized only once. */
   private pbrMaterialInitialized = false;
   private unlitGroundMaterialInitialized = false;
   private skyboxMaterialInitialized = false;
 
-  /**
-   * Creates a new ResourceManager.
-   * @param renderer The renderer used to access the `GPUDevice`
-   *  and other GPU-related configurations.
-   */
   constructor(renderer: Renderer) {
     this.renderer = renderer;
     this.preprocessor = new ShaderPreprocessor();
@@ -211,7 +195,6 @@ export class ResourceManager {
   }
 
   private createDefaultResources(): void {
-    // Create a 1x1 white texture for non-textured materials
     this.dummyTexture = this.renderer.device.createTexture({
       size: [1, 1],
       format: "rgba8unorm",
@@ -219,82 +202,53 @@ export class ResourceManager {
     });
     this.renderer.device.queue.writeTexture(
       { texture: this.dummyTexture },
-      new Uint8Array([255, 255, 255, 255]), // White pixel
+      new Uint8Array([255, 255, 255, 255]),
       { bytesPerRow: 4 },
       [1, 1],
     );
-
-    // Create a default sampler
     this.defaultSampler = this.renderer.device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
     });
   }
 
-  // ---------- Handle and spec accessors for Scene IO ----------
-
-  /**
-   * Gets the handle for a given mesh.
-   */
   public getHandleForMesh(mesh: Mesh): string | undefined {
     return _getHandle(mesh);
   }
-
-  /**
-   * Gets the handle for a given material.
-   */
   public getHandleForMaterial(material: Material): string | undefined {
     return _getHandle(material);
   }
-
-  /**
-   * Gets the material specification for a given material.
-   */
   public getMaterialSpec(material: Material): PBRMaterialSpec | undefined {
     const opts = _getPbrOptions(material);
-    if (opts) {
-      return { type: "PBR", options: opts };
-    }
-    return undefined;
+    return opts ? { type: "PBR", options: opts } : undefined;
   }
 
-  // ---------- Material creation and resolution ----------
-
-  /**
-   * Creates a new PBR material or retrieves it from the cache.
-   *
-   * Uses a deterministic key derived from options (including texture URLs)
-   * as the cache key. Also attaches non-enumerable metadata for scene
-   * serialization.
-   */
-  public async createPBRMaterial(
+  public async createPBRMaterialTemplate(
     options: PBRMaterialOptions = {},
-  ): Promise<Material> {
-    // Default options
+  ): Promise<PBRMaterial> {
     const albedo = options.albedo ?? [1, 1, 1, 1];
-    const metallic = options.metallic ?? 0.0;
-    const roughness = options.roughness ?? 0.5;
-    const normalIntensity = options.normalIntensity ?? 1.0;
-    const emissive = options.emissive ?? [0, 0, 0];
-    const occlusionStrength = options.occlusionStrength ?? 1.0;
+    const isTransparent = albedo[3] < 1.0;
+    const templateKey = `PBR_TEMPLATE:${isTransparent}`;
+    const cached = this.materials.get(templateKey);
+    if (cached) return cached as PBRMaterial;
 
-    // Deterministic cache key
-    const materialKey = `PBR:${albedo.join()}:${metallic}:${roughness}:${normalIntensity}:${emissive.join()}:${occlusionStrength}:${
-      options.albedoMap ?? ""
-    }:${options.metallicRoughnessMap ?? ""}:${options.normalMap ?? ""}:${
-      options.emissiveMap ?? ""
-    }:${options.occlusionMap ?? ""}`;
-
-    const cached = this.materials.get(materialKey);
-    if (cached) return cached;
-
-    // Ensure shader/layout initialized
     if (!this.pbrMaterialInitialized) {
       await PBRMaterial.initialize(this.renderer.device, this.preprocessor);
       this.pbrMaterialInitialized = true;
     }
 
-    // Load textures or use dummy; sRGB for albedo/emissive, linear for others
+    const materialTemplate = PBRMaterial.createTemplate(
+      this.renderer.device,
+      isTransparent,
+    );
+    this.materials.set(templateKey, materialTemplate);
+    return materialTemplate;
+  }
+
+  public async createPBRMaterialInstance(
+    materialTemplate: PBRMaterial,
+    options: PBRMaterialOptions = {},
+  ): Promise<MaterialInstance> {
     const albedoTexture = options.albedoMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -302,7 +256,6 @@ export class ResourceManager {
           "rgba8unorm-srgb",
         )
       : this.dummyTexture;
-
     const metallicRoughnessTexture = options.metallicRoughnessMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -310,7 +263,6 @@ export class ResourceManager {
           "rgba8unorm",
         )
       : this.dummyTexture;
-
     const normalTexture = options.normalMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -318,7 +270,6 @@ export class ResourceManager {
           "rgba8unorm",
         )
       : this.dummyTexture;
-
     const emissiveTexture = options.emissiveMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -326,7 +277,6 @@ export class ResourceManager {
           "rgba8unorm-srgb",
         )
       : this.dummyTexture;
-
     const occlusionTexture = options.occlusionMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -334,9 +284,7 @@ export class ResourceManager {
           "rgba8unorm",
         )
       : this.dummyTexture;
-
-    const material = new PBRMaterial(
-      this.renderer.device,
+    return materialTemplate.createInstance(
       options,
       albedoTexture,
       metallicRoughnessTexture,
@@ -345,37 +293,20 @@ export class ResourceManager {
       occlusionTexture,
       this.defaultSampler,
     );
-
-    // Attach stable handle and original options for scene serialization
-    _setHandle(material, materialKey);
-    // Clone array fields defensively
-    const clonedOpts: PBRMaterialOptions = {
-      ...options,
-      albedo: options.albedo
-        ? ([...options.albedo] as [number, number, number, number])
-        : undefined,
-      emissive: options.emissive
-        ? ([...options.emissive] as [number, number, number])
-        : undefined,
-    };
-    _setPbrOptions(material, clonedOpts);
-
-    this.materials.set(materialKey, material);
-    return material;
   }
 
-  /**
-   * Creates a new UnlitGround material for groundes or backgrounds.
-   * @param options The configuration for the material, either a texture or a color.
-   * @returns A promise that resolves to the UnlitMaterial instance.
-   */
   public async createUnlitGroundMaterial(
     options: UnlitGroundMaterialOptions,
-  ): Promise<Material> {
+  ): Promise<MaterialInstance> {
     const colorKey = options.color ? options.color.join(",") : "";
-    const materialKey = `UNLIT_SKYBOX:${options.textureUrl ?? ""}:${colorKey}`;
-    const cached = this.materials.get(materialKey);
-    if (cached) return cached;
+    const instanceKey = `UNLIT_GROUND_INSTANCE:${options.textureUrl ?? ""}:${colorKey}`;
+
+    // For unlit materials with static properties, we can still cache the instance
+    // because it will never be updated at runtime.
+    const cached = this.materials.get(instanceKey);
+    if (cached && cached instanceof MaterialInstance) {
+      return cached;
+    }
 
     // Ensure shader/layout initialized
     if (!this.unlitGroundMaterialInitialized) {
@@ -394,24 +325,17 @@ export class ResourceManager {
         )
       : this.dummyTexture;
 
-    const material = new UnlitGroundMaterial(
-      this.renderer.device,
+    const template = UnlitGroundMaterial.getTemplate(this.renderer.device);
+    const instance = template.createInstance(
       options,
       texture,
       this.defaultSampler,
     );
 
-    this.materials.set(materialKey, material);
-    return material;
+    this.materials.set(instanceKey, instance as unknown as Material); // Cache the instance
+    return instance;
   }
 
-  /**
-   * Loads an HDR environment map, converts it to a cubemap, pre-computes IBL textures,
-   * and creates all necessary resources for environment lighting.
-   * @param url The URL of the equirectangular .hdr file.
-   * @param cubemapSize The resolution for each face of the resulting cubemap.
-   * @returns A promise that resolves to an object containing the SkyboxMaterial and IBLComponent.
-   */
   public async createEnvironmentMap(
     url: string,
     cubemapSize = 512,
@@ -452,18 +376,18 @@ export class ResourceManager {
     );
     equirectTexture.destroy();
 
-    // --- 3. Create Skybox Material ---
+    // --- 3. Create Skybox Material Instance ---
     const skyboxSampler = this.renderer.device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
       mipmapFilter: "linear",
     });
-    const skyboxMaterial = new SkyboxMaterial(
-      this.renderer.device,
+    const skyboxTemplate = SkyboxMaterial.createTemplate(this.renderer.device);
+    const skyboxMaterialInstance = skyboxTemplate.createInstance(
       environmentMap,
       skyboxSampler,
     );
-    _setHandle(skyboxMaterial, `SKYBOX:${url}:${cubemapSize}`);
+    _setHandle(skyboxMaterialInstance, `SKYBOX:${url}:${cubemapSize}`);
 
     // --- 4. Pre-compute IBL Textures ---
     const irradianceMap = await generateIrradianceMap(
@@ -494,23 +418,21 @@ export class ResourceManager {
       skyboxSampler,
     );
 
-    // We don't cache the entire EnvironmentMap object, just its components.
-    this.materials.set(
-      `SKYBOX:${url}:${cubemapSize}`,
-      skyboxMaterial as Material,
-    );
-
-    return { skyboxMaterial, iblComponent };
+    return { skyboxMaterial: skyboxMaterialInstance, iblComponent };
   }
 
   /**
    * Resolves a material specification to a material instance.
    */
-  public async resolveMaterialSpec(spec: PBRMaterialSpec): Promise<Material> {
+  public async resolveMaterialSpec(
+    spec: PBRMaterialSpec,
+  ): Promise<MaterialInstance> {
     if (!spec || spec.type !== "PBR") {
       throw new Error("Unsupported material spec (expected type 'PBR').");
     }
-    return this.createPBRMaterial(spec.options);
+    // This creates a new, unique instance from the spec.
+    const template = await this.createPBRMaterialTemplate(spec.options);
+    return this.createPBRMaterialInstance(template, spec.options);
   }
 
   // ---------- Mesh resolution by handle ----------
@@ -618,173 +540,157 @@ export class ResourceManager {
   // ---------- Scene Loading ----------
 
   /**
-   * Loads a glTF file and instantiates it into the world.
-   * @param world The ECS world to add entities to.
-   * @param url The URL of the .gltf or .glb file.
-   * @returns A promise that resolves to the root entity of the loaded scene.
+   * Resolves a mesh from a string identifier, referred to as a "handle".
+   *
+   * This method loads or creates a mesh based on the handle's format. The
+   * handle also serves as a cache key, ensuring that the same resource is not
+   * loaded multiple times.
+   *
+   * Supported handle formats:
+   * - **Primitives:**
+   *   - "PRIM:cube" (default size 1.0)
+   *   - "PRIM:cube:size=2.5"
+   *   - "PRIM:icosphere" (default radius 0.5, subdivisions 2)
+   *   - "PRIM:icosphere:r=1.0,sub=3"
+   * - **Model Files:**
+   *   - "OBJ:path/to/model.obj"
+   *   - "STL:path/to/model.stl"
+   *   -  "GLTF:url#meshName"
    */
   public async loadSceneFromGLTF(world: World, url: string): Promise<Entity> {
     const { parsedGltf: gltf, baseUri } = await loadGLTF(url);
 
-    // --- Pre-load all materials ---
-    const materialPromises =
-      gltf.json.materials?.map((mat) => {
+    // --- Step 1: Pre-analysis and Asset Creation ---
+    const materialTemplates: PBRMaterial[] = [];
+    if (gltf.json.materials) {
+      for (const mat of gltf.json.materials) {
         const pbr = mat.pbrMetallicRoughness ?? {};
-        const options: PBRMaterialOptions = {
-          albedo: pbr.baseColorFactor,
-          metallic: pbr.metallicFactor,
-          roughness: pbr.roughnessFactor,
-          emissive: mat.emissiveFactor,
-          normalIntensity: mat.normalTexture?.scale,
-          occlusionStrength: mat.occlusionTexture?.strength,
-          // --- Set UV indices ---
-          albedoUV: pbr.baseColorTexture?.texCoord ?? 0,
-          metallicRoughnessUV: pbr.metallicRoughnessTexture?.texCoord ?? 0,
-          normalUV: mat.normalTexture?.texCoord ?? 0,
-          emissiveUV: mat.emissiveTexture?.texCoord ?? 0,
-          occlusionUV: mat.occlusionTexture?.texCoord ?? 0,
-        };
+        const options: PBRMaterialOptions = { albedo: pbr.baseColorFactor };
+        const template = await this.createPBRMaterialTemplate(options);
+        materialTemplates.push(template);
+      }
+    }
 
-        if (pbr.baseColorTexture) {
-          options.albedoMap = this.getImageUri(
-            gltf,
-            pbr.baseColorTexture.index,
-            baseUri,
-          );
+    const animatedMaterialIndices = new Set<number>();
+    if (gltf.json.animations) {
+      for (const anim of gltf.json.animations) {
+        for (const channel of anim.channels) {
+          const pointer =
+            channel.target.extensions?.KHR_animation_pointer?.pointer;
+          if (pointer) {
+            const parts = pointer.split("/");
+            if (parts[1] === "materials") {
+              animatedMaterialIndices.add(parseInt(parts[2], 10));
+            }
+          }
         }
-        if (pbr.metallicRoughnessTexture) {
-          options.metallicRoughnessMap = this.getImageUri(
-            gltf,
-            pbr.metallicRoughnessTexture.index,
-            baseUri,
-          );
-        }
-        if (mat.normalTexture) {
-          options.normalMap = this.getImageUri(
-            gltf,
-            mat.normalTexture.index,
-            baseUri,
-          );
-        }
-        if (mat.emissiveTexture) {
-          options.emissiveMap = this.getImageUri(
-            gltf,
-            mat.emissiveTexture.index,
-            baseUri,
-          );
-        }
-        if (mat.occlusionTexture) {
-          options.occlusionMap = this.getImageUri(
-            gltf,
-            mat.occlusionTexture.index,
-            baseUri,
-          );
-        }
-        return this.createPBRMaterial(options);
-      }) ?? [];
+      }
+    }
 
-    const materials = await Promise.all(materialPromises);
-
-    // --- Instantiate scene graph ---
+    // --- Step 2: Scene Instantiation ---
     const sceneIndex = gltf.json.scene ?? 0;
     const scene = gltf.json.scenes![sceneIndex];
-
-    // Create a root entity for the entire glTF scene
     const sceneRootEntity = world.createEntity();
     world.addComponent(sceneRootEntity, new TransformComponent());
 
     const nodeToEntityMap = new Map<number, Entity>();
+    const materialToEntitiesMap = new Map<number, Entity[]>();
+    const staticMaterialInstanceCache = new Map<number, MaterialInstance>();
 
-    // Recursively instantiate nodes
+    const context: NodeInstantiationContext = {
+      gltf,
+      baseUri,
+      materialTemplates,
+      animatedMaterialIndices,
+      nodeToEntityMap,
+      materialToEntitiesMap,
+      staticMaterialInstanceCache,
+    };
+
     for (const nodeIndex of scene.nodes) {
       await this.instantiateNode(
         world,
         gltf,
         nodeIndex,
         sceneRootEntity,
-        materials,
-        nodeToEntityMap,
+        context,
       );
     }
 
-    // --- Parse glTF Animations (node-based) ---
+    // --- Step 3: Animation Parsing and Channel Creation ---
     const clips: AnimationClip[] = [];
-    const animations: GLTFAnimation[] | undefined = gltf.json.animations;
-    if (animations && animations.length > 0) {
-      for (const anim of animations) {
+    if (gltf.json.animations) {
+      for (const anim of gltf.json.animations) {
         const channels: AnimationChannel[] = [];
         let duration = 0;
 
-        // Build samplers cache per animation (they are per-anim)
-        const samplerCache: AnimationSampler[] = new Array(
-          anim.samplers.length,
-        );
-        for (let si = 0; si < anim.samplers.length; si++) {
-          const s = anim.samplers[si];
-          const times = getAccessorData(gltf, s.input) as Float32Array;
-          const values = getAccessorData(gltf, s.output) as Float32Array;
-          const interpolation = (s.interpolation ?? "LINEAR") as
-            | "LINEAR"
-            | "STEP"
-            | "CUBICSPLINE";
-
-          // Determine stride from accessor type: translation/scale -> VEC3, rotation -> VEC4
-          const outAccessor = gltf.json.accessors![s.output];
-          const stride =
-            outAccessor.type === "VEC3"
-              ? 3
-              : outAccessor.type === "VEC4"
-                ? 4
-                : 3;
-
-          samplerCache[si] = {
-            times,
-            values,
-            interpolation,
-            valueStride: stride,
-          };
-
-          if (times.length > 0) {
-            const endT = times[times.length - 1];
-            if (endT > duration) duration = endT;
-          }
-        }
+        const samplerCache: (AnimationSampler & { path?: string })[] =
+          anim.samplers.map((s) => {
+            const times = getAccessorData(gltf, s.input) as Float32Array;
+            const values = getAccessorData(gltf, s.output) as Float32Array;
+            const interpolation = (s.interpolation ?? "LINEAR") as
+              | "LINEAR"
+              | "STEP"
+              | "CUBICSPLINE";
+            const outAccessor = gltf.json.accessors![s.output];
+            const stride =
+              outAccessor.type === "VEC3"
+                ? 3
+                : outAccessor.type === "VEC4"
+                  ? 4
+                  : 3;
+            if (times.length > 0) {
+              duration = Math.max(duration, times[times.length - 1]);
+            }
+            return { times, values, interpolation, valueStride: stride };
+          });
 
         for (const ch of anim.channels) {
-          const targetNode = ch.target.node;
-          if (targetNode === undefined) continue;
-          const targetEntity = nodeToEntityMap.get(targetNode);
-          if (targetEntity === undefined) continue;
-
-          // Ignore morph target weights for now; support TRS only
-          if (
-            ch.target.path !== "translation" &&
-            ch.target.path !== "rotation" &&
-            ch.target.path !== "scale"
-          ) {
-            console.warn(
-              "[GLTF] Ignoring animation channel path:",
-              ch.target.path,
-            );
-            continue;
-          }
-
-          // Create channel with its sampler
           const sampler = samplerCache[ch.sampler];
-          channels.push({
-            targetEntity,
-            path: ch.target.path,
-            sampler,
-          });
-        }
+          const pointer = ch.target.extensions?.KHR_animation_pointer?.pointer;
 
-        const clipName = anim.name ?? "GLTF_Animation";
+          if (pointer) {
+            const parts = pointer.split("/");
+            if (parts[1] === "materials" && parts.length >= 4) {
+              const matIndex = parseInt(parts[2], 10);
+              const property = parts.slice(3).join("/");
+              const targetEntities = materialToEntitiesMap.get(matIndex);
+              if (targetEntities) {
+                for (const targetEntity of targetEntities) {
+                  channels.push({
+                    targetEntity,
+                    path: { component: MeshRendererComponent, property },
+                    sampler,
+                  });
+                }
+              }
+            }
+          } else if (ch.target.node !== undefined) {
+            const targetEntity = nodeToEntityMap.get(ch.target.node);
+            if (
+              targetEntity &&
+              (ch.target.path === "translation" ||
+                ch.target.path === "rotation" ||
+                ch.target.path === "scale")
+            ) {
+              sampler.path = ch.target.path;
+              channels.push({
+                targetEntity,
+                path: {
+                  component: TransformComponent,
+                  property: ch.target.path,
+                },
+                sampler,
+              });
+            }
+          }
+        }
+        const clipName = anim.name ?? `GLTF_Animation_${clips.length}`;
         clips.push({ name: clipName, duration, channels });
       }
     }
 
     if (clips.length > 0) {
-      // Attach a single AnimationComponent to the scene root for now
       world.addComponent(sceneRootEntity, new AnimationComponent(clips));
       console.log(
         `[ResourceManager] Loaded ${clips.length} animation clip(s) from GLTF`,
@@ -795,8 +701,64 @@ export class ResourceManager {
         })),
       );
     }
-
     return sceneRootEntity;
+  }
+
+  private _getGLTFMaterialOptions(
+    gltfMat: GLTFMaterial,
+    gltf: ParsedGLTF,
+    baseUri: string,
+  ): PBRMaterialOptions {
+    const pbr = gltfMat.pbrMetallicRoughness ?? {};
+    const options: PBRMaterialOptions = {
+      albedo: pbr.baseColorFactor,
+      metallic: pbr.metallicFactor,
+      roughness: pbr.roughnessFactor,
+      emissive: gltfMat.emissiveFactor,
+      normalIntensity: gltfMat.normalTexture?.scale,
+      occlusionStrength: gltfMat.occlusionTexture?.strength,
+      albedoUV: pbr.baseColorTexture?.texCoord ?? 0,
+      metallicRoughnessUV: pbr.metallicRoughnessTexture?.texCoord ?? 0,
+      normalUV: gltfMat.normalTexture?.texCoord ?? 0,
+      emissiveUV: gltfMat.emissiveTexture?.texCoord ?? 0,
+      occlusionUV: gltfMat.occlusionTexture?.texCoord ?? 0,
+    };
+    if (pbr.baseColorTexture) {
+      options.albedoMap = this.getImageUri(
+        gltf,
+        pbr.baseColorTexture.index,
+        baseUri,
+      );
+    }
+    if (pbr.metallicRoughnessTexture) {
+      options.metallicRoughnessMap = this.getImageUri(
+        gltf,
+        pbr.metallicRoughnessTexture.index,
+        baseUri,
+      );
+    }
+    if (gltfMat.normalTexture) {
+      options.normalMap = this.getImageUri(
+        gltf,
+        gltfMat.normalTexture.index,
+        baseUri,
+      );
+    }
+    if (gltfMat.emissiveTexture) {
+      options.emissiveMap = this.getImageUri(
+        gltf,
+        gltfMat.emissiveTexture.index,
+        baseUri,
+      );
+    }
+    if (gltfMat.occlusionTexture) {
+      options.occlusionMap = this.getImageUri(
+        gltf,
+        gltfMat.occlusionTexture.index,
+        baseUri,
+      );
+    }
+    return options;
   }
 
   private async instantiateNode(
@@ -804,24 +766,16 @@ export class ResourceManager {
     gltf: ParsedGLTF,
     nodeIndex: number,
     parentEntity: Entity,
-    materials: Material[],
-    nodeToEntityMap: Map<number, Entity>,
+    ctx: NodeInstantiationContext,
   ): Promise<void> {
     const node = gltf.json.nodes![nodeIndex];
-    const entity = world.createEntity();
-    nodeToEntityMap.set(nodeIndex, entity);
+    const entity = world.createEntity(node.name ?? `node_${nodeIndex}`);
+    ctx.nodeToEntityMap.set(nodeIndex, entity);
 
-    // --- Transform ---
     const transform = new TransformComponent();
     if (node.matrix) {
-      // Decompose matrix for consistency, though less precise.
       const pos = vec3.create();
-      const rot = quat.create();
-      const scl = vec3.create();
-      vec3.set(pos, node.matrix[12], node.matrix[13], node.matrix[14]);
-      // A full matrix decomposition is complex. This is a simplification just to push
-      // Right now we'll just handle translation from matrix.
-      // todo: proper implementation using mat4.getTranslation, getScaling, getRotation etc
+      mat4.getTranslation(node.matrix as mat4, pos);
       transform.setPosition(pos);
     } else {
       if (node.translation)
@@ -833,11 +787,8 @@ export class ResourceManager {
     world.addComponent(entity, transform);
     setParent(world, entity, parentEntity);
 
-    // --- Mesh Renderer ---
     if (node.mesh !== undefined) {
       const gltfMesh = gltf.json.meshes![node.mesh];
-      // If a mesh has multiple primitives, create a child entity for each.
-      // This correctly handles primitives with different materials.
       const meshRootEntity =
         gltfMesh.primitives.length > 1 ? world.createEntity() : entity;
       if (gltfMesh.primitives.length > 1) {
@@ -856,39 +807,68 @@ export class ResourceManager {
           setParent(world, primitiveEntity, meshRootEntity);
         }
 
-        // Get or create the mesh for this primitive
         const meshCacheKey = `GLTF:${gltf.json.asset.version}#mesh${node.mesh}#primitive${i}`;
         const mesh = await this.createMeshFromPrimitive(
           meshCacheKey,
           gltf,
           primitive,
         );
-        this.meshes.set(meshCacheKey, mesh);
-        _setHandle(mesh, meshCacheKey);
 
-        // Get the material
-        const material =
-          primitive.material !== undefined
-            ? materials[primitive.material]
-            : materials[0]; // Fallback to default
+        const matIndex = primitive.material;
+        let materialInstance: MaterialInstance | undefined;
+
+        if (matIndex !== undefined) {
+          if (!ctx.materialToEntitiesMap.has(matIndex)) {
+            ctx.materialToEntitiesMap.set(matIndex, []);
+          }
+          ctx.materialToEntitiesMap.get(matIndex)!.push(primitiveEntity);
+
+          const isAnimated = ctx.animatedMaterialIndices.has(matIndex);
+          const gltfMat = gltf.json.materials![matIndex];
+          const options = this._getGLTFMaterialOptions(
+            gltfMat,
+            gltf,
+            ctx.baseUri,
+          );
+
+          if (isAnimated) {
+            materialInstance = await this.createPBRMaterialInstance(
+              ctx.materialTemplates[matIndex],
+              options,
+            );
+          } else {
+            materialInstance = ctx.staticMaterialInstanceCache.get(matIndex);
+            if (!materialInstance) {
+              materialInstance = await this.createPBRMaterialInstance(
+                ctx.materialTemplates[matIndex],
+                options,
+              );
+              ctx.staticMaterialInstanceCache.set(matIndex, materialInstance);
+            }
+          }
+        }
+
+        if (!materialInstance) {
+          materialInstance = ctx.staticMaterialInstanceCache.get(-1);
+          if (!materialInstance) {
+            const defaultTemplate = await this.createPBRMaterialTemplate({});
+            materialInstance = await this.createPBRMaterialInstance(
+              defaultTemplate,
+              {},
+            );
+            ctx.staticMaterialInstanceCache.set(-1, materialInstance);
+          }
+        }
         world.addComponent(
           primitiveEntity,
-          new MeshRendererComponent(mesh, material),
+          new MeshRendererComponent(mesh, materialInstance),
         );
       }
     }
 
-    // --- Recurse for children ---
     if (node.children) {
       for (const childNodeIndex of node.children) {
-        await this.instantiateNode(
-          world,
-          gltf,
-          childNodeIndex,
-          entity,
-          materials,
-          nodeToEntityMap,
-        );
+        await this.instantiateNode(world, gltf, childNodeIndex, entity, ctx);
       }
     }
   }
@@ -901,21 +881,14 @@ export class ResourceManager {
     const { json, buffers } = gltf;
     const texture = json.textures?.[textureIndex];
     if (texture?.source === undefined) return undefined;
-
     const image = json.images?.[texture.source];
     if (!image) return undefined;
-
     if (image.uri) {
-      // Handle Data URI
-      if (image.uri.startsWith("data:")) {
-        return image.uri;
-      }
-      // Handle external URI
-      return new URL(image.uri, baseUri).href;
+      return image.uri.startsWith("data:")
+        ? image.uri
+        : new URL(image.uri, baseUri).href;
     }
-
     if (image.bufferView !== undefined && image.mimeType) {
-      // Handle embedded image data from bufferView
       const bufferView = json.bufferViews![image.bufferView];
       const buffer = buffers[bufferView.buffer];
       const imageData = new Uint8Array(
@@ -926,7 +899,6 @@ export class ResourceManager {
       const blob = new Blob([imageData], { type: image.mimeType });
       return URL.createObjectURL(blob);
     }
-
     return undefined;
   }
 
@@ -935,20 +907,15 @@ export class ResourceManager {
     gltf: ParsedGLTF,
     primitive: GLTFPrimitive,
   ): Promise<Mesh> {
-    if (this.meshes.has(key)) {
-      return this.meshes.get(key)!;
-    }
-
+    if (this.meshes.has(key)) return this.meshes.get(key)!;
     const posAccessor = primitive.attributes.POSITION;
     const normAccessor = primitive.attributes.NORMAL;
     const uv0Accessor = primitive.attributes.TEXCOORD_0;
     const uv1Accessor = primitive.attributes.TEXCOORD_1;
     const indicesAccessor = primitive.indices;
-
     if (posAccessor === undefined || indicesAccessor === undefined) {
       throw new Error("GLTF primitive must have POSITION and indices.");
     }
-
     const positions = getAccessorData(gltf, posAccessor) as Float32Array;
     const indices = getAccessorData(gltf, indicesAccessor) as
       | Uint16Array
@@ -965,7 +932,6 @@ export class ResourceManager {
       uv1Accessor !== undefined
         ? (getAccessorData(gltf, uv1Accessor) as Float32Array)
         : new Float32Array();
-
     const meshData: MeshData = {
       positions,
       normals,
@@ -973,9 +939,7 @@ export class ResourceManager {
       texCoords1,
       indices,
     };
-    const mesh = await this.createMesh(key, meshData);
-    this.meshes.set(key, mesh);
-    return mesh;
+    return this.createMesh(key, meshData);
   }
 
   private validateMeshData(
@@ -1551,6 +1515,25 @@ export class ResourceManager {
       texCoords: objGeometry.uvs,
     };
 
+    const mesh = await this.createMesh(meshKey, meshData);
+    _setHandle(mesh, meshKey);
+    return mesh;
+  }
+
+  /**
+   * Loads, parses, and creates a mesh from an STL file.
+   * @param url The URL of the .stl file.
+   * @returns A promise that resolves to the created or cached Mesh.
+   */
+  public async loadMeshFromSTL(url: string): Promise<Mesh> {
+    const meshKey = `STL:${url}`;
+    if (this.meshes.has(meshKey)) return this.meshes.get(meshKey)!;
+    const stlGeometry = await loadSTL(url);
+    const meshData: MeshData = {
+      positions: stlGeometry.vertices,
+      normals: stlGeometry.normals,
+      indices: stlGeometry.indices,
+    };
     const mesh = await this.createMesh(meshKey, meshData);
     _setHandle(mesh, meshKey);
     return mesh;

@@ -4,6 +4,7 @@ import shaderUrl from "@/core/shaders/pbr.wgsl?url";
 import { createGPUBuffer } from "../utils/webgpu";
 import { Shader } from "@/core/shaders/shader";
 import { ShaderPreprocessor } from "../shaders/preprocessor";
+import { MaterialInstance } from "./materialInstance";
 
 export class PBRMaterial extends Material {
   // Static resources shared across all PBR materials
@@ -60,10 +61,32 @@ export class PBRMaterial extends Material {
   }
 
   /**
-   * Creates a new PBR Material instance.
+   * Private constructor to create the shared material template.
+   * Use PBRMaterial.initialize() and then create instances.
    */
-  constructor(
+  private constructor(device: GPUDevice, isTransparent: boolean) {
+    if (!PBRMaterial.shader || !PBRMaterial.layout) {
+      throw new Error(
+        "PBRMaterial not initialized. Call PBRMaterial.initialize() first.",
+      );
+    }
+    super(device, PBRMaterial.shader, PBRMaterial.layout, isTransparent);
+  }
+
+  /**
+   * Creates a new PBRMaterial template if it doesn't exist.
+   */
+  public static createTemplate(
     device: GPUDevice,
+    isTransparent: boolean,
+  ): PBRMaterial {
+    return new PBRMaterial(device, isTransparent);
+  }
+
+  /**
+   * Creates a new instance from this material template.
+   */
+  public createInstance(
     options: PBRMaterialOptions,
     albedoTexture: GPUTexture,
     metallicRoughnessTexture: GPUTexture,
@@ -71,18 +94,12 @@ export class PBRMaterial extends Material {
     emissiveTexture: GPUTexture,
     occlusionTexture: GPUTexture,
     sampler: GPUSampler,
-  ) {
-    if (!PBRMaterial.shader || !PBRMaterial.layout) {
-      throw new Error(
-        "PBRMaterial not initialized. Call PBRMaterial.initialize() first.",
-      );
-    }
+  ): MaterialInstance {
+    const uniformBuffer = PBRMaterial.createUniformBuffer(this.device, options);
 
-    const uniformBuffer = PBRMaterial.createUniformBuffer(device, options);
-
-    const bindGroup = device.createBindGroup({
-      label: "PBR_MATERIAL_BIND_GROUP",
-      layout: PBRMaterial.layout,
+    const bindGroup = this.device.createBindGroup({
+      label: "PBR_MATERIAL_INSTANCE_BIND_GROUP",
+      layout: this.materialBindGroupLayout,
       entries: [
         { binding: 0, resource: albedoTexture.createView() },
         { binding: 1, resource: metallicRoughnessTexture.createView() },
@@ -94,16 +111,32 @@ export class PBRMaterial extends Material {
       ],
     });
 
-    const albedo = options.albedo ?? [1, 1, 1, 1];
-    const isTransparent = albedo[3] < 1.0;
-
-    super(
-      device,
-      PBRMaterial.shader,
-      PBRMaterial.layout,
+    const instance = new MaterialInstance(
+      this.device,
+      this,
+      uniformBuffer,
       bindGroup,
-      isTransparent,
     );
+
+    // Register the updaters for properties that can be animated via KHR_animation_pointer
+    instance.registerUniformUpdater(
+      "pbrMetallicRoughness/baseColorFactor",
+      0,
+      4,
+    ); // vec4 albedo
+    instance.registerUniformUpdater(
+      "pbrMetallicRoughness/metallicFactor",
+      16,
+      1,
+    ); // float metallic
+    instance.registerUniformUpdater(
+      "pbrMetallicRoughness/roughnessFactor",
+      20,
+      1,
+    ); // float roughness
+    instance.registerUniformUpdater("emissiveFactor", 32, 3); // vec3 emissive
+
+    return instance;
   }
 
   private static createUniformBuffer(

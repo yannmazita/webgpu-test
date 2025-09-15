@@ -7,8 +7,6 @@ export class Material {
   public readonly id: number;
   /** A cache for pipelines, keyed by mesh layouts. */
   protected pipelineCache = new Map<string, GPURenderPipeline>();
-  /** The bind group containing resources specific to this material (textures, uniforms). */
-  public bindGroup: GPUBindGroup;
   /** Does the material require alpha blending. */
   public isTransparent: boolean;
   public shader: Shader;
@@ -20,14 +18,12 @@ export class Material {
     device: GPUDevice,
     shader: Shader,
     layout: GPUBindGroupLayout,
-    bindGroup: GPUBindGroup,
     isTransparent = false,
   ) {
     this.id = Material.nextId++;
     this.device = device;
     this.shader = shader;
     this.materialBindGroupLayout = layout;
-    this.bindGroup = bindGroup;
     this.isTransparent = isTransparent;
   }
 
@@ -93,19 +89,6 @@ export class Material {
         expectedLocations.add(attr.shaderLocation);
       }
     }
-
-    // Log the vertex state configuration for debugging
-    console.log(`[Material ${this.id}] Creating pipeline with vertex state:`);
-    for (let i = 0; i < meshLayouts.length; i++) {
-      const layout = meshLayouts[i];
-      const locations = layout.attributes
-        .map((a) => `@location(${a.shaderLocation})`)
-        .join(", ");
-      console.log(
-        `  Buffer ${i}: stride=${layout.arrayStride}, locations=[${locations}]`,
-      );
-    }
-    console.log(`  Buffer ${meshLayouts.length}: Instance data`);
 
     const pipelineLayout = this.device.createPipelineLayout({
       bindGroupLayouts: [
