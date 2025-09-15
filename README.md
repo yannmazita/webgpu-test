@@ -6,6 +6,29 @@ Learning graphics programming with WebGPU.
 
 Press `C` to enable free camera look :)
 
+# Features
+
+This project is a modern (read bleeding-edge) WebGPU rendering engine built from scratch in TypeScript.
+
+### Architecture
+
+- **Multi-threaded:** Uses a Web Worker and `OffscreenCanvas` to run the entire rendering pipeline off the main thread, ensuring a smooth UI.
+- **Shared Memory Communication:** Employs `SharedArrayBuffer` for high-performance, lock-free communication of input and metrics between the main thread and the renderer.
+- **Entity-Component-System (ECS):** A data-oriented design (`src/core/ecs`) for flexible and efficient scene management.
+- **Resource Management:** Centralized loading and caching of assets like meshes, materials, and textures.
+
+### Rendering & Graphics
+
+- **Physically-Based Rendering (PBR):** Implements a metallic/roughness PBR workflow for realistic materials.
+- **Image-Based Lighting (IBL):** Features a complete IBL pipeline for realistic ambient lighting, including:
+  - Diffuse irradiance mapping.
+  - Pre-filtered specular environment maps for reflections.
+  - A pre-computed BRDF lookup table.
+- **Clustered Forward Lighting:** Can handle a large number of dynamic lights (I will explore deferred rendering).
+- **Dynamic Shadows:** Real-time shadow mapping from a primary light source (sun).
+- **Skybox / Environment Mapping:** Renders HDR environment maps as backgrounds and for IBL.
+- **glTF 2.0 Loading:** Supports loading complex scenes, including animated models, from the glTF format.
+
 # Setup
 
 Simply install dependencies then run vite server:
