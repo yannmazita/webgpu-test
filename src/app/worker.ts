@@ -191,11 +191,11 @@ async function initWorker(
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
   // Scene Lighting and Fog - Lighter fog to better see the demoModel
-  world.addResource(new SceneLightingComponent());
-  const sceneLighting = world.getResource(SceneLightingComponent)!;
-  sceneLighting.ambientColor.set([0.4, 0.42, 0.5, 1.0]);
-  sceneLighting.fogColor.set([0.8, 0.85, 0.9, 1.0]); // Light blue-gray
-  sceneLighting.fogParams0.set([0.01, 0.0, 0.0, 1.0]); // Very light fog
+  //world.addResource(new SceneLightingComponent());
+  //const sceneLighting = world.getResource(SceneLightingComponent)!;
+  //sceneLighting.ambientColor.set([0.4, 0.42, 0.5, 1.0]);
+  //sceneLighting.fogColor.set([0.8, 0.85, 0.9, 1.0]); // Light blue-gray
+  //sceneLighting.fogParams0.set([0.01, 0.0, 0.0, 1.0]); // Very light fog
 
   /*
   // Ground Plane - Darker to contrast with demoModel
@@ -241,21 +241,29 @@ async function initWorker(
     console.error("Failed to load model:", error);
     // Fallback: create a simple sphere
     demoModelEntity = world.createEntity();
-    const fallbackMaterial = await resourceManager.createPBRMaterial({
-      albedo: [0.8, 0.6, 0.4, 1],
+    const fallbackOptions = {
+      albedo: [0.8, 0.6, 0.4, 1] as [number, number, number, number],
       metallic: 0.1,
       roughness: 0.3,
-    });
+    };
+    const fallbackTemplate =
+      await resourceManager.createPBRMaterialTemplate(fallbackOptions);
+    const fallbackInstance = await resourceManager.createPBRMaterialInstance(
+      fallbackTemplate,
+      fallbackOptions,
+    );
+
     const sphereMesh = await resourceManager.createMesh(
       "fallback_sphere",
       createIcosphereMeshData(1.0, 3),
     );
     const demoModelTransform = new TransformComponent();
     demoModelTransform.setPosition(0, 0, 0);
+    demoModelTransform.setScale(1, 1, 1);
     world.addComponent(demoModelEntity, demoModelTransform);
     world.addComponent(
       demoModelEntity,
-      new MeshRendererComponent(sphereMesh, fallbackMaterial),
+      new MeshRendererComponent(sphereMesh, fallbackInstance),
     );
   }
 
@@ -264,18 +272,39 @@ async function initWorker(
     "light_sphere",
     createIcosphereMeshData(0.05, 2),
   );
-  const lightMaterialWhite = await resourceManager.createPBRMaterial({
-    albedo: [1, 1, 1, 1],
-    emissive: [1, 1, 1],
-  });
-  const lightMaterialWarm = await resourceManager.createPBRMaterial({
-    albedo: [1, 0.8, 0.6, 1],
-    emissive: [1, 0.8, 0.6],
-  });
-  const lightMaterialCool = await resourceManager.createPBRMaterial({
-    albedo: [0.6, 0.8, 1, 1],
-    emissive: [0.6, 0.8, 1],
-  });
+
+  const whiteOptions = {
+    albedo: [1, 1, 1, 1] as [number, number, number, number],
+    emissive: [1, 1, 1] as [number, number, number],
+  };
+  const whiteTemplate =
+    await resourceManager.createPBRMaterialTemplate(whiteOptions);
+  const lightMaterialWhite = await resourceManager.createPBRMaterialInstance(
+    whiteTemplate,
+    whiteOptions,
+  );
+
+  const warmOptions = {
+    albedo: [1, 0.8, 0.6, 1] as [number, number, number, number],
+    emissive: [1, 0.8, 0.6] as [number, number, number],
+  };
+  const warmTemplate =
+    await resourceManager.createPBRMaterialTemplate(warmOptions);
+  const lightMaterialWarm = await resourceManager.createPBRMaterialInstance(
+    warmTemplate,
+    warmOptions,
+  );
+
+  const coolOptions = {
+    albedo: [0.6, 0.8, 1, 1] as [number, number, number, number],
+    emissive: [0.6, 0.8, 1] as [number, number, number],
+  };
+  const coolTemplate =
+    await resourceManager.createPBRMaterialTemplate(coolOptions);
+  const lightMaterialCool = await resourceManager.createPBRMaterialInstance(
+    coolTemplate,
+    coolOptions,
+  );
 
   // Key Light (main light)
   keyLightEntity = world.createEntity();

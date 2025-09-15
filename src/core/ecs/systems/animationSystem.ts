@@ -5,6 +5,7 @@ import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { AnimationChannel, AnimationSampler } from "@/core/types/animation";
 import { quat, Quat } from "wgpu-matrix";
+import { MeshRendererComponent } from "../components/meshRendererComponent";
 
 /**
  * Finds the index of the keyframe that precedes or is at the given time `t`.
@@ -102,20 +103,10 @@ function sampleQuatLinear(
   return out;
 }
 
-/**
- * Samples an animation sampler at a specific time `t` to get an interpolated
- * value. It handles different interpolation types (STEP, LINEAR).
- * @param  s The sampler to evaluate.
- * @param  t The current animation time.
- * @param  outVec3 Optional. The array to write vec3 results to.
- * @param  outQuat Optional. The array to write quat results to.
- * @private
- */
 function sampleSampler(
   s: AnimationSampler,
   t: number,
-  outVec3?: Float32Array,
-  outQuat?: Float32Array,
+  outValue: Float32Array,
 ): void {
   const times = s.times;
   const idx = findKeyframeIndex(times, t);
@@ -126,7 +117,7 @@ function sampleSampler(
   const t1 = times[i1];
 
   if (s.valueStride === 3) {
-    // vec3 channels: translation or scale
+    // vec3
     let x: number, y: number, z: number;
     switch (s.interpolation) {
       case "STEP": {
@@ -136,90 +127,83 @@ function sampleSampler(
         z = s.values[base + 2];
         break;
       }
-      case "LINEAR":
       default: {
+        // LINEAR
         [x, y, z] = sampleVec3Linear(s.values, i0, i1, t0, t1, t);
         break;
       }
-      // CUBICSPLINE not implemented for vec3 in this first pass
     }
-    if (outVec3) {
-      outVec3[0] = x;
-      outVec3[1] = y;
-      outVec3[2] = z;
-    }
+    outValue[0] = x;
+    outValue[1] = y;
+    outValue[2] = z;
     return;
   }
 
   if (s.valueStride === 4) {
-    // quat channel: rotation
+    // quat or vec4
     switch (s.interpolation) {
       case "STEP": {
         const base = i0 * 4;
-        if (outQuat) {
-          outQuat[0] = s.values[base + 0];
-          outQuat[1] = s.values[base + 1];
-          outQuat[2] = s.values[base + 2];
-          outQuat[3] = s.values[base + 3];
-        }
+        outValue[0] = s.values[base + 0];
+        outValue[1] = s.values[base + 1];
+        outValue[2] = s.values[base + 2];
+        outValue[3] = s.values[base + 3];
         break;
       }
-      case "LINEAR":
       default: {
-        const q = sampleQuatLinear(s.values, i0, i1, t0, t1, t);
-        if (outQuat) {
-          outQuat[0] = q[0];
-          outQuat[1] = q[1];
-          outQuat[2] = q[2];
-          outQuat[3] = q[3];
+        // LINEAR
+        // Check if it's a quaternion or just a vec4 (like color)
+        if (s.path === "rotation") {
+          const q = sampleQuatLinear(s.values, i0, i1, t0, t1, t);
+          outValue[0] = q[0];
+          outValue[1] = q[1];
+          outValue[2] = q[2];
+          outValue[3] = q[3];
+        } else {
+          // Linear interpolate vec4
+          const base0 = i0 * 4;
+          const base1 = i1 * 4;
+          const u = t1 > t0 ? (t - t0) / (t1 - t0) : 0.0;
+          for (let i = 0; i < 4; ++i) {
+            outValue[i] =
+              s.values[base0 + i] +
+              (s.values[base1 + i] - s.values[base0 + i]) * u;
+          }
         }
         break;
       }
-      // CUBICSPLINE for rotation (component-wise) is not implemented in this pass
     }
     return;
   }
 }
 
-/**
- * Applies the interpolated value of a single animation channel to its target
- * entity's TransformComponent.
- * @param world The ECS world.
- * @param channel The channel to apply.
- * @param t The current animation time.
- * @param tmpVec3 A temporary vec3 array to avoid allocations.
- * @param tmpQuat A temporary quat array to avoid allocations.
- * @private
- */
 function applyChannel(
   world: World,
   channel: AnimationChannel,
   t: number,
-  tmpVec3: Float32Array,
-  tmpQuat: Float32Array,
+  tmpValue: Float32Array,
 ): void {
-  const transform = world.getComponent(
-    channel.targetEntity,
-    TransformComponent,
-  );
-  if (!transform) return;
+  const path = channel.path;
+  const component = world.getComponent(channel.targetEntity, path.component);
+  if (!component) return;
 
-  if (channel.path === "translation") {
-    sampleSampler(channel.sampler, t, tmpVec3, undefined);
-    transform.setPosition(tmpVec3[0], tmpVec3[1], tmpVec3[2]);
-    return;
-  }
+  sampleSampler(channel.sampler, t, tmpValue);
 
-  if (channel.path === "scale") {
-    sampleSampler(channel.sampler, t, tmpVec3, undefined);
-    transform.setScale(tmpVec3[0], tmpVec3[1], tmpVec3[2]);
-    return;
-  }
-
-  if (channel.path === "rotation") {
-    sampleSampler(channel.sampler, t, undefined, tmpQuat);
-    transform.setRotation(tmpQuat as unknown as quat);
-    return;
+  if (component instanceof TransformComponent) {
+    switch (path.property) {
+      case "translation":
+        component.setPosition(tmpValue[0], tmpValue[1], tmpValue[2]);
+        break;
+      case "rotation":
+        component.setRotation(tmpValue as unknown as quat);
+        break;
+      case "scale":
+        component.setScale(tmpValue[0], tmpValue[1], tmpValue[2]);
+        break;
+    }
+  } else if (component instanceof MeshRendererComponent) {
+    // This assumes the property is a uniform on the material instance.
+    component.material.updateUniform(path.property, tmpValue);
   }
 }
 
@@ -240,8 +224,7 @@ export function animationSystem(world: World, deltaTime: number): void {
   if (entities.length === 0) return;
 
   // Reusable temporaries
-  const tmpV = new Float32Array(3);
-  const tmpQ = new Float32Array(4);
+  const tmpValue = new Float32Array(4); // Max stride is 4 (quat/vec4)
 
   for (const e of entities) {
     const anim = world.getComponent(e, AnimationComponent)!;
@@ -251,9 +234,8 @@ export function animationSystem(world: World, deltaTime: number): void {
     // Advance time
     let t = anim.time + deltaTime * anim.speed;
     if (anim.loop) {
-      const dur = clip.duration > 0 ? clip.duration : 0.000001;
-      // keep t in [0, dur)
-      t = t - Math.floor(t / dur) * dur;
+      const dur = clip.duration > 0 ? clip.duration : 1e-6;
+      t = t % dur;
     } else {
       t = Math.min(t, clip.duration);
     }
@@ -261,7 +243,7 @@ export function animationSystem(world: World, deltaTime: number): void {
 
     // Apply all channels
     for (const ch of clip.channels) {
-      applyChannel(world, ch, t, tmpV, tmpQ);
+      applyChannel(world, ch, t, tmpValue);
     }
   }
 }

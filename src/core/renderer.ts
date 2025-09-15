@@ -14,6 +14,7 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
+import { MaterialInstance } from "./materials/materialInstance";
 
 export interface RendererStats {
   canvasWidth: number;
@@ -36,7 +37,7 @@ export interface RendererStats {
  */
 interface DrawBatch {
   pipeline: GPURenderPipeline;
-  material: Material;
+  materialInstance: MaterialInstance;
   mesh: Mesh;
   instanceCount: number;
   firstInstance: number; // The starting offset in the global instance buffer.
@@ -746,22 +747,16 @@ export class Renderer {
   ): number {
     if (batches.length === 0) return 0;
 
-    let lastMaterial: Material | null = null;
+    let lastMaterialInstance: MaterialInstance | null = null;
     let lastMesh: Mesh | null = null;
 
     for (const batch of batches) {
       const mesh = batch.mesh;
       passEncoder.setPipeline(batch.pipeline);
 
-      /*
-      if (import.meta.env.DEV && batch === batches[0]) {
-        this.validateMeshPipelineCompatibility(batch.mesh, batch.material);
-      }
-      */
-
-      if (batch.material !== lastMaterial) {
-        passEncoder.setBindGroup(1, batch.material.bindGroup);
-        lastMaterial = batch.material;
+      if (batch.materialInstance !== lastMaterialInstance) {
+        passEncoder.setBindGroup(1, batch.materialInstance.bindGroup);
+        lastMaterialInstance = batch.materialInstance;
       }
 
       if (mesh !== lastMesh) {
@@ -792,17 +787,6 @@ export class Renderer {
         this.instanceBuffer,
         instanceByteOffset,
       );
-
-      /*
-      if (batch === batches[0]) {
-        // Only log for first batch
-        console.log(`[Renderer] Drawing first batch:`);
-        console.log(`  Mesh vertex count: ${mesh.vertexCount}`);
-        console.log(`  Mesh index count: ${mesh.indexCount}`);
-        console.log(`  Instance count: ${batch.instanceCount}`);
-        console.log(`  Instance buffer offset: ${instanceByteOffset}`);
-      }
-      */
 
       // Draw
       if (mesh.indexBuffer) {
@@ -872,12 +856,12 @@ export class Renderer {
       instanceDataView,
     );
 
-    // Draw, batching consecutive renderables with same mesh and material
+    // Draw, batching consecutive renderables with same mesh and material instance
     let drawCalls = 0;
     let i = 0;
     while (i < renderables.length) {
       const { mesh, material } = renderables[i];
-      const pipeline = material.getPipeline(
+      const pipeline = material.material.getPipeline(
         mesh.layouts,
         Renderer.INSTANCE_DATA_LAYOUT,
         this.frameBindGroupLayout,
@@ -885,7 +869,7 @@ export class Renderer {
         this.depthFormat,
       );
 
-      // Count consecutive instances with same mesh and material
+      // Count consecutive instances with same mesh and material instance
       let count = 1;
       while (
         i + count < renderables.length &&
@@ -1134,18 +1118,21 @@ export class Renderer {
     this.opaqueBatches.length = 0;
     let currentInstanceOffset = 0;
     for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
-      for (const [mesh, instances] of pipelineBatch.meshMap.entries()) {
-        if (instances.length === 0) continue;
+      for (const drawGroup of pipelineBatch.drawGroups) {
+        if (drawGroup.instances.length === 0) continue;
 
         this.opaqueBatches.push({
-          pipeline: getPipelineCallback(pipelineBatch.material, mesh),
-          material: pipelineBatch.material,
-          mesh,
-          instanceCount: instances.length,
+          pipeline: getPipelineCallback(
+            drawGroup.materialInstance.material,
+            drawGroup.mesh,
+          ),
+          materialInstance: drawGroup.materialInstance,
+          mesh: drawGroup.mesh,
+          instanceCount: drawGroup.instances.length,
           firstInstance: currentInstanceOffset,
         });
 
-        for (const instance of instances) {
+        for (const instance of drawGroup.instances) {
           const floatOffset =
             currentInstanceOffset * Renderer.INSTANCE_STRIDE_IN_FLOATS;
           this.frameInstanceData.set(instance.modelMatrix, floatOffset);
@@ -1222,8 +1209,8 @@ export class Renderer {
 
     // Draw Skybox
     if (sceneData.skyboxMaterial) {
-      const skyboxMat = sceneData.skyboxMaterial;
-      const pipeline = skyboxMat.getPipeline(
+      const skyboxMatInstance = sceneData.skyboxMaterial;
+      const pipeline = skyboxMatInstance.material.getPipeline(
         [],
         Renderer.INSTANCE_DATA_LAYOUT,
         this.frameBindGroupLayout,
@@ -1231,7 +1218,7 @@ export class Renderer {
         this.depthFormat,
       );
       scenePassEncoder.setPipeline(pipeline);
-      scenePassEncoder.setBindGroup(1, skyboxMat.bindGroup);
+      scenePassEncoder.setBindGroup(1, skyboxMatInstance.bindGroup);
       scenePassEncoder.draw(3, 1, 0, 0);
     }
 

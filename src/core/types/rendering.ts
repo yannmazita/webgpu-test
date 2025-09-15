@@ -1,6 +1,6 @@
 // src/core/types/rendering.ts
 import { IBLComponent } from "../ecs/components/iblComponent";
-import { SkyboxMaterial } from "../materials/skyboxMaterial";
+import { MaterialInstance } from "../materials/materialInstance";
 import { Light, Renderable } from "./gpu";
 import { Vec4, vec4 } from "wgpu-matrix";
 
@@ -12,7 +12,7 @@ export class SceneRenderData {
   public renderables: Renderable[] = [];
   public lights: Light[] = [];
   public ambientColor: Vec4 = vec4.create();
-  public skyboxMaterial?: SkyboxMaterial;
+  public skyboxMaterial?: MaterialInstance;
   public iblComponent?: IBLComponent;
   public prefilteredMipLevels = 0;
 

@@ -120,9 +120,16 @@ export interface GLTFAnimation {
 
 export interface GLTFAnimationChannel {
   sampler: number; // index into animations.samplers
-  target: {
-    node?: number; // node index
-    path: "translation" | "rotation" | "scale" | "weights";
+  target: GLTFAnimationChannelTarget;
+}
+
+export interface GLTFAnimationChannelTarget {
+  node?: number; // node index
+  path: "translation" | "rotation" | "scale" | "weights";
+  extensions?: {
+    KHR_animation_pointer?: {
+      pointer: string;
+    };
   };
 }
 

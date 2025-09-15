@@ -1,6 +1,7 @@
 // src/core/types/gpu.ts
 import { Mat3, Mat4, Vec3, Vec4 } from "wgpu-matrix";
 import { Material } from "@/core/materials/material";
+import { MaterialInstance } from "../materials/materialInstance";
 
 /**
  * A union of all possible TypedArray constructors that can be used for GPU
@@ -65,7 +66,7 @@ export interface Mesh {
 export interface Renderable {
   mesh: Mesh;
   modelMatrix: Mat4;
-  material: Material;
+  material: MaterialInstance;
   isUniformlyScaled: boolean;
   castShadows?: boolean;
   receiveShadows?: boolean;
@@ -79,15 +80,6 @@ export interface InstanceData {
   isUniformlyScaled: boolean;
   /** Per-instance shadow receiving flag; packed into instance flags bitfield. */
   receiveShadows: boolean;
-}
-
-/**
- * Define a structure to hold all data needed for a batch draw call.
- * A batch is defined by a unique pipeline.
- */
-export interface PipelineBatch {
-  material: Material;
-  meshMap: Map<Mesh, InstanceData[]>;
 }
 
 export interface PBRMaterialOptions {

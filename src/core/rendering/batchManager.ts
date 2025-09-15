@@ -1,11 +1,25 @@
 // src/core/rendering/batchManager.ts
 import { Material } from "@/core/materials/material";
-import {
-  InstanceData,
-  Mesh,
-  PipelineBatch,
-  Renderable,
-} from "@/core/types/gpu";
+import { InstanceData, Mesh, Renderable } from "@/core/types/gpu";
+import { MaterialInstance } from "../materials/materialInstance";
+
+/**
+ * A group of objects that can be drawn with a single instanced draw call.
+ * They share the same mesh and material instance (and therefore the same pipeline).
+ */
+interface DrawGroup {
+  materialInstance: MaterialInstance;
+  mesh: Mesh;
+  instances: InstanceData[];
+}
+
+/**
+ * A collection of draw groups that all share the same render pipeline.
+ */
+export interface PipelineBatch {
+  materialTemplate: Material;
+  drawGroups: DrawGroup[];
+}
 
 /**
  * Manages batching of renderables to minimize draw calls and allocations.
@@ -21,7 +35,7 @@ export class BatchManager {
 
   // Track if batches need rebuilding
   private batchesDirty = true;
-  private lastOpaqueSignature: [number, number][] = [];
+  private lastOpaqueSignature = new Map<string, number>();
 
   // --- Debugging ---
   private readonly DEBUG_BATCHING = false; // Set to true to log rebuilds
@@ -34,56 +48,51 @@ export class BatchManager {
   }
 
   /**
-   * Generates a stable numeric key from material and mesh IDs.
+   * Generates a stable string key from material instance and mesh IDs.
+   * This key uniquely identifies a DrawGroup.
+   * @param materialInstanceId The ID of the unique material instance.
+   * @param meshId The ID of the mesh.
+   * @return A unique key for the draw group.
    */
-  private _combineIds(materialId: number, meshId: number): number {
-    // Combine two 26-bit safe numbers into one 52-bit safe number.
-    // Assumes materialId and meshId are well under 2^26 (67 million).
-    return materialId * 67108864 + meshId; // 67108864 = 2^26
+  private _getDrawGroupKey(materialInstanceId: number, meshId: number): string {
+    return `${materialInstanceId}-${meshId}`;
   }
 
   /**
    * Computes a canonical signature of the scene's opaque renderable structure.
-   * The signature is a sorted list of [structure_key, count] pairs.
+   * The signature is a map of unique draw group keys to their instance counts.
+   * @param renderables The list of renderables to analyze.
+   * @return A map representing the scene structure.
    */
   private _computeOpaqueSignature(
     renderables: Renderable[],
-  ): [number, number][] {
-    const counts = new Map<number, number>();
+  ): Map<string, number> {
+    const counts = new Map<string, number>();
     for (const r of renderables) {
-      // The `id` property is added dynamically in ResourceManager.
-      const key = this._combineIds((r.material as any).id, (r.mesh as any).id);
+      const key = this._getDrawGroupKey(
+        (r.material as any).id,
+        (r.mesh as any).id,
+      );
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    // Sort by key for a canonical representation that is easy to compare.
-    return Array.from(counts.entries()).sort((a, b) => a[0] - b[0]);
+    return counts;
   }
 
   /**
-   * Checks if the structure of opaque renderables has changed since the last
-   * frame.
-   *
-   * This is an optimization to avoid rebuilding the batch data structures if
-   * only the transforms of objects have changed. It works by creating a
-   * "signature" of the scene's renderable structure (a sorted list of
-   * material/mesh pairs and their counts) and comparing it to the signature
-   * from the previous frame.
-   *
-   * @param opaqueRenderables A list of the opaque renderable objects for the
-   *     current frame.
+   * Checks if the structure of opaque renderables has changed since the last frame.
+   * This is an optimization to avoid rebuilding batch data structures if only
+   * object transforms have changed.
+   * @param opaqueRenderables A list of opaque renderables.
    */
   public checkIfDirty(opaqueRenderables: Renderable[]): void {
     const newSignature = this._computeOpaqueSignature(opaqueRenderables);
 
-    if (newSignature.length !== this.lastOpaqueSignature.length) {
+    if (newSignature.size !== this.lastOpaqueSignature.size) {
       this.batchesDirty = true;
     } else {
       let areEqual = true;
-      for (let i = 0; i < newSignature.length; i++) {
-        if (
-          newSignature[i][0] !== this.lastOpaqueSignature[i][0] ||
-          newSignature[i][1] !== this.lastOpaqueSignature[i][1]
-        ) {
+      for (const [key, count] of newSignature) {
+        if (this.lastOpaqueSignature.get(key) !== count) {
           areEqual = false;
           break;
         }
@@ -105,54 +114,62 @@ export class BatchManager {
   /**
    * Gets or creates batches for opaque objects.
    *
-   * This method groups renderable objects by their render pipeline, material,
-   * and mesh. This allows the renderer to draw many objects with a single
-   * instanced draw call, which is much more efficient than drawing each
-   * object individually. It uses the `checkIfDirty` optimization to take a
-   * fast path when only instance data needs updating.
+   * This method groups renderable objects to optimize rendering performance.
+   * It uses the `checkIfDirty` optimization to take a fast path when only
+   * instance data (like transforms) needs updating, or a slow path to
+   * completely rebuild the batch structure if the scene's composition has changed.
    *
-   * @param allRenderables A list of all renderable objects for the current
-   *     frame.
-   * @param getPipeline A function that retrieves or creates a render
-   *     pipeline for a given material and mesh.
-   * @returns A map of render pipelines to their corresponding batches.
+   * @param allRenderables A list of all renderable objects for the frame.
+   * @param getPipeline A function that retrieves or creates a render pipeline
+   *  for a material and mesh.
+   * @return A map of pipelines to their batches.
    */
   public getOpaqueBatches(
     allRenderables: Renderable[],
     getPipeline: (material: Material, mesh: Mesh) => GPURenderPipeline,
   ): Map<GPURenderPipeline, PipelineBatch> {
     const opaqueRenderables = allRenderables.filter(
-      (r) => !r.material.isTransparent,
+      (r) => !r.material.material.isTransparent,
     );
     this.checkIfDirty(opaqueRenderables);
 
     if (!this.batchesDirty && this.opaqueBatches.size > 0) {
-      // Fast path: Just update instance data without recreating batch structure
+      // Fast path: Just update instance data without recreating batch structure.
       this.updateInstanceData(opaqueRenderables);
       return this.opaqueBatches;
     }
 
-    // Slow path: Clear and rebuild batches from scratch
+    // Slow path: Clear and rebuild batches from scratch.
     this.opaqueBatches.clear();
 
     for (const renderable of opaqueRenderables) {
       const { mesh, material, modelMatrix, isUniformlyScaled, receiveShadows } =
         renderable;
-      const pipeline = getPipeline(material, mesh);
+      const pipeline = getPipeline(material.material, mesh);
 
-      if (!this.opaqueBatches.has(pipeline)) {
-        this.opaqueBatches.set(pipeline, {
-          material: material,
-          meshMap: new Map<Mesh, InstanceData[]>(),
-        });
+      let pipelineBatch = this.opaqueBatches.get(pipeline);
+      if (!pipelineBatch) {
+        pipelineBatch = {
+          materialTemplate: material.material,
+          drawGroups: [],
+        };
+        this.opaqueBatches.set(pipeline, pipelineBatch);
       }
 
-      const pipelineBatch = this.opaqueBatches.get(pipeline)!;
-      if (!pipelineBatch.meshMap.has(mesh)) {
-        pipelineBatch.meshMap.set(mesh, []);
+      let drawGroup = pipelineBatch.drawGroups.find(
+        (g) => g.mesh === mesh && g.materialInstance === material,
+      );
+
+      if (!drawGroup) {
+        drawGroup = {
+          mesh: mesh,
+          materialInstance: material,
+          instances: [],
+        };
+        pipelineBatch.drawGroups.push(drawGroup);
       }
 
-      pipelineBatch.meshMap.get(mesh)!.push({
+      drawGroup.instances.push({
         modelMatrix,
         isUniformlyScaled,
         receiveShadows: receiveShadows !== false,
@@ -164,47 +181,67 @@ export class BatchManager {
   }
 
   /**
-   * Updates only the instance data without recreating batch structures.
-   * This is the fast path for when only transforms have changed.
+   * Updates only the instance data within the existing batch structure.
+   *
+   * This is the "fast path" used when the scene's structure (the number and
+   * type of objects) has not changed since the last frame. It avoids the
+   * overhead of recreating the entire batch map and its arrays. The method
+   * works by first clearing the `instances` array of each draw group and then
+   * efficiently repopulating them with the current frame's transform data.
+   *
+   * @param opaqueRenderables The list of opaque renderables for the
+   *     current frame.
    */
   private updateInstanceData(opaqueRenderables: Renderable[]): void {
-    // Build a lookup map for O(1) instance placement
-    const instanceLookup = new Map<number, InstanceData[]>();
-    for (const batch of this.opaqueBatches.values()) {
-      for (const [mesh, instances] of batch.meshMap.entries()) {
-        instances.length = 0; // Clear for repopulation
-        const key = this._combineIds(
-          (batch.material as any).id,
-          (mesh as any).id,
-        );
-        instanceLookup.set(key, instances);
+    // 1. Clear all instance arrays within the existing batch structure.
+    for (const pipelineBatch of this.opaqueBatches.values()) {
+      for (const drawGroup of pipelineBatch.drawGroups) {
+        drawGroup.instances.length = 0;
       }
     }
 
-    // Repopulate with current frame data using the lookup
-    for (const r of opaqueRenderables) {
-      const key = this._combineIds((r.material as any).id, (r.mesh as any).id);
-      const instances = instanceLookup.get(key);
-      if (instances) {
-        instances.push({
-          modelMatrix: r.modelMatrix,
-          isUniformlyScaled: r.isUniformlyScaled,
-          receiveShadows: r.receiveShadows !== false,
-        });
+    // 2. Create a temporary lookup map for efficient repopulation.
+    const groupLookup = new Map<string, DrawGroup>();
+    for (const batch of this.opaqueBatches.values()) {
+      for (const group of batch.drawGroups) {
+        const key = this._getDrawGroupKey(
+          group.materialInstance.id,
+          (group.mesh as any).id,
+        );
+        groupLookup.set(key, group);
       }
+    }
+
+    // 3. Repopulate the cleared instance arrays with new data.
+    for (const renderable of opaqueRenderables) {
+      const { mesh, material, modelMatrix, isUniformlyScaled, receiveShadows } =
+        renderable;
+
+      const key = this._getDrawGroupKey(material.id, (mesh as any).id);
+      const drawGroup = groupLookup.get(key);
+
+      if (!drawGroup) {
+        console.error(
+          "BatchManager consistency error in updateInstanceData: DrawGroup not found.",
+          "This indicates a mismatch with checkIfDirty logic.",
+        );
+        continue;
+      }
+
+      // Add the new instance data to the group.
+      drawGroup.instances.push({
+        modelMatrix,
+        isUniformlyScaled,
+        receiveShadows: receiveShadows !== false,
+      });
     }
   }
 
   /**
    * Gets a pre-allocated Float32Array for instance data.
    *
-   * This method provides a view into a larger, pre-allocated array buffer.
-   * This is a memory optimization that avoids allocating a new array for
-   * instance data every frame, which helps to reduce garbage collection
-   * pauses.
-   *
    * @param size The number of instances to allocate space for.
-   * @returns A Float32Array view with the requested size.
+   * @return A Float32Array view with the requested size.
    */
   public getInstanceDataArray(size: number): Float32Array {
     const requiredSize = size * this.INSTANCE_STRIDE_IN_FLOATS;
@@ -221,10 +258,6 @@ export class BatchManager {
 
   /**
    * Marks the batches as dirty, forcing a rebuild on the next frame.
-   *
-   * This should be called whenever the structure of the scene changes in a
-   * way that affects batching, such as adding or removing objects, or
-   * changing their materials or meshes.
    */
   public invalidate(): void {
     this.batchesDirty = true;
