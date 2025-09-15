@@ -40,6 +40,13 @@ import { Entity } from "./ecs/entity";
 import { World } from "./ecs/world";
 import { setParent } from "./ecs/utils/hierarchy";
 import { MeshRendererComponent } from "./ecs/components/meshRendererComponent";
+import {
+  AnimationClip,
+  AnimationChannel,
+  AnimationSampler,
+} from "@/core/types/animation";
+import { AnimationComponent } from "@/core/ecs/components/animationComponent";
+import { GLTFAnimation } from "@/loaders/gltfLoader";
 
 // MikkTSpace WASM loader and wrapper
 let mikktspace: {
@@ -697,6 +704,95 @@ export class ResourceManager {
         sceneRootEntity,
         materials,
         nodeToEntityMap,
+      );
+    }
+
+    // --- Parse glTF Animations (node-based) ---
+    const clips: AnimationClip[] = [];
+    const animations: GLTFAnimation[] | undefined = gltf.json.animations;
+    if (animations && animations.length > 0) {
+      for (const anim of animations) {
+        const channels: AnimationChannel[] = [];
+        let duration = 0;
+
+        // Build samplers cache per animation (they are per-anim)
+        const samplerCache: AnimationSampler[] = new Array(
+          anim.samplers.length,
+        );
+        for (let si = 0; si < anim.samplers.length; si++) {
+          const s = anim.samplers[si];
+          const times = getAccessorData(gltf, s.input) as Float32Array;
+          const values = getAccessorData(gltf, s.output) as Float32Array;
+          const interpolation = (s.interpolation ?? "LINEAR") as
+            | "LINEAR"
+            | "STEP"
+            | "CUBICSPLINE";
+
+          // Determine stride from accessor type: translation/scale -> VEC3, rotation -> VEC4
+          const outAccessor = gltf.json.accessors![s.output];
+          const stride =
+            outAccessor.type === "VEC3"
+              ? 3
+              : outAccessor.type === "VEC4"
+                ? 4
+                : 3;
+
+          samplerCache[si] = {
+            times,
+            values,
+            interpolation,
+            valueStride: stride,
+          };
+
+          if (times.length > 0) {
+            const endT = times[times.length - 1];
+            if (endT > duration) duration = endT;
+          }
+        }
+
+        for (const ch of anim.channels) {
+          const targetNode = ch.target.node;
+          if (targetNode === undefined) continue;
+          const targetEntity = nodeToEntityMap.get(targetNode);
+          if (targetEntity === undefined) continue;
+
+          // Ignore morph target weights for now; support TRS only
+          if (
+            ch.target.path !== "translation" &&
+            ch.target.path !== "rotation" &&
+            ch.target.path !== "scale"
+          ) {
+            console.warn(
+              "[GLTF] Ignoring animation channel path:",
+              ch.target.path,
+            );
+            continue;
+          }
+
+          // Create channel with its sampler
+          const sampler = samplerCache[ch.sampler];
+          channels.push({
+            targetEntity,
+            path: ch.target.path,
+            sampler,
+          });
+        }
+
+        const clipName = anim.name ?? "GLTF_Animation";
+        clips.push({ name: clipName, duration, channels });
+      }
+    }
+
+    if (clips.length > 0) {
+      // Attach a single AnimationComponent to the scene root for now
+      world.addComponent(sceneRootEntity, new AnimationComponent(clips));
+      console.log(
+        `[ResourceManager] Loaded ${clips.length} animation clip(s) from GLTF`,
+        clips.map((c) => ({
+          name: c.name,
+          duration: c.duration.toFixed(3),
+          channels: c.channels.length,
+        })),
       );
     }
 
