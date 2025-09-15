@@ -16,6 +16,7 @@ export interface GLTF {
   textures?: GLTFTexture[];
   images?: GLTFImage[];
   samplers?: GLTFSampler[];
+  animations?: GLTFAnimation[];
 }
 
 export interface GLTFScene {
@@ -103,6 +104,26 @@ export interface GLTFSampler {
   minFilter?: number; // 9728: NEAREST, 9729: LINEAR, 9984: NEAREST_MIPMAP_NEAREST, etc.
   wrapS?: number; // 10497: REPEAT
   wrapT?: number; // 10497: REPEAT
+}
+
+export interface GLTFAnimationSampler {
+  input: number; // accessor index (keyframe times)
+  output: number; // accessor index (keyframe values)
+  interpolation?: "LINEAR" | "STEP" | "CUBICSPLINE";
+}
+
+export interface GLTFAnimation {
+  name?: string;
+  channels: GLTFAnimationChannel[];
+  samplers: GLTFAnimationSampler[];
+}
+
+export interface GLTFAnimationChannel {
+  sampler: number; // index into animations.samplers
+  target: {
+    node?: number; // node index
+    path: "translation" | "rotation" | "scale" | "weights";
+  };
 }
 
 // --- Parser Implementation ---

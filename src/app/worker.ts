@@ -47,6 +47,7 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
+import { animationSystem } from "@/core/ecs/systems/animationSystem";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -224,7 +225,8 @@ async function initWorker(
       //"/assets/models/gltf/khronos-samples/AntiqueCamera.glb",
       //"/assets/models/gltf/khronos-samples/BoomBox.glb",
       //"/assets/models/gltf/khronos-samples/CompareNormal.glb",
-      "/assets/models/gltf/khronos-samples/CompareAmbientOcclusion.glb",
+      //"/assets/models/gltf/khronos-samples/CompareAmbientOcclusion.glb",
+      "/assets/models/gltf/khronos-samples/AnimatedColorsCube.glb",
     );
     console.log("[Worker] GLTF scene loaded.");
 
@@ -387,6 +389,7 @@ function frame(now: number) {
     cameraTransform.setRotation(rotation);
   }
 
+  /*
   // Rotate the model slowly
   if (demoModelEntity !== -1) {
     const demoModelTransform = world.getComponent(
@@ -400,6 +403,10 @@ function frame(now: number) {
       demoModelTransform.setRotation(rotation);
     }
   }
+  */
+
+  // Drive animations (node-TRS) before recomputing world transforms
+  animationSystem(world, dt);
 
   transformSystem(world);
   cameraSystem(world);
