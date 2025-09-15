@@ -94,8 +94,8 @@ let metricsFrameId = 0;
 // State for dt and camera orbit
 let lastFrameTime = 0;
 let animationStartTime = 0;
-const orbitRadius = 3.0;
-const orbitHeight = 1.0;
+const orbitRadius = 15.0;
+const orbitHeight = 2.0;
 
 async function initWorker(
   offscreen: OffscreenCanvas,

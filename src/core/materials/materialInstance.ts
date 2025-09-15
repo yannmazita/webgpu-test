@@ -34,7 +34,7 @@ export class MaterialInstance {
 
   /**
    * Registers a function that knows how to update a specific part of the uniform buffer.
-   * @param propertyPath The property path (e.g., "pbrMetallicRoughness/baseColorFactor").
+   * @param propertyPath The property path (ex: "pbrMetallicRoughness/baseColorFactor").
    * @param byteOffset The byte offset within the uniform buffer to write to.
    * @param sizeInFloats The number of float32 values to write.
    */
@@ -63,7 +63,7 @@ export class MaterialInstance {
   /**
    * Updates a named uniform property for this material instance.
    * This performs a partial write to the GPU uniform buffer.
-   * @param propertyPath The property to update (e.g., "pbrMetallicRoughness/baseColorFactor").
+   * @param propertyPath The property to update (ex: "pbrMetallicRoughness/baseColorFactor").
    * @param value The new value as a Float32Array.
    */
   public updateUniform(propertyPath: string, value: Float32Array): void {

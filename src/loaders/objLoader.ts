@@ -65,7 +65,7 @@ export const parseOBJ = (text: string): OBJGeometry => {
 
     const faceVertexStrings = line.trim().substring(2).split(/\s+/);
 
-    // Triangulate the face if it's a polygon (e.g., a quad)
+    // Triangulate the face if it's a polygon (ex: a quad)
     // using a simple fan triangulation.
     const triangleCount = faceVertexStrings.length - 2;
     for (let i = 0; i < triangleCount; i++) {
