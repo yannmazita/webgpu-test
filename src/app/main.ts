@@ -25,7 +25,7 @@ if (!hud) throw new Error("HUD element not found");
 // --- ImGui State ---
 let uiDevice: GPUDevice | null = null;
 let uiContext: GPUCanvasContext | null = null;
-let showMyEditorWindow = true; // Use a separate flag for our custom window
+let showMyEditorWindow = true;
 
 async function initUI() {
   if (!navigator.gpu) throw new Error("WebGPU not supported");
@@ -44,10 +44,10 @@ async function initUI() {
   uiContext.configure({
     device: uiDevice,
     format: presentationFormat,
-    alphaMode: "premultiplied", // lets you overlay transparently
+    alphaMode: "premultiplied",
   });
 
-  await initDebugUI(uiCanvas, uiDevice); // call your helper, not initUI()
+  await initDebugUI(uiCanvas, uiDevice);
 
   const io = ImGui.GetIO();
   io.ConfigFlags |= ImGui.ConfigFlags.NavEnableKeyboard;
