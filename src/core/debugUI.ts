@@ -26,20 +26,10 @@ export async function initDebugUI(
  */
 export function beginDebugUIFrame(canvas: HTMLCanvasElement): void {
   const io = ImGui.GetIO();
-  // Update display size and pixel ratio for correct scaling
   io.DisplaySize.x = canvas.clientWidth;
   io.DisplaySize.y = canvas.clientHeight;
-  // The backend should handle devicePixelRatio automatically, but setting it
-  // explicitly ensures correctness if it doesn't.
   io.DisplayFramebufferScale.x = window.devicePixelRatio || 1;
   io.DisplayFramebufferScale.y = window.devicePixelRatio || 1;
-
-  // --- Pointer Events Logic ---
-  if (io.WantCaptureMouse || io.WantCaptureKeyboard) {
-    canvas.style.pointerEvents = "auto";
-  } else {
-    canvas.style.pointerEvents = "none";
-  }
 
   ImGuiImplWeb.BeginRender();
 }

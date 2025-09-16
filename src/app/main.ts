@@ -66,18 +66,67 @@ let isPointerLockedState = false;
 let mouseX = 0;
 let mouseY = 0;
 
+const updateUICanvasInteractivity = (): void => {
+  // When pointer is unlocked, always allow UI canvas to receive events
+  // so the user can re-activate ImGui by clicking it.
+  if (!isPointerLockedState) {
+    uiCanvas.style.pointerEvents = "auto";
+    return;
+  }
+
+  // When pointer is locked, allow UI canvas events only if ImGui wants them
+  // (rare case: overlays you explicitly open).
+  const io = ImGui.GetIO();
+  uiCanvas.style.pointerEvents = io.WantCaptureMouse ? "auto" : "none";
+};
+
 const handleKeyDown = (e: KeyboardEvent): void => {
   updateKeyState(inputContext, e.code, true);
+
+  if (e.code === "Escape" && isPointerLockedState) {
+    document.exitPointerLock();
+    // Immediately enable UI interactivity upon unlock
+    // (pointerlockchange event also handles it, but do it proactively).
+    setTimeout(updateUICanvasInteractivity, 0);
+  }
 };
+
 const handleKeyUp = (e: KeyboardEvent): void => {
   updateKeyState(inputContext, e.code, false);
 };
-const handleCanvasClick = async (): Promise<void> => {
-  // Only lock pointer if not interacting with ImGui
-  if (!ImGui.GetIO().WantCaptureMouse && !isPointerLockedState) {
+
+const handleCanvasClick = async (e: MouseEvent): Promise<void> => {
+  const io = ImGui.GetIO();
+
+  // If ImGui wants the mouse, don't lock.
+  if (io.WantCaptureMouse) return;
+
+  // Only lock pointer if we're actually clicking the game canvas and pointer isn't already locked
+  if (e.target === canvas && !isPointerLockedState) {
     await canvas.requestPointerLock();
   }
 };
+
+const handleUICanvasClick = async (e: MouseEvent): Promise<void> => {
+  const io = ImGui.GetIO();
+
+  // If already locked, consume event (safety; normally events go to locked element)
+  if (isPointerLockedState) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
+  // When unlocked: if ImGui wants the mouse, let UI handle it (no lock).
+  // If ImGui does not want the mouse (clicked "empty" UI area), initiate pointer lock.
+  if (!io.WantCaptureMouse) {
+    e.preventDefault();
+    e.stopPropagation();
+    await canvas.requestPointerLock();
+    // Interactivity will update on pointerlockchange
+  }
+};
+
 const handlePointerLockChange = (): void => {
   isPointerLockedState = document.pointerLockElement === canvas;
   updatePointerLock(inputContext, isPointerLockedState);
@@ -89,7 +138,11 @@ const handlePointerLockChange = (): void => {
     mouseY = Math.max(0, Math.floor(h * 0.5));
     updateMousePosition(inputContext, mouseX, mouseY);
   }
+
+  // Update UI pointer-events now that lock state changed
+  updateUICanvasInteractivity();
 };
+
 const handleMouseMove = (e: MouseEvent): void => {
   const w = canvas.clientWidth || 0;
   const h = canvas.clientHeight || 0;
@@ -115,7 +168,8 @@ const handleMouseMove = (e: MouseEvent): void => {
 document.addEventListener("keydown", handleKeyDown);
 document.addEventListener("keyup", handleKeyUp);
 document.addEventListener("pointerlockchange", handlePointerLockChange);
-canvas.addEventListener("click", handleCanvasClick); // eslint-disable-line
+canvas.addEventListener("click", handleCanvasClick);
+uiCanvas.addEventListener("click", handleUICanvasClick);
 document.addEventListener("mousemove", handleMouseMove);
 
 // --- HUD Setup ---
@@ -149,7 +203,8 @@ const updateHud = (nowMs: number) => {
     `Visible (O/T): ${m.visOpaque}/${m.visTransp}\n` +
     `Draws (O/T): ${m.drawsOpaque}/${m.drawsTransp}\n` +
     `Instances (O/T): ${m.instOpaque}/${m.instTransp}\n` +
-    `Cluster L/cluster avg/max: ${avgL.toFixed(2)}/${maxL}  |  Overflows: ${ofl}`;
+    `Cluster L/cluster avg/max: ${avgL.toFixed(2)}/${maxL}  |  Overflows: ${ofl}\n` +
+    `Pointer Lock: ${isPointerLockedState ? "ON" : "OFF"} (Press ESC to exit, C to toggle camera)`;
 
   lastHudUpdateTime = nowMs;
 };
@@ -227,7 +282,21 @@ function drawUI() {
   ImGui.Text("Hello, world!");
   ImGui.Checkbox("Show My Editor Window", showMyEditorWindowRef);
   showMyEditorWindow = showMyEditorWindowRef[0];
+
+  // Debug info
+  ImGui.Separator();
+  ImGui.Text(`Pointer Lock: ${isPointerLockedState ? "ON" : "OFF"}`);
+  ImGui.Text("Press ESC to exit pointer lock");
+  ImGui.Text("Press C to toggle camera mode");
+
+  const io = ImGui.GetIO();
+  ImGui.Text(`ImGui WantCaptureMouse: ${io.WantCaptureMouse}`);
+  ImGui.Text(`ImGui WantCaptureKeyboard: ${io.WantCaptureKeyboard}`);
+
   ImGui.End();
+
+  // UI interactivity reflects current lock & ImGui state every frame
+  updateUICanvasInteractivity();
 
   // --- Render ---
   const uiCommandEncoder = uiDevice.createCommandEncoder();
@@ -270,4 +339,5 @@ const tick = (now: number) => {
 };
 
 await initUI();
+updateUICanvasInteractivity();
 requestAnimationFrame(tick);
