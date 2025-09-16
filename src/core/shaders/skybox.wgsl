@@ -10,11 +10,12 @@ struct CameraUniforms {
 
 struct SceneUniforms {
     cameraPos: vec4<f32>,
-    ambientColor: vec4<f32>,
-    fogColor: vec4<f32>,
-    fogParams0: vec4<f32>,
-    fogParams1: vec4<f32>,
-    hdr_enabled: f32, // 1.0 if HDR is on, 0.0 otherwise
+    fogColor: vec4<f32>, // ambient in-scattering
+    fogParams: vec4<f32>, // [density, height, heightFalloff, inscatteringIntensity]
+    hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
+    prefiltered_mip_levels: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;

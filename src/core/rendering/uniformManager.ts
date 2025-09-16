@@ -13,8 +13,8 @@ export class UniformManager {
   private lightStorageBufferCapacity: number;
 
   constructor() {
-    // cameraPos(4) + ambient(4) + fogColor(4) + fogParams0(4) + fogParams1(4) + hdr_enabled(1) + padding(3) = 24 floats
-    this.sceneDataArray = new Float32Array(24);
+    // scene array: cameraPos(4) + fogColor(4) + fogParams(4) + hdr(1) + prefiltered(1) + pad(2) = 16 floats
+    this.sceneDataArray = new Float32Array(16);
     this.cameraDataArray = new Float32Array(32); // For 2 matrices
     this.lightStorageBufferCapacity = 4;
     const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT; // 3 vec4 per light
@@ -55,10 +55,11 @@ export class UniformManager {
     device: GPUDevice,
     buffer: GPUBuffer,
     camera: CameraComponent,
-    ambientColor: Vec4,
     fogColor: Vec4,
-    fogParams0: Vec4, // [distanceDensity, height, heightFalloff, enableFlags]
-    fogParams1: Vec4, // reserved/extensible
+    fogDensity: number,
+    fogHeight: number,
+    fogHeightFalloff: number,
+    fogInscatteringIntensity: number,
     hdrEnabled?: boolean,
     prefilteredMipLevels?: number,
   ): void {
@@ -67,16 +68,17 @@ export class UniformManager {
     this.sceneDataArray[1] = camera.inverseViewMatrix[13];
     this.sceneDataArray[2] = camera.inverseViewMatrix[14];
     this.sceneDataArray[3] = 1.0;
-    // ambient
-    this.sceneDataArray.set(ambientColor, 4);
-    // fog
-    this.sceneDataArray.set(fogColor, 8);
-    this.sceneDataArray.set(fogParams0, 12);
-    this.sceneDataArray.set(fogParams1, 16);
+    // fog color (for ambient in-scattering)
+    this.sceneDataArray.set(fogColor, 4);
+    // fog params
+    this.sceneDataArray[8] = fogDensity;
+    this.sceneDataArray[9] = fogHeight;
+    this.sceneDataArray[10] = fogHeightFalloff;
+    this.sceneDataArray[11] = fogInscatteringIntensity;
     // hdr flag (default false if not provided)
-    this.sceneDataArray[20] = hdrEnabled ? 1.0 : 0.0;
+    this.sceneDataArray[12] = hdrEnabled ? 1.0 : 0.0;
     // prefiltered_mip_levels (default 0 if not provided)
-    this.sceneDataArray[21] = prefilteredMipLevels ?? 0;
+    this.sceneDataArray[13] = prefilteredMipLevels ?? 0;
 
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }

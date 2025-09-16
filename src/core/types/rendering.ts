@@ -11,16 +11,16 @@ import { Vec4, vec4 } from "wgpu-matrix";
 export class SceneRenderData {
   public renderables: Renderable[] = [];
   public lights: Light[] = [];
-  public ambientColor: Vec4 = vec4.create();
   public skyboxMaterial?: MaterialInstance;
   public iblComponent?: IBLComponent;
   public prefilteredMipLevels = 0;
 
   // fog parameters
-  public fogColor: Vec4 = vec4.fromValues(0.6, 0.7, 0.8, 1.0);
-  // [distanceDensity, height, heightFalloff, enableFlags]
-  public fogParams0: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0);
-  public fogParams1: Vec4 = vec4.fromValues(0.0, 0.0, 0.0, 0.0); // reserved
+  public fogColor: Vec4 = vec4.fromValues(0.5, 0.6, 0.7, 1.0);
+  public fogDensity = 0.02;
+  public fogHeight = 0.0;
+  public fogHeightFalloff = 0.1;
+  public fogInscatteringIntensity = 0.8;
 
   public clear(): void {
     this.renderables.length = 0;
@@ -28,6 +28,6 @@ export class SceneRenderData {
     this.skyboxMaterial = undefined;
     this.iblComponent = undefined;
     this.prefilteredMipLevels = 0;
-    // ambientColor/fog params persist as scene configuration
+    // fog params persist as scene configuration
   }
 }
