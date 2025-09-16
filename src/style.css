@@ -8,8 +8,20 @@ body {
 }
 
 #canvas {
+  position: relative;
+  z-index: 1;
   width: 100vw;
   height: 100vh;
+}
+
+#hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  color: hsla(82, 100%, 36%, 1);
+  background-color: hsla(0, 0%, 0%, 0.5);
+  pointer-events: none; /* Let pointer events go through to canvas */
 }
 
 #app {
@@ -17,5 +29,4 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  /*background-color: #111;*/
 }

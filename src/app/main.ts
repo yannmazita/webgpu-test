@@ -13,6 +13,8 @@ import {
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
+const hud = document.querySelector<HTMLDivElement>("#hud");
+if (!hud) throw new Error("HUD element not found");
 
 // Setup shared memory and contexts
 const inputBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
@@ -78,10 +80,7 @@ canvas.addEventListener("click", handleCanvasClick); // eslint-disable-line
 document.addEventListener("mousemove", handleMouseMove);
 
 // --- HUD Setup ---
-const hud = document.createElement("div");
-hud.id = "hud";
 hud.textContent = "Initializing...";
-document.body.appendChild(hud);
 
 const HUD_UPDATE_INTERVAL_MS = 250;
 let lastHudUpdateTime = 0;
