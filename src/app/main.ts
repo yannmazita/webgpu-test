@@ -10,11 +10,49 @@ import {
   updateMousePosition,
   updatePointerLock,
 } from "@/core/input";
+import { ImGui } from "@mori2003/jsimgui";
+import { beginDebugUIFrame, endDebugUI, initDebugUI } from "@/core/debugUI";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
+
+const uiCanvas = document.querySelector<HTMLCanvasElement>("#ui-canvas");
+if (!uiCanvas) throw new Error("UI Canvas element not found");
+
 const hud = document.querySelector<HTMLDivElement>("#hud");
 if (!hud) throw new Error("HUD element not found");
+
+// --- ImGui State ---
+let uiDevice: GPUDevice | null = null;
+let uiContext: GPUCanvasContext | null = null;
+let showMyEditorWindow = true; // Use a separate flag for our custom window
+
+async function initUI() {
+  if (!navigator.gpu) throw new Error("WebGPU not supported");
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error("No adapter found");
+  uiDevice = await adapter.requestDevice();
+
+  uiCanvas.width = canvas.clientWidth;
+  uiCanvas.height = canvas.clientHeight;
+
+  // Create a WebGPU context for the UI canvas
+  uiContext = uiCanvas.getContext("webgpu") as GPUCanvasContext;
+  if (!uiContext) throw new Error("Failed to get WebGPU context");
+
+  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  uiContext.configure({
+    device: uiDevice,
+    format: presentationFormat,
+    alphaMode: "premultiplied", // lets you overlay transparently
+  });
+
+  await initDebugUI(uiCanvas, uiDevice); // call your helper, not initUI()
+
+  const io = ImGui.GetIO();
+  io.ConfigFlags |= ImGui.ConfigFlags.NavEnableKeyboard;
+  io.ConfigFlags |= ImGui.ConfigFlags.DockingEnable;
+}
 
 // Setup shared memory and contexts
 const inputBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
@@ -35,7 +73,8 @@ const handleKeyUp = (e: KeyboardEvent): void => {
   updateKeyState(inputContext, e.code, false);
 };
 const handleCanvasClick = async (): Promise<void> => {
-  if (!isPointerLockedState) {
+  // Only lock pointer if not interacting with ImGui
+  if (!ImGui.GetIO().WantCaptureMouse && !isPointerLockedState) {
     await canvas.requestPointerLock();
   }
 };
@@ -177,6 +216,40 @@ worker.addEventListener("message", (ev) => {
   }
 });
 
+function drawUI() {
+  if (!uiDevice || !uiContext) return;
+
+  beginDebugUIFrame(uiCanvas);
+
+  // --- ImGui widgets ---
+  const showMyEditorWindowRef: [boolean] = [showMyEditorWindow];
+  ImGui.Begin("Editor");
+  ImGui.Text("Hello, world!");
+  ImGui.Checkbox("Show My Editor Window", showMyEditorWindowRef);
+  showMyEditorWindow = showMyEditorWindowRef[0];
+  ImGui.End();
+
+  // --- Render ---
+  const uiCommandEncoder = uiDevice.createCommandEncoder();
+
+  const textureView = uiContext.getCurrentTexture().createView();
+
+  const uiPassEncoder = uiCommandEncoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: textureView,
+        loadOp: "clear",
+        storeOp: "store",
+        clearValue: { r: 0, g: 0, b: 0, a: 0 }, // transparent clear
+      },
+    ],
+  });
+  endDebugUI(uiPassEncoder);
+  uiPassEncoder.end();
+
+  uiDevice.queue.submit([uiCommandEncoder.finish()]);
+}
+
 const tick = (now: number) => {
   // Always check for resize at the start of a frame.
   // sendResize() is cheap and only posts a message when dimensions change.
@@ -192,7 +265,9 @@ const tick = (now: number) => {
     });
   }
   updateHud(now);
+  drawUI();
   requestAnimationFrame(tick);
 };
 
+await initUI();
 requestAnimationFrame(tick);
