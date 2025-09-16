@@ -144,7 +144,7 @@ fn vs_main(
     var modelMatrix3x3 = mat3x3<f32>(
         modelMatrix[0].xyz,
         modelMatrix[1].xyz,
-        modelMatrix[2].xyz
+        modelMatrix[2].xyz,
     );
 
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
