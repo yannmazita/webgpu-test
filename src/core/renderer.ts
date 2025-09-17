@@ -72,7 +72,6 @@ export class Renderer {
   private clusterBuilder!: ClusterBuilder;
   private dummyTexture!: GPUTexture;
   private dummyCubemapTexture!: GPUTexture;
-  private shadowDataBuffer!: GPUBuffer;
 
   // Optimization managers
   private batchManager!: BatchManager;
@@ -231,7 +230,7 @@ export class Renderer {
       this.resizePending = false;
     }
 
-    this.depthFormat = "depth32float";
+    this.depthFormat = "depth24plus";
     this.createDepthTexture();
 
     this.cameraUniformBuffer = this.device.createBuffer({
@@ -243,15 +242,6 @@ export class Renderer {
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
       size: 16 * 4, // 16 floats to match sceneDataArray in UniformManager
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    // This buffer will hold all shadow data for the main PBR pass
-    // (matrices array, splits, dir, color, params)
-    this.shadowDataBuffer = this.device.createBuffer({
-      label: "PBR_SHADOW_UNIFORMS",
-      // Mat4[4] + Vec4 + Vec4 + Vec4 + Vec4 = (16*4 + 4 + 4 + 4 + 4) * 4 = 320 bytes
-      size: 320,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -280,7 +270,7 @@ export class Renderer {
           binding: 0,
           visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
-        }, // camera (VP, V matrices)
+        }, // camera
         {
           binding: 1,
           visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
@@ -290,7 +280,7 @@ export class Renderer {
           binding: 2,
           visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
-        }, // scene (cameraPos, fog, etc.)
+        }, // scene
         {
           binding: 3,
           visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
@@ -300,12 +290,12 @@ export class Renderer {
           binding: 4,
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "read-only-storage" },
-        }, // cluster counts
+        }, // cluster counts (read in fs)
         {
           binding: 5,
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "read-only-storage" },
-        }, // cluster indices
+        }, // cluster indices (read in fs)
         {
           binding: 6,
           visibility: GPUShaderStage.FRAGMENT,
@@ -315,32 +305,32 @@ export class Renderer {
           binding: 7,
           visibility: GPUShaderStage.FRAGMENT,
           texture: { viewDimension: "cube" },
-        }, // prefiltered specular map
+        }, // prefiltered map
         {
           binding: 8,
           visibility: GPUShaderStage.FRAGMENT,
           texture: { viewDimension: "2d" },
-        }, // BRDF LUT
+        }, // brdf LUT
         {
           binding: 9,
           visibility: GPUShaderStage.FRAGMENT,
           sampler: {},
-        }, // IBL sampler
+        }, // ibl sampler
         {
           binding: 10,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: "depth", viewDimension: "2d-array" },
-        }, // CSM shadow map array
+          texture: { sampleType: "depth", viewDimension: "2d" },
+        }, // shadow map (depth)
         {
           binding: 11,
           visibility: GPUShaderStage.FRAGMENT,
           sampler: { type: "comparison" },
-        }, // shadow comparison sampler
+        }, // shadow compare sampler
         {
           binding: 12,
-          visibility: GPUShaderStage.FRAGMENT,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
-        }, // shadow uniforms for PBR pass (matrices, splits, etc.)
+        }, // shadow uniforms (light VP, dir/color, params)
       ],
     });
 
@@ -350,36 +340,45 @@ export class Renderer {
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
     );
 
-    // Initialize the shadow subsystem
+    // Initialize the shadow subsystem with current mesh/instance layouts
     this.shadowSubsystem = new ShadowSubsystem(this.device);
-    // The mesh layouts are consistent, so we can define them here.
-    // This matches the order in ResourceManager.createMesh
-    const meshLayouts: GPUVertexBufferLayout[] = [
-      {
-        arrayStride: 12,
-        attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
-      }, // Position
-      {
-        arrayStride: 12,
-        attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
-      }, // Normal
-      {
-        arrayStride: 8,
-        attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
-      }, // UV0
-      {
-        arrayStride: 16,
-        attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
-      }, // Tangent
-      {
-        arrayStride: 8,
-        attributes: [{ shaderLocation: 9, offset: 0, format: "float32x2" }],
-      }, // UV1
-    ];
     await this.shadowSubsystem.init(
-      meshLayouts,
+      // Use any mesh's layouts as a template; they are consistent across meshes.
+      // We don't have meshes at init time; we can pass an example layout. Reuse the PBR layout expectation:
+      [
+        // Positions
+        {
+          arrayStride: 12,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
+        },
+        // Normals
+        {
+          arrayStride: 12,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
+        },
+        // UV0
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
+        },
+        // Tangents
+        {
+          arrayStride: 16,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
+        },
+        // UV1
+        {
+          arrayStride: 8,
+          stepMode: "vertex",
+          attributes: [{ shaderLocation: 9, offset: 0, format: "float32x2" }],
+        },
+      ],
       Renderer.INSTANCE_DATA_LAYOUT,
-      this.depthFormat,
+      "depth32float",
     );
 
     // Check for errors after init
@@ -571,7 +570,7 @@ export class Renderer {
     sun?: SceneSunComponent,
     shadowSettings?: ShadowSettingsComponent,
   ): void {
-    // Update sun shadow matrices and its own UBO for the depth pass
+    // Update sun shadow uniforms first (if available)
     if (sun && sun.enabled && shadowSettings) {
       this.shadowSubsystem.updatePerFrame(camera, sun, shadowSettings);
     }
@@ -615,7 +614,7 @@ export class Renderer {
     // We create the frame bind group every frame. This is cheap
     // and ensures it's always valid and uses the latest resources.
     const ibl = sceneData.iblComponent;
-    const shadowBindings = this.shadowSubsystem.getFrameTextureBindings();
+    const shadowBindings = this.shadowSubsystem.getFrameBindings();
 
     this.frameBindGroup = this.device.createBindGroup({
       label: "FRAME_BIND_GROUP",
@@ -660,7 +659,10 @@ export class Renderer {
         },
         { binding: 10, resource: shadowBindings.shadowMapView },
         { binding: 11, resource: shadowBindings.shadowSampler },
-        { binding: 12, resource: { buffer: this.shadowDataBuffer } },
+        {
+          binding: 12,
+          resource: { buffer: shadowBindings.shadowUniformBuffer },
+        },
       ],
     });
 
@@ -957,23 +959,13 @@ export class Renderer {
   /**
    * Renders a single frame.
    *
-   * This method orchestrates the entire rendering pipeline for a frame:
-   * 1. Handles canvas resizing.
-   * 2. Updates all frame-level uniform buffers (camera, scene, lights, shadows).
-   * 3. Performs frustum culling on all scene objects.
-   * 4. Runs the light clustering compute shader.
-   * 5. Runs the multi-pass Cascaded Shadow Map depth rendering.
-   * 6. Runs the main scene render pass, drawing the skybox, opaque objects (batched),
-   *    and transparent objects (sorted back-to-front).
-   * 7. Optionally calls a callback to render UI or other overlays.
-   * 8. Submits all command buffers to the GPU.
-   *
+   * This method performs frustum culling, batching, and sorting of renderable
+   * objects, and then records and submits the necessary render passes to the
+   * GPU.
    * @param camera The camera to render from.
    * @param sceneData The data for the scene to render.
    * @param postSceneDrawCallback An optional callback to render UI or other
-   *     content after the main scene has been drawn.
-   * @param sun The primary directional light for the scene.
-   * @param shadowSettings The global settings for shadow rendering.
+   * content after the main scene has been drawn.
    */
   public render(
     camera: CameraComponent,
@@ -1017,7 +1009,7 @@ export class Renderer {
     this.transparentRenderables.length = 0;
     for (const r of sceneData.renderables) {
       if (this._isInFrustum(r, camera)) {
-        if (r.material.material.isTransparent) {
+        if (r.material.isTransparent) {
           this.transparentRenderables.push(r);
         } else {
           this.visibleRenderables.push(r);
@@ -1039,8 +1031,7 @@ export class Renderer {
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
-            (r) =>
-              r.castShadows !== false && !r.material.material.isTransparent,
+            (r) => r.castShadows !== false && !r.material.isTransparent,
           )
         : [];
     const shadowCasterCount = shadowCasters.length;
@@ -1079,8 +1070,9 @@ export class Renderer {
       for (let i = 0; i < shadowCasterCount; i++) {
         const floatOffset = i * floatsPerInstance;
         this.frameInstanceData.set(shadowCasters[i].modelMatrix, floatOffset);
-        // Shadow pass doesn't use receiveShadows flag, only isUniformlyScaled
-        const flags = shadowCasters[i].isUniformlyScaled ? 1 : 0;
+        const flags =
+          (shadowCasters[i].isUniformlyScaled ? 1 : 0) |
+          ((shadowCasters[i].receiveShadows !== false ? 1 : 0) << 1);
         u32[floatOffset + 16] = flags;
       }
       this.device.queue.writeBuffer(
@@ -1094,7 +1086,7 @@ export class Renderer {
       // Record the pass
       this.shadowSubsystem.recordShadowPass(
         shadowEncoder,
-        shadowSettings, // CORRECTED: Pass the whole settings object
+        shadowSettings.mapSize,
         shadowCasters,
         this.instanceBuffer,
       );

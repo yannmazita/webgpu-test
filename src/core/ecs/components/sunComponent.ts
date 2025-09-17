@@ -18,43 +18,19 @@ export class SceneSunComponent implements IComponent {
 }
 
 /**
- * Global shadow quality and behavior settings for the scene, including
- * Cascaded Shadow Maps (CSM).
+ * Global shadow quality/settings for the scene.
  */
 export class ShadowSettingsComponent implements IComponent {
-  /** Shadow map resolution (width=height). Higher values produce sharper shadows. */
+  /** Shadow map resolution (width=height). */
   public mapSize = 2048;
-  /** Number of cascades for CSM. Must be between 1 and 4. */
-  public numCascades = 4;
-  /**
-   * Controls the distribution of cascades. 0 is fully linear, 1 is fully
-   * logarithmic. A value around 0.7-0.8 is often a good starting point to
-   * give more resolution to closer cascades.
-   */
-  public cascadeLambda = 0.75;
-  /**
-   * Constant depth bias added in the shader during the shadow comparison.
-   * Helps prevent "shadow acne" on flat surfaces. Units are in normalized depth [0,1].
-   */
+  /** Depth bias applied in shader compare (in [0,1] depth). */
   public depthBias = 0.0015;
-  /**
-   * Slope-scale depth bias applied by the rasterizer during the shadow pass.
-   * Helps prevent "shadow acne" on surfaces at a steep angle to the light.
-   */
+  /** Raster slope-scale bias to reduce acne. */
   public slopeScaleBias = 3.0;
-  /**
-   * Constant depth bias applied by the rasterizer during the shadow pass.
-   * Units are relative to the depth format's precision.
-   */
+  /** Raster constant bias in depth units. */
   public constantBias = 1.0;
-  /**
-   * Radius for Percentage-Closer Filtering (PCF) in texels. A 3x3 kernel is
-   * used. A value of 1.0 samples adjacent texels. 0 disables PCF.
-   */
+  /** PCF radius in texels for 3x3 kernel; 0 disables PCF. */
   public pcfRadius = 1.0;
-  /**
-   * DEPRECATED for CSM. Half-extent of the ortho box for a single-cascade MVP.
-   * This is no longer used by the CSM implementation.
-   */
-  //public orthoHalfExtent = 20.0;
+  /** Half-extent of the ortho box for the MVP (MVP only). */
+  public orthoHalfExtent = 20.0;
 }
