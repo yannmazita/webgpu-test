@@ -78,11 +78,19 @@ struct PBRMaterialUniforms {
 }
 
 struct ShadowUniforms {
-    lightViewProj: mat4x4<f32>,
-    lightDir: vec4<f32>,    // xyz used
-    lightColor: vec4<f32>,  // rgb used
-    params0: vec4<f32>,     // intensity, pcfRadius, mapSize, depthBias
-}
+  // Cascaded Shadow Mapping Data
+  // Each matrix transforms from world-space to the light's clip-space for a given cascade.
+  lightViewProj: array<mat4x4<f32>, 4>,
+  
+  // Cascade split depths, stored in view-space.
+  // We only need splits for cascades 0, 1, and 2. The last cascade goes to the far plane.
+  // .w component is unused.
+  cascadeSplits: vec4<f32>,
+
+  lightDir: vec4<f32>,    // xyz used
+  lightColor: vec4<f32>,  // rgb used
+  params0: vec4<f32>,     // intensity, pcfRadius, mapSize, depthBias
+};
 
 // @group(0) - Per-frame data
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
@@ -95,7 +103,7 @@ struct ShadowUniforms {
 @group(0) @binding(7) var prefilteredMap: texture_cube<f32>;
 @group(0) @binding(8) var brdfLUT: texture_2d<f32>;
 @group(0) @binding(9) var iblSampler: sampler;
-@group(0) @binding(10) var shadowMap: texture_depth_2d;
+@group(0) @binding(10) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(11) var shadowSampler: sampler_comparison;
 @group(0) @binding(12) var<uniform> shadow: ShadowUniforms;
 
@@ -280,9 +288,19 @@ fn calculateLightContribution(
     return (diffuse + specular) * lightColor * NdotL;
 }
 
-fn projectToShadowSpace(worldPos: vec3<f32>) -> vec3<f32> {
+fn getCascadeIndex(viewZ: f32) -> i32 {
+    // viewZ is positive distance from camera
+    // cascadeSplits are also positive distances
+    if (viewZ < shadow.cascadeSplits.x) { return 0; }
+    if (viewZ < shadow.cascadeSplits.y) { return 1; }
+    if (viewZ < shadow.cascadeSplits.z) { return 2; }
+    return 3;
+}
+
+fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
     let wp = vec4<f32>(worldPos, 1.0);
-    let sp = shadow.lightViewProj * wp;
+    // Select the correct matrix for the cascade
+    let sp = shadow.lightViewProj[cascadeIndex] * wp;
     let ndc = sp.xyz / sp.w;
     // WebGPU NDC z in [0,1], orthographic/perspective handled by matrix
     let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
@@ -290,9 +308,7 @@ fn projectToShadowSpace(worldPos: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(uv, depth);
 }
 
-fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32) -> f32 {
-    // The sampler is set to clamp-to-edge, so this out-of-bounds coords are handled
-    // automatically on the gpu
+fn sampleShadowPCF(uv: vec2<f32>, depth: f32, cascadeIndex: i32, pcfRadius: f32, mapSize: f32) -> f32 {
     let texel = vec2<f32>(1.0 / mapSize);
     var sum = 0.0;
     var taps = 0.0;
@@ -300,7 +316,7 @@ fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32) -> f
     for (var j: i32 = -1; j <= 1; j = j + 1) {
         for (var i: i32 = -1; i <= 1; i = i + 1) {
             let offs = vec2<f32>(f32(i), f32(j)) * texel * pcfRadius;
-            sum += textureSampleCompare(shadowMap, shadowSampler, uv + offs, depth);
+            sum += textureSampleCompare(shadowMap, shadowSampler, uv + offs, cascadeIndex, depth);
             taps += 1.0;
         }
     }
@@ -356,10 +372,9 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     var Lo = vec3<f32>(0.0);
 
     // View-like depth along camera forward
-    let toPoint = fi.worldPosition - clusterParams.cameraPos.xyz;
-    let viewZraw = dot(toPoint, clusterParams.cameraForward.xyz);
-    // Tiny near-plane bias to reduce slice flicker at edges
-    let viewZ = max(viewZraw, clusterParams.near + 1e-4);
+    let toPoint = fi.worldPosition - camera.viewMatrix[3].xyz; // Using camera world pos from view matrix
+    let viewPos = camera.viewMatrix * vec4<f32>(fi.worldPosition, 1.0);
+    let viewZ = -viewPos.z; // In view space, +Z is into the screen, so -Z is depth.
 
     if (viewZ >= clusterParams.near && viewZ <= clusterParams.far) {
         let zNorm = (viewZ - clusterParams.near) * clusterParams.invZRange;
@@ -413,10 +428,13 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let Ls = normalize(-shadow.lightDir.xyz);
     let sunColor = shadow.lightColor.rgb * intensity;
     
+    // Determine which cascade this fragment falls into
+    let cascadeIndex = getCascadeIndex(viewZ);
+
     // Always sample shadow map to maintain uniform control flow
-    let sh = projectToShadowSpace(fi.worldPosition);
+    let sh = projectToShadowSpace(fi.worldPosition, cascadeIndex);
     let cmpDepth = sh.z - depthBias;
-    let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, pcfRadius, mapSize);
+    let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, cascadeIndex, pcfRadius, mapSize);
     // Mix between full light (1.0) and shadowed based on receiveShadows flag
     let shadowFactor = mix(1.0, shadowSample, receiveShadowsFloat);
     
@@ -485,6 +503,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let g = 0.76; // Asymmetry parameter, controls forward scattering
     let phase = (1.0 - g*g) / (4.0 * PI * pow(1.0 + g*g - 2.0*g*cos_angle, 1.5));
 
+    // Note: Fog's sun in-scattering should also use the cascaded shadow factor
     let sun_inscattering = shadow.lightColor.rgb * sun_inscatter_intensity * phase * shadowFactor; // Sun scattering is also shadowed
     let ambient_inscattering = scene.fogColor.rgb;
     let total_inscattering = sun_inscattering + ambient_inscattering;
