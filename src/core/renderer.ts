@@ -241,7 +241,7 @@ export class Renderer {
 
     this.sceneDataBuffer = this.device.createBuffer({
       label: "SCENE_DATA_UNIFORM_BUFFER",
-      size: 24 * 4, // 24 floats to match sceneDataArray in UniformManager
+      size: 16 * 4, // 16 floats to match sceneDataArray in UniformManager
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -585,10 +585,11 @@ export class Renderer {
       this.device,
       this.sceneDataBuffer,
       camera,
-      sceneData.ambientColor,
       sceneData.fogColor,
-      sceneData.fogParams0,
-      sceneData.fogParams1,
+      sceneData.fogDensity,
+      sceneData.fogHeight,
+      sceneData.fogHeightFalloff,
+      sceneData.fogInscatteringIntensity,
       this.hdrSupported,
       sceneData.prefilteredMipLevels,
     );

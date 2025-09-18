@@ -1,6 +1,8 @@
 // src/core/shaders/pbr.wgsl
 #include "utils.wgsl"
 
+const PI: f32 = 3.141592653589793;
+
 struct ClusterParams {
     gridX: u32,
     gridY: u32,
@@ -42,10 +44,8 @@ struct CameraUniforms {
 
 struct SceneUniforms {
     cameraPos: vec4<f32>,
-    ambientColor: vec4<f32>,
-    fogColor: vec4<f32>,
-    fogParams0: vec4<f32>, // [distanceDensity, height, heightFalloff, enableFlags]
-    fogParams1: vec4<f32>, // reserved/extensible
+    fogColor: vec4<f32>, // ambient in-scattering
+    fogParams: vec4<f32>, // [density, height, heightFalloff, inscatteringIntensity]
     hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
     prefiltered_mip_levels: f32,
     pad0: f32,
@@ -144,7 +144,7 @@ fn vs_main(
     var modelMatrix3x3 = mat3x3<f32>(
         modelMatrix[0].xyz,
         modelMatrix[1].xyz,
-        modelMatrix[2].xyz
+        modelMatrix[2].xyz,
     );
 
     let worldPos4 = modelMatrix * vec4<f32>(inPos, 1.0);
@@ -446,32 +446,51 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     var color = ambient + Lo;
 
-    // Fog
-    let distanceDensity = scene.fogParams0.x;
-    let fogHeight = scene.fogParams0.y;
-    let heightFalloff = scene.fogParams0.z;
-    let enableFlags = scene.fogParams0.w;
+    // ===== Volumetric Fog =====
+    let view_dir = normalize(fi.worldPosition - scene.cameraPos.xyz);
+    let dist_to_camera = length(fi.worldPosition - scene.cameraPos.xyz);
 
-    if (enableFlags > 0.0) {
-        let dist = length(scene.cameraPos.xyz - fi.worldPosition);
-        // Exponential squared for a denser falloff
-        let fogDistTerm = distanceDensity * dist;
-        let fd = exp(-(fogDistTerm * fogDistTerm));
+    // Fog is calculated based on height
+    let fog_density = scene.fogParams.x;
+    let fog_height = scene.fogParams.y;
+    let fog_falloff = scene.fogParams.z;
+    let sun_inscatter_intensity = scene.fogParams.w;
 
-        // Invert height logic: fog is dense *below* fogHeight
-        let dh = max(fogHeight - fi.worldPosition.y, 0.0);
-        let fh = exp(-heightFalloff * dh);
-        
-        let f = clamp(fd * fh, 0.0, 1.0);
-        
-        // Apply fog to reflected light (ambient + direct)
-        color = mix(scene.fogColor.rgb, color, f);
+    // Simplified analytical integral for exponential height fog.
+    // This is an approximation but works well for most cases.
+    let y_cam = scene.cameraPos.y;
+    let y_pixel = fi.worldPosition.y;
 
-        // Add a haze component for atmospheric scattering
-        let hazeIntensity = 0.2;
-        let haze = scene.fogColor.rgb * (1.0 - f) * hazeIntensity;
-        color += haze;
+    var optical_depth = 0.0;
+    // Avoid division by zero for horizontal rays
+    if (abs(view_dir.y) > 0.0001) {
+        // Correct analytical integral for exponential height fog
+        let term1 = exp(-fog_falloff * (y_cam - fog_height));
+        let term2 = exp(-fog_falloff * (y_pixel - fog_height));
+        let integral = (dist_to_camera / view_dir.y) * (term1 - term2);
+        optical_depth = max(0.0, fog_density * integral);
+    } else {
+        // For horizontal rays, density is constant along the path
+        let height_term = exp(-fog_falloff * (y_cam - fog_height));
+        optical_depth = max(0.0, fog_density * height_term * dist_to_camera);
     }
+    
+    let extinction = exp(-optical_depth);
+
+    // In-scattering term
+    // Phase function for sun scattering (approximates Mie scattering)
+    let sun_dir = -Ls; // Ls points TO the sun, we need direction FROM sun
+    let cos_angle = dot(view_dir, sun_dir);
+    // Henyey-Greenstein approximation
+    let g = 0.76; // Asymmetry parameter, controls forward scattering
+    let phase = (1.0 - g*g) / (4.0 * PI * pow(1.0 + g*g - 2.0*g*cos_angle, 1.5));
+
+    let sun_inscattering = shadow.lightColor.rgb * sun_inscatter_intensity * phase * shadowFactor; // Sun scattering is also shadowed
+    let ambient_inscattering = scene.fogColor.rgb;
+    let total_inscattering = sun_inscattering + ambient_inscattering;
+
+    // Final fog calculation
+    color = mix(total_inscattering, color, extinction);
 
     // Add emissive color after fog so it cuts through
     color += emissive;

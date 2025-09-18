@@ -187,34 +187,21 @@ async function initWorker(
   cameraTransform.setRotation(rotation);
 
   world.addComponent(cameraEntity, cameraTransform);
-  world.addComponent(cameraEntity, new CameraComponent(45, 16 / 9, 0.1, 100.0));
+  world.addComponent(
+    cameraEntity,
+    new CameraComponent(45, 16 / 9, 0.1, 1000.0),
+  );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
-  // Scene Lighting and Fog - Lighter fog to better see the demoModel
-  //world.addResource(new SceneLightingComponent());
-  //const sceneLighting = world.getResource(SceneLightingComponent)!;
-  //sceneLighting.ambientColor.set([0.4, 0.42, 0.5, 1.0]);
-  //sceneLighting.fogColor.set([0.8, 0.85, 0.9, 1.0]); // Light blue-gray
-  //sceneLighting.fogParams0.set([0.01, 0.0, 0.0, 1.0]); // Very light fog
+  // Thick fog
+  world.addResource(new SceneLightingComponent());
+  const sceneLighting = world.getResource(SceneLightingComponent)!;
 
-  /*
-  // Ground Plane - Darker to contrast with demoModel
-  const groundPlaneEntity = world.createEntity();
-  const groundMaterial = await resourceManager.createUnlitGroundMaterial({
-    color: [0.1, 0.1, 0.12, 1.0],
-  });
-  const groundMesh = await resourceManager.createMesh(
-    "ground_plane",
-    createPlaneMeshData(20),
-  );
-  const groundXform = new TransformComponent();
-  groundXform.setPosition(0, -1.5, 0);
-  world.addComponent(groundPlaneEntity, groundXform);
-  world.addComponent(
-    groundPlaneEntity,
-    new MeshRendererComponent(groundMesh, groundMaterial),
-  );
-  */
+  sceneLighting.fogColor.set([0.1, 0.1, 0.12, 1.0]); // Dark, slightly blue fog for ambient scattering
+  sceneLighting.fogDensity = 0.1;
+  sceneLighting.fogHeight = -5.0; // Fog is densest below the origin
+  sceneLighting.fogHeightFalloff = 0.05;
+  sceneLighting.fogInscatteringIntensity = 4.0; // Strong sun scattering glow
 
   // Load the demo model
   try {

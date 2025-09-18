@@ -7,7 +7,7 @@ import { ImGui, ImGuiImplWeb } from "@mori2003/jsimgui";
  * @param canvas The HTML canvas element to bind to.
  * @param device The GPUDevice for rendering.
  */
-export async function init(
+export async function initDebugUI(
   canvas: HTMLCanvasElement,
   device: GPUDevice,
 ): Promise<void> {
@@ -24,13 +24,10 @@ export async function init(
  * of each animation frame, before any ImGui widgets are declared.
  * @param canvas The canvas element, used to update ImGui's display size.
  */
-export function beginFrame(canvas: HTMLCanvasElement): void {
+export function beginDebugUIFrame(canvas: HTMLCanvasElement): void {
   const io = ImGui.GetIO();
-  // Update display size and pixel ratio for correct scaling
   io.DisplaySize.x = canvas.clientWidth;
   io.DisplaySize.y = canvas.clientHeight;
-  // The backend should handle devicePixelRatio automatically, but setting it
-  // explicitly ensures correctness if it doesn't.
   io.DisplayFramebufferScale.x = window.devicePixelRatio || 1;
   io.DisplayFramebufferScale.y = window.devicePixelRatio || 1;
 
@@ -44,14 +41,14 @@ export function beginFrame(canvas: HTMLCanvasElement): void {
  *
  * @param passEncoder The GPURenderPassEncoder for the current frame.
  */
-export function render(passEncoder: GPURenderPassEncoder): void {
+export function endDebugUI(passEncoder: GPURenderPassEncoder): void {
   ImGuiImplWeb.EndRender(passEncoder);
 }
 
 /**
  * Cleans up ImGui resources. Should be called when the application exits.
  */
-export function destroy(): void {
+export function destroyDebugUI(): void {
   if (ImGui.GetCurrentContext()) {
     ImGui.DestroyContext();
   }
