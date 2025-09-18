@@ -1012,7 +1012,7 @@ export class Renderer {
     this.transparentRenderables.length = 0;
     for (const r of sceneData.renderables) {
       if (this._isInFrustum(r, camera)) {
-        if (r.material.isTransparent) {
+        if (r.material.material.isTransparent) {
           this.transparentRenderables.push(r);
         } else {
           this.visibleRenderables.push(r);
@@ -1034,7 +1034,8 @@ export class Renderer {
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
-            (r) => r.castShadows !== false && !r.material.isTransparent,
+            (r) =>
+              r.castShadows !== false && !r.material.material.isTransparent,
           )
         : [];
     const shadowCasterCount = shadowCasters.length;

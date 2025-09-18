@@ -83,7 +83,7 @@ export function renderSystem(
 
   // Fog
   const fog = world.getResource(FogComponent);
-  if (fog && fog.enabled) {
+  if (fog?.enabled) {
     sceneData.fogEnabled = true;
     vec4.copy(fog.color, sceneData.fogColor);
     sceneData.fogDensity = fog.density;
