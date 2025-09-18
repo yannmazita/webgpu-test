@@ -575,6 +575,9 @@ export class Renderer {
     // Update sun shadow uniforms first (if available)
     if (sun && sun.enabled && shadowSettings) {
       this.shadowSubsystem.updatePerFrame(camera, sun, shadowSettings);
+    } else {
+      // No sun or disabled: ensure uniforms carry zero intensity so FS adds no sun term
+      this.shadowSubsystem.writeDisabled();
     }
 
     // Camera + scene uniforms
