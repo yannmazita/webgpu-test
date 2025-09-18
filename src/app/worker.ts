@@ -46,6 +46,12 @@ import {
 } from "@/core/ecs/components/sunComponent";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
 import { FogComponent } from "@/core/ecs/components/fogComponent";
+import {
+  createEngineStateContext as createEngineStateCtx,
+  EngineStateContext as EngineStateCtx,
+  syncEngineState,
+  publishSnapshotFromWorld,
+} from "@/core/engineState";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -57,6 +63,7 @@ interface InitMsg {
   canvas: OffscreenCanvas;
   sharedInputBuffer: SharedArrayBuffer;
   sharedMetricsBuffer: SharedArrayBuffer;
+  sharedEngineStateBuffer: SharedArrayBuffer;
 }
 interface ResizeMsg {
   type: typeof MSG_RESIZE;
@@ -68,6 +75,8 @@ interface FrameMsg {
   type: typeof MSG_FRAME;
   now: number;
 }
+
+let engineStateCtx: EngineStateCtx | null = null;
 
 let renderer: Renderer | null = null;
 let resourceManager: ResourceManager | null = null;
@@ -99,6 +108,7 @@ async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
+  sharedEngineStateBuffer: SharedArrayBuffer,
 ) {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -119,6 +129,8 @@ async function initWorker(
     isPointerLocked: () => isPointerLocked(inputContext!),
     lateUpdate: () => {},
   };
+
+  engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
 
   const actionMap: ActionMapConfig = {
     move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
@@ -336,6 +348,8 @@ async function initWorker(
   world.addResource(new SceneSunComponent());
   world.addResource(new ShadowSettingsComponent());
 
+  publishSnapshotFromWorld(world, engineStateCtx);
+
   (self as any).postMessage({ type: "READY" });
 }
 
@@ -348,6 +362,11 @@ function frame(now: number) {
     !actionController
   )
     return;
+
+  // apply editor state before systems
+  if (engineStateCtx) {
+    syncEngineState(world, engineStateCtx);
+  }
 
   const MAX_PAUSE = 0.5;
   let dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0;

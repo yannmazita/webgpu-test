@@ -1116,7 +1116,7 @@ export class ResourceManager {
     let finalNormals = data.normals;
     let finalTexCoords = data.texCoords;
     const finalTexCoords1 = data.texCoords1;
-    let finalTangents: Float32Array | undefined; // <<< FIX: DECLARED HERE
+    let finalTangents: Float32Array | undefined;
     let finalIndices: Uint16Array | Uint32Array | undefined = data.indices;
     let finalVertexCount = data.positions.length / 3;
 
