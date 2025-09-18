@@ -130,8 +130,6 @@ async function initWorker(
     lateUpdate: () => {},
   };
 
-  engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
-
   const actionMap: ActionMapConfig = {
     move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
     move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
@@ -151,6 +149,30 @@ async function initWorker(
     getMouseDelta: () => inputReader.getMouseDelta(),
     isPointerLocked: () => inputReader.isPointerLocked(),
   };
+
+  // Engine editor state: validate buffer before using
+  try {
+    if (
+      sharedEngineStateBuffer &&
+      (sharedEngineStateBuffer as any) instanceof SharedArrayBuffer
+    ) {
+      engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
+      console.log(
+        "[Worker] EngineState SAB created. i32.len=",
+        engineStateCtx.i32.length,
+        " f32.len=",
+        engineStateCtx.f32.length,
+      );
+    } else {
+      console.warn(
+        "[Worker] sharedEngineStateBuffer missing or not a SharedArrayBuffer.",
+      );
+      engineStateCtx = null;
+    }
+  } catch (e) {
+    console.error("[Worker] Failed to create EngineState context:", e);
+    engineStateCtx = null;
+  }
 
   cameraControllerSystem = new CameraControllerSystem(actionController);
 
@@ -348,7 +370,17 @@ async function initWorker(
   world.addResource(new SceneSunComponent());
   world.addResource(new ShadowSettingsComponent());
 
-  publishSnapshotFromWorld(world, engineStateCtx);
+  if (engineStateCtx) {
+    // Only publish if the buffer looks large enough to hold header+flags
+    if ((engineStateCtx.i32.length | 0) >= 4) {
+      publishSnapshotFromWorld(world, engineStateCtx);
+    } else {
+      console.warn(
+        "[Worker] EngineState SAB too small; skipping snapshot. i32.len=",
+        engineStateCtx.i32.length,
+      );
+    }
+  }
 
   (self as any).postMessage({ type: "READY" });
 }
@@ -364,7 +396,8 @@ function frame(now: number) {
     return;
 
   // apply editor state before systems
-  if (engineStateCtx) {
+  // Only sync if we have a plausible shared state array
+  if (engineStateCtx && engineStateCtx.i32.length >= (8 >> 2) + 1) {
     syncEngineState(world, engineStateCtx);
   }
 
@@ -460,6 +493,7 @@ self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
       msg.canvas,
       msg.sharedInputBuffer,
       msg.sharedMetricsBuffer,
+      msg.sharedEngineStateBuffer,
     );
     return;
   }

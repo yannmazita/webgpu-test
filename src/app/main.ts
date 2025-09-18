@@ -40,7 +40,6 @@ if (!hud) throw new Error("HUD element not found");
 // --- ImGui State ---
 let uiDevice: GPUDevice | null = null;
 let uiContext: GPUCanvasContext | null = null;
-let showMyEditorWindow = true;
 
 async function initUI() {
   if (!navigator.gpu) throw new Error("WebGPU not supported");
@@ -80,6 +79,14 @@ const engineStateBuffer = new SharedArrayBuffer(
   SHARED_ENGINE_STATE_BUFFER_SIZE,
 );
 const engineStateCtx = createEngineStateCtx(engineStateBuffer);
+console.log(
+  "[Main] EngineState SAB bytes=",
+  engineStateBuffer.byteLength,
+  " i32.len=",
+  (engineStateCtx as any).i32.length,
+  " f32.len=",
+  (engineStateCtx as any).f32.length,
+);
 initializeEngineStateHeader(engineStateCtx);
 
 // --- Input Event Handling ---
@@ -373,11 +380,7 @@ function drawUI() {
   beginDebugUIFrame(uiCanvas);
 
   // --- ImGui widgets ---
-  const showMyEditorWindowRef: [boolean] = [showMyEditorWindow];
   ImGui.Begin("Editor");
-  ImGui.Text("Hello, world!");
-  ImGui.Checkbox("Show My Editor Window", showMyEditorWindowRef);
-  showMyEditorWindow = showMyEditorWindowRef[0];
 
   ImGui.Separator();
   ImGui.Text(`Pointer Lock: ${isPointerLockedState ? "ON" : "OFF"}`);

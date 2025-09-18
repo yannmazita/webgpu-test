@@ -47,12 +47,33 @@ export function createEngineStateContext(
 }
 
 export function initializeEngineStateHeader(ctx: EngineStateContext): void {
-  Atomics.store(ctx.i32, idx(ENGINE_STATE_MAGIC_OFFSET), ENGINE_STATE_MAGIC);
-  Atomics.store(
-    ctx.i32,
-    idx(ENGINE_STATE_VERSION_OFFSET),
-    ENGINE_STATE_VERSION,
-  );
+  try {
+    Atomics.store(ctx.i32, idx(ENGINE_STATE_MAGIC_OFFSET), ENGINE_STATE_MAGIC);
+    Atomics.store(
+      ctx.i32,
+      idx(ENGINE_STATE_VERSION_OFFSET),
+      ENGINE_STATE_VERSION,
+    );
+  } catch (e) {
+    console.error(
+      "[EngineState] Failed to initialize header; is SharedArrayBuffer available?",
+      e,
+    );
+  }
+}
+
+function inBoundsI32(ctx: EngineStateContext, byteOffset: number): boolean {
+  const index = byteOffset >> 2;
+  return index >= 0 && index < ctx.i32.length;
+}
+function inBoundsF32Range(
+  ctx: EngineStateContext,
+  byteOffset: number,
+  floatCount: number,
+): boolean {
+  const start = byteOffset >> 2;
+  const end = start + floatCount;
+  return start >= 0 && end <= ctx.f32.length;
 }
 
 // Writer helpers (MAIN thread)
@@ -134,25 +155,62 @@ export function setShadowOrthoHalfExtent(
 }
 
 // Reader/sync (WORKER thread)
+let warnedInvalidFlagsIndex = false;
+
 export function syncEngineState(world: World, ctx: EngineStateContext): void {
-  const mask = Atomics.exchange(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), 0);
+  // Ensure flags index is valid on this typed array
+  if (!inBoundsI32(ctx, ENGINE_STATE_FLAGS0_OFFSET)) {
+    if (!warnedInvalidFlagsIndex) {
+      console.error(
+        "[EngineState] FLAGS0 out of bounds or buffer not shared. i32.length=",
+        ctx.i32.length,
+        "expected >= ",
+        (ENGINE_STATE_FLAGS0_OFFSET >> 2) + 1,
+      );
+      warnedInvalidFlagsIndex = true;
+    }
+    return;
+  }
+
+  let mask = 0;
+  try {
+    mask = Atomics.exchange(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), 0);
+  } catch (e) {
+    if (!warnedInvalidFlagsIndex) {
+      console.error(
+        "[EngineState] Atomics.exchange failed in sync (invalid shared buffer or index). i32.length=",
+        ctx.i32.length,
+        e,
+      );
+      warnedInvalidFlagsIndex = true;
+    }
+    return;
+  }
   if (mask === 0) return;
 
   const fog = world.getResource(FogComponent);
   const sun = world.getResource(SceneSunComponent);
   const shadows = world.getResource(ShadowSettingsComponent);
 
-  if (mask & DF_FOG_ENABLED && fog) {
+  if (mask & DF_FOG_ENABLED && fog && inBoundsI32(ctx, FOG_ENABLED_OFFSET)) {
     fog.enabled = Atomics.load(ctx.i32, idx(FOG_ENABLED_OFFSET)) !== 0;
   }
-  if (mask & DF_FOG_COLOR && fog) {
+  if (
+    mask & DF_FOG_COLOR &&
+    fog &&
+    inBoundsF32Range(ctx, FOG_COLOR_OFFSET, 4)
+  ) {
     const base = idx(FOG_COLOR_OFFSET);
     fog.color[0] = ctx.f32[base + 0];
     fog.color[1] = ctx.f32[base + 1];
     fog.color[2] = ctx.f32[base + 2];
     fog.color[3] = ctx.f32[base + 3];
   }
-  if (mask & DF_FOG_PARAMS0 && fog) {
+  if (
+    mask & DF_FOG_PARAMS0 &&
+    fog &&
+    inBoundsF32Range(ctx, FOG_PARAMS0_OFFSET, 4)
+  ) {
     const base = idx(FOG_PARAMS0_OFFSET);
     fog.density = Math.max(0, ctx.f32[base + 0]);
     fog.height = ctx.f32[base + 1];
@@ -160,10 +218,14 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
     fog.inscatteringIntensity = Math.max(0, ctx.f32[base + 3]);
   }
 
-  if (mask & DF_SUN_ENABLED && sun) {
+  if (mask & DF_SUN_ENABLED && sun && inBoundsI32(ctx, SUN_ENABLED_OFFSET)) {
     sun.enabled = Atomics.load(ctx.i32, idx(SUN_ENABLED_OFFSET)) !== 0;
   }
-  if (mask & DF_SUN_DIRECTION && sun) {
+  if (
+    mask & DF_SUN_DIRECTION &&
+    sun &&
+    inBoundsF32Range(ctx, SUN_DIRECTION_OFFSET, 4)
+  ) {
     const base = idx(SUN_DIRECTION_OFFSET);
     const vx = ctx.f32[base + 0];
     const vy = ctx.f32[base + 1];
@@ -175,29 +237,37 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
       sun.direction[2] = vz / len;
     }
   }
-  if (mask & DF_SUN_COLOR && sun) {
+  if (
+    mask & DF_SUN_COLOR &&
+    sun &&
+    inBoundsF32Range(ctx, SUN_COLOR_OFFSET, 4)
+  ) {
     const base = idx(SUN_COLOR_OFFSET);
     sun.color[0] = Math.max(0, ctx.f32[base + 0]);
     sun.color[1] = Math.max(0, ctx.f32[base + 1]);
     sun.color[2] = Math.max(0, ctx.f32[base + 2]);
-    sun.color[3] = Math.max(0, ctx.f32[base + 3]); // intensity in w
+    sun.color[3] = Math.max(0, ctx.f32[base + 3]); // intensity
   }
 
   if (shadows) {
-    if (mask & DF_SHADOW_MAP_SIZE) {
+    if (mask & DF_SHADOW_MAP_SIZE && inBoundsI32(ctx, SHADOW_MAP_SIZE_OFFSET)) {
       const req = Atomics.load(ctx.i32, idx(SHADOW_MAP_SIZE_OFFSET)) | 0;
-      const clamped = clampShadowMapSize(req);
-      shadows.mapSize = clamped;
+      shadows.mapSize = clampShadowMapSize(req);
     }
-    if (mask & DF_SHADOW_PARAMS0) {
+    if (
+      mask & DF_SHADOW_PARAMS0 &&
+      inBoundsF32Range(ctx, SHADOW_PARAMS0_OFFSET, 4)
+    ) {
       const base = idx(SHADOW_PARAMS0_OFFSET);
       shadows.slopeScaleBias = clampFinite(ctx.f32[base + 0], -128, 128);
       shadows.constantBias = clampFinite(ctx.f32[base + 1], 0, 4096);
-      // depthBias stored in Shadow uniforms (params0.w in shader)
       shadows.depthBias = clampFinite(ctx.f32[base + 2], 0, 0.1);
       shadows.pcfRadius = clampFinite(ctx.f32[base + 3], 0, 5);
     }
-    if (mask & DF_SHADOW_PARAMS1) {
+    if (
+      mask & DF_SHADOW_PARAMS1 &&
+      inBoundsF32Range(ctx, SHADOW_PARAMS1_OFFSET, 1)
+    ) {
       const base = idx(SHADOW_PARAMS1_OFFSET);
       shadows.orthoHalfExtent = clampFinite(ctx.f32[base + 0], 1, 1e4);
     }
@@ -222,60 +292,95 @@ export function publishSnapshotFromWorld(
   world: World,
   ctx: EngineStateContext,
 ): void {
-  const fog = world.getResource(FogComponent);
-  const sun = world.getResource(SceneSunComponent);
-  const shadows = world.getResource(ShadowSettingsComponent);
+  try {
+    const fog = world.getResource(FogComponent);
+    const sun = world.getResource(SceneSunComponent);
+    const shadows = world.getResource(ShadowSettingsComponent);
 
-  if (fog) {
-    Atomics.store(ctx.i32, idx(FOG_ENABLED_OFFSET), fog.enabled ? 1 : 0);
-    ctx.f32.set(fog.color, idx(FOG_COLOR_OFFSET));
-    ctx.f32.set(
-      [fog.density, fog.height, fog.heightFalloff, fog.inscatteringIntensity],
-      idx(FOG_PARAMS0_OFFSET),
-    );
-    Atomics.or(
-      ctx.i32,
-      idx(ENGINE_STATE_FLAGS0_OFFSET),
-      DF_FOG_ENABLED | DF_FOG_COLOR | DF_FOG_PARAMS0,
-    );
-  }
-  if (sun) {
-    Atomics.store(ctx.i32, idx(SUN_ENABLED_OFFSET), sun.enabled ? 1 : 0);
-    ctx.f32.set(
-      [sun.direction[0], sun.direction[1], sun.direction[2], 0.0],
-      idx(SUN_DIRECTION_OFFSET),
-    );
-    ctx.f32.set(
-      [sun.color[0], sun.color[1], sun.color[2], sun.color[3]],
-      idx(SUN_COLOR_OFFSET),
-    );
-    Atomics.or(
-      ctx.i32,
-      idx(ENGINE_STATE_FLAGS0_OFFSET),
-      DF_SUN_ENABLED | DF_SUN_DIRECTION | DF_SUN_COLOR,
-    );
-  }
-  if (shadows) {
-    Atomics.store(ctx.i32, idx(SHADOW_MAP_SIZE_OFFSET), shadows.mapSize | 0);
-    ctx.f32.set(
-      [
-        shadows.slopeScaleBias,
-        shadows.constantBias,
-        shadows.depthBias,
-        shadows.pcfRadius,
-      ],
-      idx(SHADOW_PARAMS0_OFFSET),
-    );
-    ctx.f32.set([shadows.orthoHalfExtent, 0, 0, 0], idx(SHADOW_PARAMS1_OFFSET));
-    Atomics.or(
-      ctx.i32,
-      idx(ENGINE_STATE_FLAGS0_OFFSET),
-      DF_SHADOW_MAP_SIZE | DF_SHADOW_PARAMS0 | DF_SHADOW_PARAMS1,
-    );
-  }
+    if (fog) {
+      if (inBoundsI32(ctx, FOG_ENABLED_OFFSET)) {
+        Atomics.store(ctx.i32, idx(FOG_ENABLED_OFFSET), fog.enabled ? 1 : 0);
+      }
+      if (inBoundsF32Range(ctx, FOG_COLOR_OFFSET, 4)) {
+        ctx.f32.set(fog.color, idx(FOG_COLOR_OFFSET));
+      }
+      if (inBoundsF32Range(ctx, FOG_PARAMS0_OFFSET, 4)) {
+        ctx.f32.set(
+          [
+            fog.density,
+            fog.height,
+            fog.heightFalloff,
+            fog.inscatteringIntensity,
+          ],
+          idx(FOG_PARAMS0_OFFSET),
+        );
+      }
+      Atomics.or(
+        ctx.i32,
+        idx(ENGINE_STATE_FLAGS0_OFFSET),
+        DF_FOG_ENABLED | DF_FOG_COLOR | DF_FOG_PARAMS0,
+      );
+    }
 
-  // Write header (last) for visibility diagnostics
-  initializeEngineStateHeader(ctx);
+    if (sun) {
+      if (inBoundsI32(ctx, SUN_ENABLED_OFFSET)) {
+        Atomics.store(ctx.i32, idx(SUN_ENABLED_OFFSET), sun.enabled ? 1 : 0);
+      }
+      if (inBoundsF32Range(ctx, SUN_DIRECTION_OFFSET, 4)) {
+        ctx.f32.set(
+          [sun.direction[0], sun.direction[1], sun.direction[2], 0.0],
+          idx(SUN_DIRECTION_OFFSET),
+        );
+      }
+      if (inBoundsF32Range(ctx, SUN_COLOR_OFFSET, 4)) {
+        ctx.f32.set(
+          [sun.color[0], sun.color[1], sun.color[2], sun.color[3]],
+          idx(SUN_COLOR_OFFSET),
+        );
+      }
+      Atomics.or(
+        ctx.i32,
+        idx(ENGINE_STATE_FLAGS0_OFFSET),
+        DF_SUN_ENABLED | DF_SUN_DIRECTION | DF_SUN_COLOR,
+      );
+    }
+
+    if (shadows) {
+      if (inBoundsI32(ctx, SHADOW_MAP_SIZE_OFFSET)) {
+        Atomics.store(
+          ctx.i32,
+          idx(SHADOW_MAP_SIZE_OFFSET),
+          shadows.mapSize | 0,
+        );
+      }
+      if (inBoundsF32Range(ctx, SHADOW_PARAMS0_OFFSET, 4)) {
+        ctx.f32.set(
+          [
+            shadows.slopeScaleBias,
+            shadows.constantBias,
+            shadows.depthBias,
+            shadows.pcfRadius,
+          ],
+          idx(SHADOW_PARAMS0_OFFSET),
+        );
+      }
+      if (inBoundsF32Range(ctx, SHADOW_PARAMS1_OFFSET, 1)) {
+        ctx.f32.set(
+          [shadows.orthoHalfExtent, 0, 0, 0],
+          idx(SHADOW_PARAMS1_OFFSET),
+        );
+      }
+      Atomics.or(
+        ctx.i32,
+        idx(ENGINE_STATE_FLAGS0_OFFSET),
+        DF_SHADOW_MAP_SIZE | DF_SHADOW_PARAMS0 | DF_SHADOW_PARAMS1,
+      );
+    }
+
+    initializeEngineStateHeader(ctx);
+  } catch (e) {
+    console.error("[EngineState] publishSnapshotFromWorld failed:", e);
+  }
 }
 
 // Read-only snapshot helper (MAIN thread)
