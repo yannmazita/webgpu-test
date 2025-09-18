@@ -10,12 +10,9 @@ struct CameraUniforms {
 
 struct SceneUniforms {
     cameraPos: vec4<f32>,
-    fogColor: vec4<f32>, // ambient in-scattering
-    fogParams: vec4<f32>, // [density, height, heightFalloff, inscatteringIntensity]
-    hdr_enabled: f32,      // 1.0 if HDR is on, 0.0 otherwise
-    prefiltered_mip_levels: f32,
-    pad0: f32,
-    pad1: f32,
+    fogColor: vec4<f32>,
+    fogParams: vec4<f32>,       // [density, height, heightFalloff, inscatteringIntensity]
+    miscParams: vec4<f32>,      // [fogEnabled, hdrEnabled, prefilteredMipLevels, pad]
 }
 
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
@@ -62,10 +59,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the cubemap with the view direction.
     var color = textureSample(skyboxTexture, skyboxSampler, in.view_dir);
     
-    // If HDR is not enabled, we must tone map the color to the SDR range.
-    if (scene.hdr_enabled < 0.5) {
-        color = vec4<f32>(ACESFilmicToneMapping(color.rgb), color.a);
-    }
+    // Always apply tone mapping as this is the final output stage.
+    let final_color = ACESFilmicToneMapping(color.rgb);
 
-    return color;
+    return vec4<f32>(final_color, color.a);
 }

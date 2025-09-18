@@ -506,8 +506,10 @@ export class Renderer {
 
     // Attempt to configure for HDR if supported by the adapter
     if (this.hdrSupported) {
-      const hdrConfig: any = { ...config, format: "rgba16float" };
-      hdrConfig.toneMapping = { mode: "extended" };
+      const hdrConfig: GPUCanvasConfiguration = {
+        ...config,
+        format: "rgba16float",
+      };
       try {
         this.context.configure(hdrConfig);
         // If successful, update the canvasFormat to the HDR format

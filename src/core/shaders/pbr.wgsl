@@ -475,10 +475,8 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Add emissive color after fog so it cuts through
     color += emissive;
 
-    // Conditionally apply Tone mapping + gamma for SDR output
-    if (scene.miscParams.y < 0.5) { // Check hdrEnabled flag
-        color = ACESFilmicToneMapping(color);
-    }
+    // Always apply tone mapping as this is the final output stage.
+    let final_color = ACESFilmicToneMapping(color);
 
-    return vec4<f32>(color, material.albedo.a);
+    return vec4<f32>(final_color, material.albedo.a);
 }
