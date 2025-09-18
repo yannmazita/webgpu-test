@@ -399,13 +399,13 @@ function drawUI() {
       setFogEnabled(engineStateCtx, fogEnabledUI);
     }
 
-    const colorRef = new Float32Array([
+    const fogColorRef: [number, number, number] = [
       fogColorUI[0],
       fogColorUI[1],
       fogColorUI[2],
-    ]);
-    if (ImGui.ColorEdit3("Color##Fog", colorRef) && engineReady) {
-      fogColorUI = [colorRef[0], colorRef[1], colorRef[2]];
+    ];
+    if (ImGui.ColorEdit3("Color##Fog", fogColorRef) && engineReady) {
+      fogColorUI = [fogColorRef[0], fogColorRef[1], fogColorRef[2]];
       setFogColor(
         engineStateCtx,
         fogColorUI[0],
@@ -429,6 +429,7 @@ function drawUI() {
         fogInscatterUI,
       );
     }
+
     const heightRef: [number] = [fogHeightUI];
     if (
       ImGui.SliderFloat("Height##Fog", heightRef, -50.0, 50.0) &&
@@ -480,11 +481,11 @@ function drawUI() {
       setSunEnabled(engineStateCtx, sunEnabledUI);
     }
 
-    const sunColorRef = new Float32Array([
+    const sunColorRef: [number, number, number] = [
       sunColorUI[0],
       sunColorUI[1],
       sunColorUI[2],
-    ]);
+    ];
     if (ImGui.ColorEdit3("Color##Sun", sunColorRef) && engineReady) {
       sunColorUI = [sunColorRef[0], sunColorRef[1], sunColorRef[2]];
       setSunColorAndIntensity(
@@ -495,6 +496,7 @@ function drawUI() {
         sunIntensityUI,
       );
     }
+
     const sunIntensityRef: [number] = [sunIntensityUI];
     if (
       ImGui.SliderFloat("Intensity##Sun", sunIntensityRef, 0.0, 50.0) &&
