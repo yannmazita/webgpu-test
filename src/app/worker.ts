@@ -10,10 +10,7 @@ import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { LightComponent } from "@/core/ecs/components/lightComponent";
 import { cameraSystem } from "@/core/ecs/systems/cameraSystem";
 import { transformSystem } from "@/core/ecs/systems/transformSystem";
-import {
-  renderSystem,
-  SceneLightingComponent,
-} from "@/core/ecs/systems/renderSystem";
+import { renderSystem } from "@/core/ecs/systems/renderSystem";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { SceneRenderData } from "@/core/types/rendering";
 import { createIcosphereMeshData } from "@/core/utils/primitives";
@@ -48,6 +45,7 @@ import {
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
+import { FogComponent } from "@/core/ecs/components/fogComponent";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -193,15 +191,14 @@ async function initWorker(
   );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
 
-  // Thick fog
-  world.addResource(new SceneLightingComponent());
-  const sceneLighting = world.getResource(SceneLightingComponent)!;
-
-  sceneLighting.fogColor.set([0.1, 0.1, 0.12, 1.0]); // Dark, slightly blue fog for ambient scattering
-  sceneLighting.fogDensity = 0.1;
-  sceneLighting.fogHeight = -5.0; // Fog is densest below the origin
-  sceneLighting.fogHeightFalloff = 0.05;
-  sceneLighting.fogInscatteringIntensity = 4.0; // Strong sun scattering glow
+  // Volumetric Fog
+  const fog = new FogComponent();
+  fog.color.set([0.1, 0.1, 0.12, 1.0]);
+  fog.density = 0.1;
+  fog.height = -5.0;
+  fog.heightFalloff = 0.05;
+  fog.inscatteringIntensity = 4.0;
+  world.addResource(fog);
 
   // Load the demo model
   try {

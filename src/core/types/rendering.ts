@@ -16,6 +16,7 @@ export class SceneRenderData {
   public prefilteredMipLevels = 0;
 
   // fog parameters
+  public fogEnabled = false;
   public fogColor: Vec4 = vec4.fromValues(0.5, 0.6, 0.7, 1.0);
   public fogDensity = 0.02;
   public fogHeight = 0.0;
@@ -28,6 +29,7 @@ export class SceneRenderData {
     this.skyboxMaterial = undefined;
     this.iblComponent = undefined;
     this.prefilteredMipLevels = 0;
-    // fog params persist as scene configuration
+    this.fogEnabled = false; // Reset per frame
+    // Default fog params remain
   }
 }

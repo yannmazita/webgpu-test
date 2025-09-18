@@ -55,6 +55,7 @@ export class UniformManager {
     device: GPUDevice,
     buffer: GPUBuffer,
     camera: CameraComponent,
+    fogEnabled: boolean,
     fogColor: Vec4,
     fogDensity: number,
     fogHeight: number,
@@ -68,17 +69,18 @@ export class UniformManager {
     this.sceneDataArray[1] = camera.inverseViewMatrix[13];
     this.sceneDataArray[2] = camera.inverseViewMatrix[14];
     this.sceneDataArray[3] = 1.0;
-    // fog color (for ambient in-scattering)
+    // fog color
     this.sceneDataArray.set(fogColor, 4);
     // fog params
     this.sceneDataArray[8] = fogDensity;
     this.sceneDataArray[9] = fogHeight;
     this.sceneDataArray[10] = fogHeightFalloff;
     this.sceneDataArray[11] = fogInscatteringIntensity;
-    // hdr flag (default false if not provided)
-    this.sceneDataArray[12] = hdrEnabled ? 1.0 : 0.0;
-    // prefiltered_mip_levels (default 0 if not provided)
-    this.sceneDataArray[13] = prefilteredMipLevels ?? 0;
+    // misc params
+    this.sceneDataArray[12] = fogEnabled ? 1.0 : 0.0;
+    this.sceneDataArray[13] = hdrEnabled ? 1.0 : 0.0;
+    this.sceneDataArray[14] = prefilteredMipLevels ?? 0;
+    // this.sceneDataArray[15] is padding
 
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }

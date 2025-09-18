@@ -1,7 +1,7 @@
 // src/core/ecs/systems/renderSystem.ts
 import { Renderer } from "@/core/renderer";
 import { SceneRenderData } from "@/core/types/rendering";
-import { vec4, Vec4 } from "wgpu-matrix";
+import { vec4 } from "wgpu-matrix";
 import { CameraComponent } from "../components/cameraComponent";
 import { LightComponent } from "../components/lightComponent";
 import { MeshRendererComponent } from "../components/meshRendererComponent";
@@ -14,16 +14,7 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "../components/sunComponent";
-
-// A global resource for scene properties
-export class SceneLightingComponent {
-  // Volumetric Fog configuration
-  public fogColor: Vec4 = vec4.fromValues(0.5, 0.6, 0.7, 1.0); // Ambient in-scattering term
-  public fogDensity = 0.02;
-  public fogHeight = 0.0;
-  public fogHeightFalloff = 0.1;
-  public fogInscatteringIntensity = 0.8; // Sun scattering contribution
-}
+import { FogComponent } from "../components/fogComponent";
 
 /**
  * Gathers all necessary data and orchestrates the rendering of a single frame.
@@ -91,14 +82,17 @@ export function renderSystem(
   }
 
   // Fog
-  const sceneLighting =
-    world.getResource(SceneLightingComponent) ?? new SceneLightingComponent();
-  // copy fog
-  vec4.copy(sceneLighting.fogColor, sceneData.fogColor);
-  sceneData.fogDensity = sceneLighting.fogDensity;
-  sceneData.fogHeight = sceneLighting.fogHeight;
-  sceneData.fogHeightFalloff = sceneLighting.fogHeightFalloff;
-  sceneData.fogInscatteringIntensity = sceneLighting.fogInscatteringIntensity;
+  const fog = world.getResource(FogComponent);
+  if (fog && fog.enabled) {
+    sceneData.fogEnabled = true;
+    vec4.copy(fog.color, sceneData.fogColor);
+    sceneData.fogDensity = fog.density;
+    sceneData.fogHeight = fog.height;
+    sceneData.fogHeightFalloff = fog.heightFalloff;
+    sceneData.fogInscatteringIntensity = fog.inscatteringIntensity;
+  } else {
+    sceneData.fogEnabled = false;
+  }
 
   // Collect all renderables
   const renderableQuery = world.query([

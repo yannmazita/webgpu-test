@@ -585,6 +585,7 @@ export class Renderer {
       this.device,
       this.sceneDataBuffer,
       camera,
+      sceneData.fogEnabled,
       sceneData.fogColor,
       sceneData.fogDensity,
       sceneData.fogHeight,
