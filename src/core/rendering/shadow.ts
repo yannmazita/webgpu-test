@@ -311,6 +311,7 @@ export class ShadowSubsystem {
       [sun.color[3], settings.pcfRadius, this.mapSize, settings.depthBias],
       24,
     );
+    // Uploading the packed data to the GPU buffer
     this.device.queue.writeBuffer(
       this.shadowUniformBuffer,
       0,

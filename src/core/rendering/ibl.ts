@@ -207,6 +207,7 @@ export async function generatePrefilteredMap(
 
   for (let mip = 0; mip < maxMipLevels; mip++) {
     const roughness = mip / (maxMipLevels - 1);
+    // Uploading the packed data to the GPU buffer
     device.queue.writeBuffer(
       prefilterParamsBuffer,
       0,

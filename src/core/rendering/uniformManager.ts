@@ -3,13 +3,26 @@ import { Vec4 } from "wgpu-matrix";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
 /**
- * Manages uniform and storage buffers with dirty tracking to avoid redundant GPU updates
+ * Manages the creation, packing, and updating of CPU-side data for uniform and
+ * storage buffers.
+ *
+ * Its primary role is to act as an optimization layer between the high-level
+ * scene data and the low-level GPU buffer writes. By using pre-allocated and
+ * resizable `ArrayBuffer`s as staging areas, it avoids creating new arrays
+ * every frame. This significantly reduces garbage collection pressure, which is
+ * crucial for smooth, real-time rendering in ts.
+ *
+ * It ensures that data is packed into memory layouts that precisely match the
+ * WGSL struct definitions in the shaders.
  */
 export class UniformManager {
-  // Pre-allocated arrays/buffers
+  /** A pre-allocated staging buffer for scene-wide uniform data. */
   private sceneDataArray: Float32Array;
+  /** A pre-allocated staging buffer for camera-specific uniform data. */
   private cameraDataArray: Float32Array;
+  /** A resizable, reusable buffer for light data, designed for an SSBO. */
   private lightDataBuffer: ArrayBuffer;
+  /** The current capacity (in number of lights) of the lightDataBuffer. */
   private lightStorageBufferCapacity: number;
 
   constructor() {
@@ -23,14 +36,15 @@ export class UniformManager {
   }
 
   /**
-   * Updates the camera uniform buffer with the view-projection matrix.
+   * Updates the camera uniform buffer with the latest view and view-projection
+   * matrices.
    *
-   * This method is called every frame to ensure that the GPU has the latest
-   * camera matrix for rendering.
+   * This method packs the matrices into a pre-allocated Float32Array and
+   * queues a write to the specified GPU buffer.
    *
-   * @param device The GPU device.
-   * @param buffer The camera uniform buffer.
-   * @param camera The camera component.
+   * @param device The active GPUDevice.
+   * @param buffer The target GPUBuffer for camera uniforms.
+   * @param camera The CameraComponent containing the matrix data.
    */
   public updateCameraUniform(
     device: GPUDevice,
@@ -46,10 +60,32 @@ export class UniformManager {
   }
 
   /**
-   * Updates the scene uniform buffer with scene-wide data.
+   * Updates the scene uniform buffer with scene-wide data like camera position,
+   * fog parameters, and rendering flags.
    *
-   * Backward compatible: hdrEnabled and prefilteredMipLevels are optional.
-   * If omitted, HDR is considered disabled and prefiltered mips = 0.
+   * @remarks
+   * This function packs data into a pre-allocated Float32Array according to a
+   * strict memory layout that must match the `SceneUniforms` struct in the WGSL
+   * shaders. The current layout is (16 floats / 64 bytes):
+   *
+   * | Offset (Floats) | Member                   | Type          |
+   * |:----------------|:-------------------------|:--------------|
+   * | 0-3             | `cameraPos`              | `vec4<f32>`   |
+   * | 4-7             | `fogColor`               | `vec4<f32>`   |
+   * | 8-11            | `fogParams`              | `vec4<f32>`   |
+   * | 12-15           | `miscParams`             | `vec4<f32>`   |
+   *
+   * @param device The active GPUDevice.
+   * @param buffer The target GPUBuffer for scene uniforms.
+   * @param camera The active scene camera, used for its world position.
+   * @param fogEnabled A flag indicating if fog is active.
+   * @param fogColor The ambient in-scattering color of the fog.
+   * @param fogDensity The base density of the fog.
+   * @param fogHeight The world-space Y coordinate for the fog's maximum density.
+   * @param fogHeightFalloff The rate at which fog density decreases with altitude.
+   * @param fogInscatteringIntensity The strength of the sun's contribution to fog color.
+   * @param hdrEnabled A flag indicating if the renderer is in HDR mode.
+   * @param prefilteredMipLevels The number of mip levels in the prefiltered IBL map.
    */
   public updateSceneUniform(
     device: GPUDevice,
@@ -64,37 +100,43 @@ export class UniformManager {
     hdrEnabled?: boolean,
     prefilteredMipLevels?: number,
   ): void {
-    // camera pos
+    // Packing data into the Float32Array
+    // cameraPos: vec4<f32>
     this.sceneDataArray[0] = camera.inverseViewMatrix[12];
     this.sceneDataArray[1] = camera.inverseViewMatrix[13];
     this.sceneDataArray[2] = camera.inverseViewMatrix[14];
     this.sceneDataArray[3] = 1.0;
-    // fog color
+
+    // fogColor: vec4<f32>
     this.sceneDataArray.set(fogColor, 4);
-    // fog params
+
+    // fogParams: vec4<f32>
     this.sceneDataArray[8] = fogDensity;
     this.sceneDataArray[9] = fogHeight;
     this.sceneDataArray[10] = fogHeightFalloff;
     this.sceneDataArray[11] = fogInscatteringIntensity;
-    // misc params
+
+    // miscParams: vec4<f32>
     this.sceneDataArray[12] = fogEnabled ? 1.0 : 0.0;
     this.sceneDataArray[13] = hdrEnabled ? 1.0 : 0.0;
     this.sceneDataArray[14] = prefilteredMipLevels ?? 0;
-    // this.sceneDataArray[15] is padding
+    this.sceneDataArray[15] = 0.0; // Padding
 
+    // Uploading the packed data to the GPU buffer
     device.queue.writeBuffer(buffer, 0, this.sceneDataArray);
   }
 
   /**
-   * Gets a reusable ArrayBuffer for light data.
+   * Gets a reusable CPU-side ArrayBuffer for light data.
    *
-   * This method provides a pre-allocated or resized ArrayBuffer to hold the
-   * light data for the current frame. This is a memory optimization that
-   * avoids allocating a new buffer every frame, which helps to reduce
-   * garbage collection pauses.
+   * This method provides a pre-allocated ArrayBuffer. If the requested number
+   * of lights exceeds the buffer's current capacity, the buffer is resized
+   * automatically. This avoids allocating a new buffer every frame.
    *
-   * @param lightCount The number of lights in the scene.
-   * @returns An ArrayBuffer with enough capacity to hold the light data.
+   * @param lightCount The number of lights that need to be stored.
+   * @returns An ArrayBuffer with enough capacity for the specified lights.
+   * The caller is responsible for creating views (ex: Uint32Array,
+   * Float32Array) on this buffer to pack the light data.
    */
   public getLightDataBuffer(lightCount: number): ArrayBuffer {
     const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT;

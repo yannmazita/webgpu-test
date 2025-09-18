@@ -253,6 +253,7 @@ export class ClusterBuilder {
     arr[30] = m[14];
     arr[31] = 1.0;
 
+    // Uploading the packed data to the GPU buffer
     this.device.queue.writeBuffer(this.clusterParamsBuffer, 0, arr);
   }
 
