@@ -1,5 +1,5 @@
 // src/core/ecs/systems/renderSystem.ts
-import { Renderer } from "@/core/renderer";
+import { Renderer } from "@/core/rendering/renderer";
 import { SceneRenderData } from "@/core/types/rendering";
 import { vec4 } from "wgpu-matrix";
 import { CameraComponent } from "../components/cameraComponent";

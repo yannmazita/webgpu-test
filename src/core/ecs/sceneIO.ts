@@ -1,6 +1,6 @@
 // src/core/ecs/sceneIO.ts
 import { World } from "./world";
-import { ResourceManager } from "@/core/resourceManager";
+import { ResourceManager } from "@/core/resources/resourceManager";
 import { TransformComponent } from "./components/transformComponent";
 import { MeshRendererComponent } from "./components/meshRendererComponent";
 import { LightComponent } from "./components/lightComponent";
