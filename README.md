@@ -2,7 +2,8 @@
 
 Learning graphics programming with WebGPU.
 
-[engine_demo_15-09-2025.webm](https://github.com/user-attachments/assets/29e2e8ec-4cb1-486b-9c28-c5895b562aae)
+[engine_demo-19-09-2025.webm](https://github.com/user-attachments/assets/14a29c5e-5732-437c-8f24-e62af67baa42)
+
 
 Press `C` to enable free camera look :)
 
