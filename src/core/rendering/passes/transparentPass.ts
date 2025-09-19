@@ -5,9 +5,14 @@ import { Vec3, vec3 } from "wgpu-matrix";
 import { Renderer } from "@/core/renderer";
 
 export class TransparentPass {
+  private device: GPUDevice;
   private tempVec3A: Vec3 = vec3.create();
   private tempVec3B: Vec3 = vec3.create();
   private tempCameraPos: Vec3 = vec3.create();
+
+  constructor(device: GPUDevice) {
+    this.device = device;
+  }
 
   public record(
     passEncoder: GPURenderPassEncoder,
@@ -61,7 +66,7 @@ export class TransparentPass {
       instanceUintView[uintOff + 16] = flags;
     }
 
-    passEncoder.device.queue.writeBuffer(
+    this.device.queue.writeBuffer(
       instanceBuffer,
       instanceBufferOffset,
       instanceDataView,
