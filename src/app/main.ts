@@ -22,7 +22,7 @@ if (!hud) throw new Error("HUD element not found");
 
 // Setup shared memory and contexts
 const inputBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
-const inputContext = createInputContext(inputBuffer);
+const inputContext = createInputContext(inputBuffer, true);
 
 const metricsBuffer = new SharedArrayBuffer(METRICS_BUFFER_SIZE);
 const metricsContext = createMetricsContext(metricsBuffer);

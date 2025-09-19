@@ -96,7 +96,7 @@ async function initWorker(
   initializeMetrics(metricsContext);
 
   // Input setup
-  inputContext = createInputContext(sharedInputBuffer);
+  inputContext = createInputContext(sharedInputBuffer, false);
   const inputReader: IInputSource = {
     isKeyDown: (code: string) => isKeyDown(inputContext!, code),
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
