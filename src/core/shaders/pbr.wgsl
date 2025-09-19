@@ -475,8 +475,11 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     // Add emissive color after fog so it cuts through
     color += emissive;
 
-    // Always apply tone mapping as this is the final output stage.
-    let final_color = ACESFilmicToneMapping(color);
+    // Conditionally apply tone mapping based on scene.miscParams.y
+    var final_color = color;
+    if (scene.miscParams.y > 0.5) {
+        final_color = ACESFilmicToneMapping(color);
+    }
 
     return vec4<f32>(final_color, material.albedo.a);
 }

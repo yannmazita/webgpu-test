@@ -402,6 +402,7 @@ export class ResourceManager {
       this.preprocessor,
       environmentMap,
       skyboxSampler,
+      cubemapSize,
     );
 
     // BRDF LUT is scene-independent, so we generate and cache it once globally.

@@ -84,7 +84,7 @@ export class UniformManager {
    * @param fogHeight The world-space Y coordinate for the fog's maximum density.
    * @param fogHeightFalloff The rate at which fog density decreases with altitude.
    * @param fogInscatteringIntensity The strength of the sun's contribution to fog color.
-   * @param hdrEnabled A flag indicating if the renderer is in HDR mode.
+   * @param toneMappingEnabled Whether ACES tone mapping should be applied in shaders.
    * @param prefilteredMipLevels The number of mip levels in the prefiltered IBL map.
    */
   public updateSceneUniform(
@@ -97,7 +97,7 @@ export class UniformManager {
     fogHeight: number,
     fogHeightFalloff: number,
     fogInscatteringIntensity: number,
-    hdrEnabled?: boolean,
+    toneMappingEnabled?: boolean,
     prefilteredMipLevels?: number,
   ): void {
     // Packing data into the Float32Array
@@ -116,9 +116,9 @@ export class UniformManager {
     this.sceneDataArray[10] = fogHeightFalloff;
     this.sceneDataArray[11] = fogInscatteringIntensity;
 
-    // miscParams: vec4<f32>
+    // miscParams: vec4<f32> = [fogEnabled, toneMappingEnabled, prefilteredMipLevels, pad]
     this.sceneDataArray[12] = fogEnabled ? 1.0 : 0.0;
-    this.sceneDataArray[13] = hdrEnabled ? 1.0 : 0.0;
+    this.sceneDataArray[13] = toneMappingEnabled ? 1.0 : 0.0;
     this.sceneDataArray[14] = prefilteredMipLevels ?? 0;
     this.sceneDataArray[15] = 0.0; // Padding
 

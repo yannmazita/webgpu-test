@@ -209,7 +209,8 @@ let lastHudFrameId = 0;
 
 let engineReady = false;
 
-// UI state for editor
+// -- UI state for editor --
+// Fog
 let fogEnabledUI = true;
 let fogColorUI: [number, number, number] = [0.5, 0.6, 0.7];
 let fogDensityUI = 0.02;
@@ -217,18 +218,23 @@ let fogHeightUI = 0.0;
 let fogFalloffUI = 0.1;
 let fogInscatterUI = 0.8;
 
+// Sun
 let sunEnabledUI = true;
 let sunColorUI: [number, number, number] = [1, 1, 1];
 let sunIntensityUI = 1.0;
 let sunYawDegUI = -26; // azimuth, rough default
 let sunPitchDegUI = -50; // elevation
 
+// Shadows
 let shadowMapSizeUI = 2048;
 let shadowSlopeScaleBiasUI = 3.0;
 let shadowConstantBiasUI = 1.0;
 let shadowDepthBiasUI = 0.0015;
 let shadowPcfRadiusUI = 1.0;
 let shadowOrthoExtentUI = 20.0;
+
+// Rendering
+let toneMappingEnabledUI = true;
 
 function dirToYawPitchDeg(
   x: number,
@@ -537,7 +543,7 @@ function drawUI() {
   }
 
   if (ImGui.CollapsingHeader("Shadows", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const sizes = [512, 1024, 2048, 4096];
+    const sizes = [256, 512, 1024, 2048, 4096, 8192];
 
     const currentLabel = `${shadowMapSizeUI}`;
     if (ImGui.BeginCombo("Map Size", currentLabel)) {
@@ -589,6 +595,18 @@ function drawUI() {
     ) {
       shadowOrthoExtentUI = orthoRef[0];
       setShadowOrthoHalfExtent(engineStateCtx, shadowOrthoExtentUI);
+    }
+  }
+
+  if (ImGui.CollapsingHeader("Rendering", ImGui.TreeNodeFlags.DefaultOpen)) {
+    // Tone mapping toggle (communicated to worker)
+    const toneMapRef: [boolean] = [toneMappingEnabledUI];
+    if (ImGui.Checkbox("Tone Mapping (ACES)", toneMapRef)) {
+      toneMappingEnabledUI = toneMapRef[0];
+      worker.postMessage({
+        type: "SET_TONE_MAPPING",
+        enabled: toneMappingEnabledUI,
+      });
     }
   }
 
