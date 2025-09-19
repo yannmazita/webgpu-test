@@ -3,15 +3,6 @@ import { ImGui } from "@mori2003/jsimgui";
 import { beginDebugUIFrame, endDebugUI, initDebugUI } from "@/core/debugUI";
 import {
   readSnapshot as readEngineSnapshot,
-  setFogEnabled,
-  setFogColor,
-  setFogParams,
-  setSunEnabled,
-  setSunDirection,
-  setSunColorAndIntensity,
-  setShadowMapSize,
-  setShadowParams0,
-  setShadowOrthoHalfExtent,
   EngineStateContext,
 } from "@/core/engineState";
 import {
@@ -21,6 +12,11 @@ import {
   updateMousePosition,
   updatePointerLock,
 } from "@/core/input/manager";
+
+import * as fogWidget from "./editor-widgets/fogWidget";
+import * as sunWidget from "./editor-widgets/sunWidget";
+import * as shadowWidget from "./editor-widgets/shadowWidget";
+import * as renderingWidget from "./editor-widgets/renderingWidget";
 
 let uiDevice: GPUDevice;
 let uiContext: GPUCanvasContext;
@@ -34,28 +30,27 @@ let isPointerLockedState = false;
 let mouseX = 0;
 let mouseY = 0;
 
-// --- UI state for editor ---
-let fogEnabledUI = true;
-let fogColorUI: [number, number, number] = [0.5, 0.6, 0.7];
-let fogDensityUI = 0.02;
-let fogHeightUI = 0.0;
-let fogFalloffUI = 0.1;
-let fogInscatterUI = 0.8;
+const uiState = {
+  fogEnabledUI: true,
+  fogColorUI: [0.5, 0.6, 0.7] as [number, number, number],
+  fogDensityUI: 0.02,
+  fogHeightUI: 0.0,
+  fogFalloffUI: 0.1,
+  fogInscatterUI: 0.8,
+  sunEnabledUI: true,
+  sunColorUI: [1, 1, 1] as [number, number, number],
+  sunIntensityUI: 1.0,
+  sunYawDegUI: -26,
+  sunPitchDegUI: -50,
+  shadowMapSizeUI: 2048,
+  shadowSlopeScaleBiasUI: 3.0,
+  shadowConstantBiasUI: 1.0,
+  shadowDepthBiasUI: 0.0015,
+  shadowPcfRadiusUI: 1.0,
+  shadowOrthoExtentUI: 20.0,
+  toneMappingEnabledUI: true,
+};
 
-let sunEnabledUI = true;
-let sunColorUI: [number, number, number] = [1, 1, 1];
-let sunIntensityUI = 1.0;
-let sunYawDegUI = -26;
-let sunPitchDegUI = -50;
-
-let shadowMapSizeUI = 2048;
-let shadowSlopeScaleBiasUI = 3.0;
-let shadowConstantBiasUI = 1.0;
-let shadowDepthBiasUI = 0.0015;
-let shadowPcfRadiusUI = 1.0;
-let shadowOrthoExtentUI = 20.0;
-
-let toneMappingEnabledUI = true;
 let engineReady = false;
 
 export function init(
@@ -75,28 +70,36 @@ export function init(
     const msg = ev.data;
     if (msg?.type === "READY") {
       const snap = readEngineSnapshot(engineStateCtx);
-      fogEnabledUI = snap.fog.enabled;
-      fogColorUI = [snap.fog.color[0], snap.fog.color[1], snap.fog.color[2]];
-      fogDensityUI = snap.fog.density;
-      fogHeightUI = snap.fog.height;
-      fogFalloffUI = snap.fog.heightFalloff;
-      fogInscatterUI = snap.fog.inscatteringIntensity;
-      sunEnabledUI = snap.sun.enabled;
-      sunColorUI = [snap.sun.color[0], snap.sun.color[1], snap.sun.color[2]];
-      sunIntensityUI = snap.sun.intensity;
+      uiState.fogEnabledUI = snap.fog.enabled;
+      uiState.fogColorUI = [
+        snap.fog.color[0],
+        snap.fog.color[1],
+        snap.fog.color[2],
+      ];
+      uiState.fogDensityUI = snap.fog.density;
+      uiState.fogHeightUI = snap.fog.height;
+      uiState.fogFalloffUI = snap.fog.heightFalloff;
+      uiState.fogInscatterUI = snap.fog.inscatteringIntensity;
+      uiState.sunEnabledUI = snap.sun.enabled;
+      uiState.sunColorUI = [
+        snap.sun.color[0],
+        snap.sun.color[1],
+        snap.sun.color[2],
+      ];
+      uiState.sunIntensityUI = snap.sun.intensity;
       const { yaw, pitch } = dirToYawPitchDeg(
         snap.sun.direction[0],
         snap.sun.direction[1],
         snap.sun.direction[2],
       );
-      sunYawDegUI = yaw;
-      sunPitchDegUI = pitch;
-      shadowMapSizeUI = snap.shadow.mapSize;
-      shadowSlopeScaleBiasUI = snap.shadow.slopeScaleBias;
-      shadowConstantBiasUI = snap.shadow.constantBias;
-      shadowDepthBiasUI = snap.shadow.depthBias;
-      shadowPcfRadiusUI = snap.shadow.pcfRadius;
-      shadowOrthoExtentUI = snap.shadow.orthoHalfExtent;
+      uiState.sunYawDegUI = yaw;
+      uiState.sunPitchDegUI = pitch;
+      uiState.shadowMapSizeUI = snap.shadow.mapSize;
+      uiState.shadowSlopeScaleBiasUI = snap.shadow.slopeScaleBias;
+      uiState.shadowConstantBiasUI = snap.shadow.constantBias;
+      uiState.shadowDepthBiasUI = snap.shadow.depthBias;
+      uiState.shadowPcfRadiusUI = snap.shadow.pcfRadius;
+      uiState.shadowOrthoExtentUI = snap.shadow.orthoHalfExtent;
       engineReady = true;
     }
   });
@@ -228,19 +231,6 @@ function dirToYawPitchDeg(
   return { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI };
 }
 
-function yawPitchDegToDir(
-  yawDeg: number,
-  pitchDeg: number,
-): [number, number, number] {
-  const yaw = (yawDeg * Math.PI) / 180;
-  const pitch = (pitchDeg * Math.PI) / 180;
-  const cp = Math.cos(pitch);
-  const x = cp * Math.cos(yaw);
-  const y = Math.sin(pitch);
-  const z = cp * Math.sin(yaw);
-  return [x, y, z];
-}
-
 export function update(): void {
   if (!uiDevice || !uiContext) return;
 
@@ -256,203 +246,10 @@ export function update(): void {
   ImGui.Text(`ImGui WantCaptureKeyboard: ${io.WantCaptureKeyboard}`);
   ImGui.Separator();
 
-  if (ImGui.CollapsingHeader("Fog", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const fogEnabledRef: [boolean] = [fogEnabledUI];
-    if (ImGui.Checkbox("Enabled##Fog", fogEnabledRef) && engineReady) {
-      fogEnabledUI = fogEnabledRef[0];
-      setFogEnabled(engineStateCtx, fogEnabledUI);
-    }
-    const fogColorRef: [number, number, number] = [
-      fogColorUI[0],
-      fogColorUI[1],
-      fogColorUI[2],
-    ];
-    if (ImGui.ColorEdit3("Color##Fog", fogColorRef) && engineReady) {
-      fogColorUI = [fogColorRef[0], fogColorRef[1], fogColorRef[2]];
-      setFogColor(
-        engineStateCtx,
-        fogColorUI[0],
-        fogColorUI[1],
-        fogColorUI[2],
-        1.0,
-      );
-    }
-    const densityRef: [number] = [fogDensityUI];
-    if (
-      ImGui.SliderFloat("Density##Fog", densityRef, 0.0, 1.0) &&
-      engineReady
-    ) {
-      fogDensityUI = densityRef[0];
-      setFogParams(
-        engineStateCtx,
-        fogDensityUI,
-        fogHeightUI,
-        fogFalloffUI,
-        fogInscatterUI,
-      );
-    }
-    const heightRef: [number] = [fogHeightUI];
-    if (
-      ImGui.SliderFloat("Height##Fog", heightRef, -50.0, 50.0) &&
-      engineReady
-    ) {
-      fogHeightUI = heightRef[0];
-      setFogParams(
-        engineStateCtx,
-        fogDensityUI,
-        fogHeightUI,
-        fogFalloffUI,
-        fogInscatterUI,
-      );
-    }
-    const falloffRef: [number] = [fogFalloffUI];
-    if (
-      ImGui.SliderFloat("Height Falloff##Fog", falloffRef, 0.0, 1.0) &&
-      engineReady
-    ) {
-      fogFalloffUI = falloffRef[0];
-      setFogParams(
-        engineStateCtx,
-        fogDensityUI,
-        fogHeightUI,
-        fogFalloffUI,
-        fogInscatterUI,
-      );
-    }
-    const inscatterRef: [number] = [fogInscatterUI];
-    if (
-      ImGui.SliderFloat("Inscatter Intensity##Fog", inscatterRef, 0.0, 10.0) &&
-      engineReady
-    ) {
-      fogInscatterUI = inscatterRef[0];
-      setFogParams(
-        engineStateCtx,
-        fogDensityUI,
-        fogHeightUI,
-        fogFalloffUI,
-        fogInscatterUI,
-      );
-    }
-  }
-
-  if (ImGui.CollapsingHeader("Sun", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const sunEnabledRef: [boolean] = [sunEnabledUI];
-    if (ImGui.Checkbox("Enabled##Sun", sunEnabledRef) && engineReady) {
-      sunEnabledUI = sunEnabledRef[0];
-      setSunEnabled(engineStateCtx, sunEnabledUI);
-    }
-    const sunColorRef: [number, number, number] = [
-      sunColorUI[0],
-      sunColorUI[1],
-      sunColorUI[2],
-    ];
-    if (ImGui.ColorEdit3("Color##Sun", sunColorRef) && engineReady) {
-      sunColorUI = [sunColorRef[0], sunColorRef[1], sunColorRef[2]];
-      setSunColorAndIntensity(
-        engineStateCtx,
-        sunColorUI[0],
-        sunColorUI[1],
-        sunColorUI[2],
-        sunIntensityUI,
-      );
-    }
-    const sunIntensityRef: [number] = [sunIntensityUI];
-    if (
-      ImGui.SliderFloat("Intensity##Sun", sunIntensityRef, 0.0, 50.0) &&
-      engineReady
-    ) {
-      sunIntensityUI = sunIntensityRef[0];
-      setSunColorAndIntensity(
-        engineStateCtx,
-        sunColorUI[0],
-        sunColorUI[1],
-        sunColorUI[2],
-        sunIntensityUI,
-      );
-    }
-    const yawRef: [number] = [sunYawDegUI];
-    const pitchRef: [number] = [sunPitchDegUI];
-    let changedAngles = false;
-    if (ImGui.SliderFloat("Yaw (deg)##Sun", yawRef, -180.0, 180.0)) {
-      changedAngles = true;
-    }
-    if (ImGui.SliderFloat("Pitch (deg)##Sun", pitchRef, -89.9, 89.9)) {
-      changedAngles = true;
-    }
-    if (changedAngles && engineReady) {
-      sunYawDegUI = yawRef[0];
-      sunPitchDegUI = pitchRef[0];
-      const [dx, dy, dz] = yawPitchDegToDir(sunYawDegUI, sunPitchDegUI);
-      setSunDirection(engineStateCtx, dx, dy, dz);
-    }
-    if (ImGui.TreeNode("Advanced Vector (normalized)")) {
-      const [dx, dy, dz] = yawPitchDegToDir(sunYawDegUI, sunPitchDegUI);
-      ImGui.Text(`Dir: ${dx.toFixed(3)}, ${dy.toFixed(3)}, ${dz.toFixed(3)}`);
-      ImGui.TreePop();
-    }
-  }
-
-  if (ImGui.CollapsingHeader("Shadows", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const sizes = [256, 512, 1024, 2048, 4096, 8192];
-    const currentLabel = `${shadowMapSizeUI}`;
-    if (ImGui.BeginCombo("Map Size", currentLabel)) {
-      for (const size of sizes) {
-        const label = `${size}`;
-        const isSelected = shadowMapSizeUI === size;
-        if (ImGui.Selectable(label, isSelected)) {
-          shadowMapSizeUI = size;
-          if (engineReady) setShadowMapSize(engineStateCtx, shadowMapSizeUI);
-        }
-        if (isSelected) ImGui.SetItemDefaultFocus();
-      }
-      ImGui.EndCombo();
-    }
-    const slopeRef: [number] = [shadowSlopeScaleBiasUI];
-    const constRef: [number] = [shadowConstantBiasUI];
-    const depthRef: [number] = [shadowDepthBiasUI];
-    const pcfRef: [number] = [shadowPcfRadiusUI];
-    let changedShadow0 = false;
-    if (ImGui.SliderFloat("Slope Scale Bias", slopeRef, 0.0, 16.0))
-      changedShadow0 = true;
-    if (ImGui.SliderFloat("Constant Bias", constRef, 0.0, 4096.0))
-      changedShadow0 = true;
-    if (ImGui.SliderFloat("Depth Bias", depthRef, 0.0, 0.02))
-      changedShadow0 = true;
-    if (ImGui.SliderFloat("PCF Radius", pcfRef, 0.0, 5.0))
-      changedShadow0 = true;
-    if (changedShadow0 && engineReady) {
-      shadowSlopeScaleBiasUI = slopeRef[0];
-      shadowConstantBiasUI = constRef[0];
-      shadowDepthBiasUI = depthRef[0];
-      shadowPcfRadiusUI = pcfRef[0];
-      setShadowParams0(
-        engineStateCtx,
-        shadowSlopeScaleBiasUI,
-        shadowConstantBiasUI,
-        shadowDepthBiasUI,
-        shadowPcfRadiusUI,
-      );
-    }
-    const orthoRef: [number] = [shadowOrthoExtentUI];
-    if (
-      ImGui.SliderFloat("Ortho Half Extent", orthoRef, 1.0, 500.0) &&
-      engineReady
-    ) {
-      shadowOrthoExtentUI = orthoRef[0];
-      setShadowOrthoHalfExtent(engineStateCtx, shadowOrthoExtentUI);
-    }
-  }
-
-  if (ImGui.CollapsingHeader("Rendering", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const toneMapRef: [boolean] = [toneMappingEnabledUI];
-    if (ImGui.Checkbox("Tone Mapping (ACES)", toneMapRef)) {
-      toneMappingEnabledUI = toneMapRef[0];
-      worker.postMessage({
-        type: "SET_TONE_MAPPING",
-        enabled: toneMappingEnabledUI,
-      });
-    }
-  }
+  fogWidget.render(engineStateCtx, uiState, engineReady);
+  sunWidget.render(engineStateCtx, uiState, engineReady);
+  shadowWidget.render(engineStateCtx, uiState, engineReady);
+  renderingWidget.render(worker, uiState);
 
   ImGui.End();
   updateUICanvasInteractivity();
