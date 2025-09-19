@@ -396,8 +396,7 @@ function frame(now: number) {
     return;
 
   // apply editor state before systems
-  // Only sync if we have a plausible shared state array
-  if (engineStateCtx && engineStateCtx.i32.length >= (8 >> 2) + 1) {
+  if (engineStateCtx) {
     syncEngineState(world, engineStateCtx);
   }
 

@@ -489,12 +489,37 @@ export class Renderer {
     }
   }
 
+  /**
+   * Configures the WebGPU canvas context for rendering.
+   *
+   * This method obtains a "webgpu" GPUCanvasContext from the underlying
+   * HTMLCanvasElement or OffscreenCanvas, chooses an appropriate canvas
+   * format, and configures the swap chain. If HDR output is potentially
+   * supported by the adapter (as detected during device setup), it first
+   * attempts to configure the canvas with an HDR format (rgba16float)
+   * and falls back to the preferred SDR format if that fails.
+   *
+   * Side effects:
+   * - Initializes this.context with a GPUCanvasContext.
+   * - Sets this.canvasFormat to the final format used by the swap chain.
+   * - Calls GPUCanvasContext.configure() with the selected configuration.
+   * - Logs the final canvas format selection.
+   *
+   * Error handling:
+   * - On HDR configuration failure, logs a warning, disables the HDR path,
+   *   and configures the context with SDR settings instead.
+   *
+   * Note:
+   * - The presence of adapter features (ie "shader-f16") does not guarantee
+   *   that a particular canvas format is supported. The code attempts HDR and
+   *   gracefully falls back to SDR as needed.
+   */
   private setupContext(): void {
     // OffscreenCanvas also supports 'webgpu' context in workers; use a safe cast.
     const canvasAny = this.canvas as any;
     this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
 
-    // Default to the preferred SDR format
+    // Default to the browser's preferred SDR format
     this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
 
     const config: GPUCanvasConfiguration = {
@@ -504,7 +529,8 @@ export class Renderer {
       alphaMode: "premultiplied",
     };
 
-    // Attempt to configure for HDR if supported by the adapter
+    // Attempt to configure for HDR if the adapter indicates support.
+    // If configuration fails at runtime, fall back to SDR.
     if (this.hdrSupported) {
       const hdrConfig: GPUCanvasConfiguration = {
         ...config,
@@ -512,7 +538,7 @@ export class Renderer {
       };
       try {
         this.context.configure(hdrConfig);
-        // If successful, update the canvasFormat to the HDR format
+        // If successful, record the HDR format.
         this.canvasFormat = "rgba16float";
         console.log("Successfully configured canvas for HDR output.");
       } catch (e) {
@@ -520,14 +546,17 @@ export class Renderer {
           "HDR canvas configuration failed. Falling back to SDR.",
           e,
         );
-        // If it fails, unset the hdrSupported flag and configure for SDR
+        // Disable HDR path and configure standard SDR.
         this.hdrSupported = false;
         this.context.configure(config);
       }
     } else {
-      // If not supported by adapter, just configure for SDR
+      // Adapter not HDR-capable (or we chose not to attempt HDR): configure SDR.
       this.context.configure(config);
     }
+
+    // Diagnostic: log the final canvas format in use.
+    console.log("[Renderer] Canvas configured with format:", this.canvasFormat);
   }
 
   private createDepthTexture(): void {

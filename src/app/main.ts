@@ -537,7 +537,7 @@ function drawUI() {
   }
 
   if (ImGui.CollapsingHeader("Shadows", ImGui.TreeNodeFlags.DefaultOpen)) {
-    const sizes = [512, 1024, 2048, 4096];
+    const sizes = [256, 512, 1024, 2048, 4096, 8192];
 
     const currentLabel = `${shadowMapSizeUI}`;
     if (ImGui.BeginCombo("Map Size", currentLabel)) {

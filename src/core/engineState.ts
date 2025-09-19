@@ -1,10 +1,27 @@
 // src/core/engineState.ts
+
+/**
+ * This module defines a lock-free, low-latency bridge between the main thread
+ * (ImGui editor) and the render worker using SharedArrayBuffer. The main thread
+ * writes raw values into a shared float/int view and then publishes a "dirty"
+ * bit via Atomics.or(). The worker thread consumes those dirty bits using
+ * Atomics.exchange(), applies changes to ECS resources, and then bumps a
+ * generation counter for observability.
+ *
+ * Memory ordering pattern:
+ * - Writer (main): Write floats/ints → Atomics.or(FLAGS).
+ * - Reader (worker): mask = Atomics.exchange(FLAGS, 0) → Read floats/ints.
+ *
+ * This provides release/acquire visibility across agents without locks.
+ */
+
 import {
   ENGINE_STATE_MAGIC,
   ENGINE_STATE_VERSION,
   ENGINE_STATE_MAGIC_OFFSET,
   ENGINE_STATE_VERSION_OFFSET,
   ENGINE_STATE_FLAGS0_OFFSET,
+  ENGINE_STATE_GEN_OFFSET,
   // Offsets
   FOG_ENABLED_OFFSET,
   FOG_COLOR_OFFSET,
@@ -33,19 +50,51 @@ import {
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
 
+/**
+ * Context that wraps typed-array views into the shared editor state buffer.
+ *
+ * The buffer must be a SharedArrayBuffer. Both views share the same backing
+ * memory and are indexed using byte offsets shifted by 2 (>>2). See `idx()`.
+ */
 export interface EngineStateContext {
+  /** Int view for flags and integer fields. */
   i32: Int32Array;
+  /** Float view for struct-like field groups (vec4-aligned). */
   f32: Float32Array;
 }
 
+/**
+ * Converts a byte offset into the 32-bit element index usable by Int32Array/Float32Array views.
+ * @param byteOffset Byte offset from the start of the SAB.
+ * @returns 32-bit element index (byteOffset >> 2).
+ * @private
+ */
 const idx = (byteOffset: number) => byteOffset >> 2;
 
+/**
+ * Creates an engine state context for the given SharedArrayBuffer.
+ *
+ * No header is written by this function. Call {@link initializeEngineStateHeader}
+ * on the writer thread to seed MAGIC/VERSION/GEN.
+ *
+ * @param buffer A SharedArrayBuffer large enough for the schema.
+ * @returns EngineStateContext with int and float views.
+ * @throws If a non-SharedArrayBuffer or invalid buffer is passed, later Atomics
+ *         usage will fail; this does not validate size upfront.
+ */
 export function createEngineStateContext(
   buffer: SharedArrayBuffer,
 ): EngineStateContext {
   return { i32: new Int32Array(buffer), f32: new Float32Array(buffer) };
 }
 
+/**
+ * Initializes the shared header with MAGIC, VERSION, and resets GENERATION.
+ *
+ * Writer-only (main thread). Safe to call multiple times; values are idempotent.
+ *
+ * @param ctx Engine state context with shared views.
+ */
 export function initializeEngineStateHeader(ctx: EngineStateContext): void {
   try {
     Atomics.store(ctx.i32, idx(ENGINE_STATE_MAGIC_OFFSET), ENGINE_STATE_MAGIC);
@@ -54,6 +103,8 @@ export function initializeEngineStateHeader(ctx: EngineStateContext): void {
       idx(ENGINE_STATE_VERSION_OFFSET),
       ENGINE_STATE_VERSION,
     );
+    // Start generation counter at 0; worker will bump after applying changes.
+    Atomics.store(ctx.i32, idx(ENGINE_STATE_GEN_OFFSET), 0);
   } catch (e) {
     console.error(
       "[EngineState] Failed to initialize header; is SharedArrayBuffer available?",
@@ -62,10 +113,28 @@ export function initializeEngineStateHeader(ctx: EngineStateContext): void {
   }
 }
 
+/**
+ * Checks that a 32-bit integer address (by byte offset) is in-bounds of the i32 view.
+ *
+ * @param ctx Engine state context
+ * @param byteOffset Byte offset to test
+ * @returns True if index is a valid Int32 index
+ * @private
+ */
 function inBoundsI32(ctx: EngineStateContext, byteOffset: number): boolean {
   const index = byteOffset >> 2;
   return index >= 0 && index < ctx.i32.length;
 }
+
+/**
+ * Checks that a ranged Float32 read/write (by byte offset) is in-bounds of the f32 view.
+ *
+ * @param ctx Engine state context
+ * @param byteOffset Starting byte offset
+ * @param floatCount Number of float elements to access
+ * @returns True if the [start, end) view is valid
+ * @private
+ */
 function inBoundsF32Range(
   ctx: EngineStateContext,
   byteOffset: number,
@@ -76,11 +145,32 @@ function inBoundsF32Range(
   return start >= 0 && end <= ctx.f32.length;
 }
 
-// Writer helpers (MAIN thread)
+/* ============================================================================
+ * WRITERS (Main thread)
+ * The pattern is: write raw values first, then publish with Atomics.or(FLAGS).
+ * ==========================================================================*/
+
+/**
+ * Publishes fog enable/disable state.
+ *
+ * @remarks Memory ordering: value is written before the dirty bit is set with Atomics.
+ * @param ctx Engine state context
+ * @param enabled True to enable fog
+ */
 export function setFogEnabled(ctx: EngineStateContext, enabled: boolean): void {
   Atomics.store(ctx.i32, idx(FOG_ENABLED_OFFSET), enabled ? 1 : 0);
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_FOG_ENABLED);
 }
+
+/**
+ * Publishes fog color (RGBA).
+ *
+ * @param ctx Engine state context
+ * @param r Red [0..]
+ * @param g Green
+ * @param b Blue
+ * @param a Alpha
+ */
 export function setFogColor(
   ctx: EngineStateContext,
   r: number,
@@ -91,6 +181,16 @@ export function setFogColor(
   ctx.f32.set([r, g, b, a], idx(FOG_COLOR_OFFSET));
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_FOG_COLOR);
 }
+
+/**
+ * Publishes fog params vector [density, height, heightFalloff, inscatteringIntensity].
+ *
+ * @param ctx Engine state context
+ * @param density Base fog density (non-negative)
+ * @param height Reference height (world Y) where fog is densest
+ * @param heightFalloff Rate of exponential falloff with altitude (non-negative)
+ * @param inscatteringIntensity Sun in-scattering contribution strength (non-negative)
+ */
 export function setFogParams(
   ctx: EngineStateContext,
   density: number,
@@ -105,10 +205,25 @@ export function setFogParams(
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_FOG_PARAMS0);
 }
 
+/**
+ * Publishes sun enable/disable state.
+ *
+ * @param ctx Engine state context
+ * @param enabled True to enable sun light
+ */
 export function setSunEnabled(ctx: EngineStateContext, enabled: boolean): void {
   Atomics.store(ctx.i32, idx(SUN_ENABLED_OFFSET), enabled ? 1 : 0);
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SUN_ENABLED);
 }
+
+/**
+ * Publishes sun direction (XYZ), will be normalized by the worker on apply.
+ *
+ * @param ctx Engine state context
+ * @param x X component
+ * @param y Y component
+ * @param z Z component
+ */
 export function setSunDirection(
   ctx: EngineStateContext,
   x: number,
@@ -118,6 +233,16 @@ export function setSunDirection(
   ctx.f32.set([x, y, z, 0.0], idx(SUN_DIRECTION_OFFSET));
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SUN_DIRECTION);
 }
+
+/**
+ * Publishes sun color (RGB) and intensity (W).
+ *
+ * @param ctx Engine state context
+ * @param r Red
+ * @param g Green
+ * @param b Blue
+ * @param intensity Intensity multiplier (non-negative)
+ */
 export function setSunColorAndIntensity(
   ctx: EngineStateContext,
   r: number,
@@ -129,10 +254,27 @@ export function setSunColorAndIntensity(
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SUN_COLOR);
 }
 
+/**
+ * Publishes requested shadow map resolution (will be snapped to allowed buckets by worker).
+ *
+ * @param ctx Engine state context
+ * @param size Desired size (e.g., 512, 1024...); worker clamps/snap.
+ */
 export function setShadowMapSize(ctx: EngineStateContext, size: number): void {
   Atomics.store(ctx.i32, idx(SHADOW_MAP_SIZE_OFFSET), size | 0);
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SHADOW_MAP_SIZE);
 }
+
+/**
+ * Publishes shadow raster/compare parameters vector
+ * [slopeScaleBias, constantBias, depthBias, pcfRadius].
+ *
+ * @param ctx Engine state context
+ * @param slopeScaleBias Raster slope-scale bias (ramps with slope)
+ * @param constantBias Raster constant bias
+ * @param depthBias Bias used by compare sampling in FS (0..0.1 typical)
+ * @param pcfRadius Kernel radius for 3x3 PCF (texel units, 0..5)
+ */
 export function setShadowParams0(
   ctx: EngineStateContext,
   slopeScaleBias: number,
@@ -146,6 +288,13 @@ export function setShadowParams0(
   );
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SHADOW_PARAMS0);
 }
+
+/**
+ * Publishes shadow ortho camera half-extent (single cascade fit).
+ *
+ * @param ctx Engine state context
+ * @param orthoHalfExtent Orthographic half-extent along X/Y (1..1e4 typical)
+ */
 export function setShadowOrthoHalfExtent(
   ctx: EngineStateContext,
   orthoHalfExtent: number,
@@ -154,15 +303,34 @@ export function setShadowOrthoHalfExtent(
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SHADOW_PARAMS1);
 }
 
-// Reader/sync (WORKER thread)
+/* ============================================================================
+ * READER/SYNC (Worker thread)
+ * Reads once per frame; applies only the changed fields and clears flags.
+ * ==========================================================================*/
+
 let warnedInvalidFlagsIndex = false;
 
+/**
+ * Consumes dirty flags atomically and applies updates to the ECS world.
+ *
+ * This function is idempotent within a frame: it clears the dirty mask via
+ * Atomics.exchange, then reads raw floats/ints and normalizes/clamps as needed.
+ * On success (mask != 0), it increments a GENERATION counter to facilitate
+ * debugging and observability from the main thread.
+ *
+ * Safety:
+ * - All Atomics operations are guarded by in-bounds checks and try/catch to
+ *   avoid RangeError on non-shared or too-small buffers.
+ *
+ * @param world ECS world containing FogComponent, SceneSunComponent, ShadowSettingsComponent
+ * @param ctx Engine state context
+ */
 export function syncEngineState(world: World, ctx: EngineStateContext): void {
   // Ensure flags index is valid on this typed array
   if (!inBoundsI32(ctx, ENGINE_STATE_FLAGS0_OFFSET)) {
     if (!warnedInvalidFlagsIndex) {
       console.error(
-        "[EngineState] FLAGS0 out of bounds or buffer not shared. i32.length=",
+        "[EngineState] FLAGS0 out of bounds or buffer not shared. i32.len=",
         ctx.i32.length,
         "expected >= ",
         (ENGINE_STATE_FLAGS0_OFFSET >> 2) + 1,
@@ -192,6 +360,7 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
   const sun = world.getResource(SceneSunComponent);
   const shadows = world.getResource(ShadowSettingsComponent);
 
+  // Fog updates
   if (mask & DF_FOG_ENABLED && fog && inBoundsI32(ctx, FOG_ENABLED_OFFSET)) {
     fog.enabled = Atomics.load(ctx.i32, idx(FOG_ENABLED_OFFSET)) !== 0;
   }
@@ -218,6 +387,7 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
     fog.inscatteringIntensity = Math.max(0, ctx.f32[base + 3]);
   }
 
+  // Sun updates
   if (mask & DF_SUN_ENABLED && sun && inBoundsI32(ctx, SUN_ENABLED_OFFSET)) {
     sun.enabled = Atomics.load(ctx.i32, idx(SUN_ENABLED_OFFSET)) !== 0;
   }
@@ -249,6 +419,7 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
     sun.color[3] = Math.max(0, ctx.f32[base + 3]); // intensity
   }
 
+  // Shadow updates
   if (shadows) {
     if (mask & DF_SHADOW_MAP_SIZE && inBoundsI32(ctx, SHADOW_MAP_SIZE_OFFSET)) {
       const req = Atomics.load(ctx.i32, idx(SHADOW_MAP_SIZE_OFFSET)) | 0;
@@ -272,22 +443,30 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
       shadows.orthoHalfExtent = clampFinite(ctx.f32[base + 0], 1, 1e4);
     }
   }
+
+  // Signal a successful application for observability (optional for UI)
+  try {
+    Atomics.add(ctx.i32, idx(ENGINE_STATE_GEN_OFFSET), 1);
+  } catch {
+    // No-op if buffer invalid; earlier guards already emitted a log.
+  }
 }
 
-function clampShadowMapSize(v: number): number {
-  const allowed = [256, 512, 1024, 2048, 4096, 8192];
-  const nearest = allowed.reduce(
-    (best, x) => (Math.abs(x - v) < Math.abs(best - v) ? x : best),
-    allowed[0],
-  );
-  return nearest;
-}
-function clampFinite(v: number, min: number, max: number): number {
-  if (!Number.isFinite(v)) return min;
-  return Math.min(max, Math.max(min, v));
-}
+/* ============================================================================
+ * Snapshot helpers
+ * ==========================================================================*/
 
-// Publish a one-time snapshot after world init (WORKER)
+/**
+ * One-time snapshot publisher from the worker after the ECS world has been created.
+ *
+ * This writes the ECS resources (fog/sun/shadows) into the shared buffer and
+ * sets all relevant dirty bits so the main thread can initialize the UI state
+ * from the SAB without a separate message payload. Finally, it also
+ * initializes the header (MAGIC/VERSION/GEN).
+ *
+ * @param world ECS world configured with FogComponent, SceneSunComponent, ShadowSettingsComponent
+ * @param ctx Engine state context
+ */
 export function publishSnapshotFromWorld(
   world: World,
   ctx: EngineStateContext,
@@ -383,7 +562,18 @@ export function publishSnapshotFromWorld(
   }
 }
 
-// Read-only snapshot helper (MAIN thread)
+/**
+ * Reads a non-atomic, coherent snapshot of editor state for initializing the UI.
+ *
+ * This is intended for the main thread when receiving a READY notification
+ * from the worker. It uses Atomics.load for integer header bits (enabled booleans,
+ * mapSize), and direct float reads for parameter blocks. Because the worker
+ * publishes the snapshot with dirty bits already set and initializes the header
+ * last, this is sufficient for initialization reads.
+ *
+ * @param ctx Engine state context
+ * @returns Structured snapshot for Fog, Sun, and Shadow settings
+ */
 export function readSnapshot(ctx: EngineStateContext): {
   fog: {
     enabled: boolean;
@@ -408,6 +598,7 @@ export function readSnapshot(ctx: EngineStateContext): {
     orthoHalfExtent: number;
   };
 } {
+  // Fog
   const fogEnabled = Atomics.load(ctx.i32, idx(FOG_ENABLED_OFFSET)) !== 0;
   const fcol = [
     ctx.f32[idx(FOG_COLOR_OFFSET) + 0],
@@ -425,6 +616,7 @@ export function readSnapshot(ctx: EngineStateContext): {
     inscatteringIntensity: ctx.f32[fparBase + 3],
   };
 
+  // Sun
   const sunEnabled = Atomics.load(ctx.i32, idx(SUN_ENABLED_OFFSET)) !== 0;
   const sdir = [
     ctx.f32[idx(SUN_DIRECTION_OFFSET) + 0],
@@ -439,6 +631,7 @@ export function readSnapshot(ctx: EngineStateContext): {
   ] as [number, number, number];
   const sint = ctx.f32[scolBase + 3];
 
+  // Shadows
   const smap = Atomics.load(ctx.i32, idx(SHADOW_MAP_SIZE_OFFSET)) | 0;
   const spar0Base = idx(SHADOW_PARAMS0_OFFSET);
   const orthoBase = idx(SHADOW_PARAMS1_OFFSET);
@@ -461,4 +654,40 @@ export function readSnapshot(ctx: EngineStateContext): {
     },
     shadow,
   };
+}
+
+/* ============================================================================
+ * Utilities
+ * ==========================================================================*/
+
+/**
+ * Snaps a requested shadow map size to the nearest allowed bucket.
+ *
+ * Allowed: [256, 512, 1024, 2048, 4096, 8192]
+ *
+ * @param v Requested size
+ * @returns Nearest allowed size
+ * @private
+ */
+function clampShadowMapSize(v: number): number {
+  const allowed = [256, 512, 1024, 2048, 4096, 8192];
+  const nearest = allowed.reduce(
+    (best, x) => (Math.abs(x - v) < Math.abs(best - v) ? x : best),
+    allowed[0],
+  );
+  return nearest;
+}
+
+/**
+ * Clamps a finite numeric value to [min, max], returning min if not finite.
+ *
+ * @param v Input value
+ * @param min Minimum
+ * @param max Maximum
+ * @returns Clamped finite value
+ * @private
+ */
+function clampFinite(v: number, min: number, max: number): number {
+  if (!Number.isFinite(v)) return min;
+  return Math.min(max, Math.max(min, v));
 }
