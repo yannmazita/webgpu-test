@@ -1,6 +1,6 @@
 // src/core/rendering/passes/skyboxPass.ts
 import { MaterialInstance } from "@/core/materials/materialInstance";
-import { Renderer } from "@/core/renderer";
+import { Renderer } from "@/core/rendering/renderer";
 
 export class SkyboxPass {
   public record(

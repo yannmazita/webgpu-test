@@ -2,7 +2,7 @@
 import { Renderable } from "@/core/types/gpu";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { Vec3, vec3 } from "wgpu-matrix";
-import { Renderer } from "@/core/renderer";
+import { Renderer } from "@/core/rendering/renderer";
 
 export class TransparentPass {
   private device: GPUDevice;

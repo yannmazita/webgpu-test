@@ -1,25 +1,25 @@
 // src/core/renderer.ts
 import { vec3 } from "wgpu-matrix";
-import { Light, Mesh, Renderable } from "./types/gpu";
+import { Light, Mesh, Renderable } from "@/core/types/gpu";
 import { Material } from "@/core/materials/material";
-import { SceneRenderData } from "./types/rendering";
-import { CameraComponent } from "./ecs/components/cameraComponent";
-import { BatchManager } from "./rendering/batchManager";
-import { UniformManager } from "./rendering/uniformManager";
-import { Profiler } from "./utils/profiler";
-import { testAABBFrustum, transformAABB } from "./utils/bounds";
-import { ClusterPass } from "./rendering/passes/clusterPass";
-import { ShadowPass } from "./rendering/passes/shadowPass";
-import { SkyboxPass } from "./rendering/passes/skyboxPass";
+import { SceneRenderData } from "@/core/types/rendering";
+import { CameraComponent } from "@/core/ecs/components/cameraComponent";
+import { BatchManager } from "@/core/rendering/batchManager";
+import { UniformManager } from "@/core/rendering/uniformManager";
+import { Profiler } from "@/core/utils/profiler";
+import { testAABBFrustum, transformAABB } from "@/core/utils/bounds";
+import { ClusterPass } from "@/core/rendering/passes/clusterPass";
+import { ShadowPass } from "@/core/rendering/passes/shadowPass";
+import { SkyboxPass } from "@/core/rendering/passes/skyboxPass";
 import { DrawBatch, RendererStats } from "@/core/types/renderer";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
-import { MaterialInstance } from "./materials/materialInstance";
-import { OpaquePass } from "./rendering/passes/opaquePass";
-import { TransparentPass } from "./rendering/passes/transparentPass";
-import { UIPass } from "./rendering/passes/uiPass";
+import { MaterialInstance } from "@/core/materials/materialInstance";
+import { OpaquePass } from "@/core/rendering/passes/opaquePass";
+import { TransparentPass } from "@/core/rendering/passes/transparentPass";
+import { UIPass } from "@/core/rendering/passes/uiPass";
 
 /**
  * The central rendering engine.

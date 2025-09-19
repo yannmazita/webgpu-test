@@ -1,6 +1,6 @@
 // src/core/rendering/passes/clusterPass.ts
 import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
-import { RendererStats } from "@/core/renderer";
+import { RendererStats } from "@/core/types/renderer";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
 export class ClusterPass {

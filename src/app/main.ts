@@ -3,7 +3,7 @@ import "@/style.css";
 import { SHARED_BUFFER_SIZE } from "@/core/sharedInputLayout";
 import { METRICS_BUFFER_SIZE } from "@/core/sharedMetricsLayout";
 import { createMetricsContext } from "@/core/metrics";
-import { createInputContext } from "@/core/input";
+import { createInputContext } from "@/core/input/manager";
 import { SHARED_ENGINE_STATE_BUFFER_SIZE } from "@/core/sharedEngineStateLayout";
 import {
   createEngineStateContext as createEngineStateCtx,

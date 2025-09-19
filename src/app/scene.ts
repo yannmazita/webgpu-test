@@ -1,6 +1,6 @@
 // src/app/scene.ts
 import { World } from "@/core/ecs/world";
-import { ResourceManager } from "@/core/resourceManager";
+import { ResourceManager } from "@/core/resources/resourceManager";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";

@@ -1,25 +1,25 @@
 // src/core/resourceManager.ts
-import { Renderer } from "./renderer";
-import { Material } from "./materials/material";
+import { Renderer } from "@/core/rendering/renderer";
+import { Material } from "@/core/materials/material";
 import {
   AABB,
   Mesh,
   PBRMaterialOptions,
   UnlitGroundMaterialOptions,
-} from "./types/gpu";
-import { MeshData } from "./types/mesh";
-import { createTextureFromImage } from "./utils/texture";
-import { createGPUBuffer } from "./utils/webgpu";
+} from "@/core/types/gpu";
+import { MeshData } from "@/core/types/mesh";
+import { createTextureFromImage } from "@/core/utils/texture";
+import { createGPUBuffer } from "@/core/utils/webgpu";
 import { loadOBJ } from "@/loaders/objLoader";
 import { loadSTL } from "@/loaders/stlLoader";
-import { ShaderPreprocessor } from "./shaders/preprocessor";
+import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { mat4, quat, vec3 } from "wgpu-matrix";
-import { PBRMaterial } from "./materials/pbrMaterial";
+import { PBRMaterial } from "@/core/materials/pbrMaterial";
 import {
   createCubeMeshData,
   createIcosphereMeshData,
-} from "./utils/primitives";
-import { UnlitGroundMaterial } from "./materials/unlitGroundMaterial";
+} from "@/core/utils/primitives";
+import { UnlitGroundMaterial } from "@/core/materials/unlitGroundMaterial";
 import { loadHDR } from "@/loaders/hdrLoader";
 import {
   equirectangularToCubemap,
@@ -36,19 +36,18 @@ import {
   loadGLTF,
   ParsedGLTF,
 } from "@/loaders/gltfLoader";
-import { TransformComponent } from "./ecs/components/transformComponent";
-import { Entity } from "./ecs/entity";
-import { World } from "./ecs/world";
-import { setParent } from "./ecs/utils/hierarchy";
-import { MeshRendererComponent } from "./ecs/components/meshRendererComponent";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
+import { Entity } from "@/core/ecs/entity";
+import { World } from "@/core/ecs/world";
+import { setParent } from "@/core/ecs/utils/hierarchy";
+import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import {
   AnimationClip,
   AnimationChannel,
   AnimationSampler,
 } from "@/core/types/animation";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
-import { GLTFAnimation } from "@/loaders/gltfLoader";
-import { MaterialInstance } from "./materials/materialInstance";
+import { MaterialInstance } from "@/core/materials/materialInstance";
 
 // MikkTSpace WASM loader and wrapper
 let mikktspace: {

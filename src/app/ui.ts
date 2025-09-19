@@ -20,7 +20,7 @@ import {
   accumulateMouseDelta,
   updateMousePosition,
   updatePointerLock,
-} from "@/core/input";
+} from "@/core/input/manager";
 import { MetricsContext, readMetricsSnapshot } from "@/core/metrics";
 
 let uiDevice: GPUDevice | null = null;

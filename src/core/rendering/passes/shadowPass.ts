@@ -1,6 +1,6 @@
 // src/core/rendering/passes/shadowPass.ts
 import { ShadowSubsystem } from "@/core/rendering/shadow";
-import { Renderer } from "@/core/renderer";
+import { Renderer } from "@/core/rendering/renderer";
 import { Renderable } from "@/core/types/gpu";
 import {
   SceneSunComponent,

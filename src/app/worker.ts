@@ -1,15 +1,15 @@
 // src/app/worker.ts
 /// <reference lib="webworker" />
 
-import { Renderer } from "@/core/renderer";
-import { ResourceManager } from "@/core/resourceManager";
+import { Renderer } from "@/core/rendering/renderer";
+import { ResourceManager } from "@/core/resources/resourceManager";
 import { World } from "@/core/ecs/world";
 import { cameraSystem } from "@/core/ecs/systems/cameraSystem";
 import { transformSystem } from "@/core/ecs/systems/transformSystem";
 import { renderSystem } from "@/core/ecs/systems/renderSystem";
 import { SceneRenderData } from "@/core/types/rendering";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
-import { IInputSource } from "@/core/iinputSource";
+import { IInputSource } from "@/core/input/iinputSource";
 import {
   createInputContext,
   InputContext,
@@ -17,7 +17,7 @@ import {
   getAndResetMouseDelta,
   getMousePosition,
   isPointerLocked,
-} from "@/core/input";
+} from "@/core/input/manager";
 import {
   createMetricsContext,
   initializeMetrics,
@@ -31,7 +31,7 @@ import {
   IActionController,
   isActionPressed,
   wasActionPressed,
-} from "@/core/action";
+} from "@/core/input/action";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
 import { createDefaultScene } from "./scene";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";

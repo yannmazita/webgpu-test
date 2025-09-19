@@ -8,7 +8,7 @@ import {
   IS_POINTER_LOCKED_OFFSET,
   MOUSE_POS_X_OFFSET,
   MOUSE_POS_Y_OFFSET,
-} from "./sharedInputLayout";
+} from "@/core/sharedInputLayout";
 
 /** The context object holding views for the input buffer. */
 export interface InputContext {

@@ -1,5 +1,5 @@
 // src/core/ecs/systems/cameraControllerSystem.ts
-import { IActionController } from "@/core/action";
+import { IActionController } from "@/core/input/action";
 import { MainCameraTagComponent } from "../components/tagComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";

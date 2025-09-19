@@ -2,7 +2,7 @@
 import { DrawBatch } from "@/core/types/renderer";
 import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
-import { Renderer } from "@/core/renderer";
+import { Renderer } from "@/core/rendering/renderer";
 
 export class OpaquePass {
   public record(

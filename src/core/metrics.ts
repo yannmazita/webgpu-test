@@ -20,7 +20,7 @@ import {
   METRICS_CLUSTER_MAX_OFFSET,
   METRICS_CLUSTER_OVERFLOWS_OFFSET,
 } from "./sharedMetricsLayout";
-import { RendererStats } from "./renderer";
+import { RendererStats } from "./types/renderer";
 
 export type { RendererStats };
 
