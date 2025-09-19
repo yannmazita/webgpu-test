@@ -39,8 +39,7 @@ export const createShaderModule = (
  * Creates and populates a GPUBuffer from a TypedArray.
  *
  * This utility simplifies the common pattern of creating a buffer, mapping it,
- * copying data, and unmapping it. It also handles the WebGPU requirement to
- * have buffers size be a multiple of 4 when using mappedAtCreation.
+ * copying data, and unmapping it.
  *
  * @param device - The GPU device used to create the buffer.
  * @param data - The typed array of data to be copied into the buffer.
@@ -55,28 +54,25 @@ export const createGPUBuffer = (
   label?: string,
 ): GPUBuffer => {
   // Pad the buffer size to a multiple of 4 bytes.
-  // This is required for buffers created with mappedAtCreation set to true.
-  const paddedSize = Math.ceil(data.byteLength / 4) * 4;
+  const paddedSize = Math.max(4, Math.ceil(data.byteLength / 4) * 4);
 
   const bufferDescriptor: GPUBufferDescriptor = {
-    label: label,
+    label,
     size: paddedSize,
-    usage: usage,
-    mappedAtCreation: true,
+    usage: usage | GPUBufferUsage.COPY_DST, // ensure we can upload with writeBuffer
+    mappedAtCreation: false,
   };
 
   const gpuBuffer = device.createBuffer(bufferDescriptor);
 
-  // Get the constructor of the typed array (ie Float32Array, Uint16Array etc).
-  // allowing to create a new view of the same type on the mapped range.
-  const TypedArrayConstructor = data.constructor as new (
-    buffer: ArrayBuffer,
-  ) => TypedArray;
-
-  // Create a new typed array view of the GPU buffer's mapped range.
-  const writeArray = new TypedArrayConstructor(gpuBuffer.getMappedRange());
-  writeArray.set(data); // copy the data into the GPU buffer.
-  gpuBuffer.unmap(); // unmap buffer, transferring ownership of the memory to the GPU.
+  // Upload data; respects data.byteOffset/byteLength
+  device.queue.writeBuffer(
+    gpuBuffer,
+    0,
+    data.buffer,
+    data.byteOffset,
+    data.byteLength,
+  );
 
   return gpuBuffer;
 };

@@ -401,4 +401,20 @@ export class ShadowSubsystem {
       shadowUniformBuffer: this.shadowUniformBuffer,
     };
   }
+
+  public writeDisabled(): void {
+    // Zero sun contribution by setting intensity to 0 and neutral data.
+    // Prepare an identity lightViewProj to avoid NaNs.
+    const ident = mat4.identity();
+    this.shadowUniformsData.fill(0);
+    this.shadowUniformsData.set(ident, 0); // lightViewProj
+    // lightDir, lightColor remain 0
+    // params0: [intensity, pcfRadius, mapSize, depthBias] -> intensity = 0
+    // leave others 0
+    this.device.queue.writeBuffer(
+      this.shadowUniformBuffer,
+      0,
+      this.shadowUniformsData,
+    );
+  }
 }

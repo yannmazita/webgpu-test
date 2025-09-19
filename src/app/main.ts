@@ -12,6 +12,21 @@ import {
 } from "@/core/input";
 import { ImGui } from "@mori2003/jsimgui";
 import { beginDebugUIFrame, endDebugUI, initDebugUI } from "@/core/debugUI";
+import { SHARED_ENGINE_STATE_BUFFER_SIZE } from "@/core/sharedEngineStateLayout";
+import {
+  createEngineStateContext as createEngineStateCtx,
+  initializeEngineStateHeader,
+  readSnapshot as readEngineSnapshot,
+  setFogEnabled,
+  setFogColor,
+  setFogParams,
+  setSunEnabled,
+  setSunDirection,
+  setSunColorAndIntensity,
+  setShadowMapSize,
+  setShadowParams0,
+  setShadowOrthoHalfExtent,
+} from "@/core/engineState";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
@@ -25,7 +40,6 @@ if (!hud) throw new Error("HUD element not found");
 // --- ImGui State ---
 let uiDevice: GPUDevice | null = null;
 let uiContext: GPUCanvasContext | null = null;
-let showMyEditorWindow = true;
 
 async function initUI() {
   if (!navigator.gpu) throw new Error("WebGPU not supported");
@@ -60,6 +74,20 @@ const inputContext = createInputContext(inputBuffer);
 
 const metricsBuffer = new SharedArrayBuffer(METRICS_BUFFER_SIZE);
 const metricsContext = createMetricsContext(metricsBuffer);
+
+const engineStateBuffer = new SharedArrayBuffer(
+  SHARED_ENGINE_STATE_BUFFER_SIZE,
+);
+const engineStateCtx = createEngineStateCtx(engineStateBuffer);
+console.log(
+  "[Main] EngineState SAB bytes=",
+  engineStateBuffer.byteLength,
+  " i32.len=",
+  (engineStateCtx as any).i32.length,
+  " f32.len=",
+  (engineStateCtx as any).f32.length,
+);
+initializeEngineStateHeader(engineStateCtx);
 
 // --- Input Event Handling ---
 let isPointerLockedState = false;
@@ -179,6 +207,52 @@ const HUD_UPDATE_INTERVAL_MS = 250;
 let lastHudUpdateTime = 0;
 let lastHudFrameId = 0;
 
+let engineReady = false;
+
+// UI state for editor
+let fogEnabledUI = true;
+let fogColorUI: [number, number, number] = [0.5, 0.6, 0.7];
+let fogDensityUI = 0.02;
+let fogHeightUI = 0.0;
+let fogFalloffUI = 0.1;
+let fogInscatterUI = 0.8;
+
+let sunEnabledUI = true;
+let sunColorUI: [number, number, number] = [1, 1, 1];
+let sunIntensityUI = 1.0;
+let sunYawDegUI = -26; // azimuth, rough default
+let sunPitchDegUI = -50; // elevation
+
+let shadowMapSizeUI = 2048;
+let shadowSlopeScaleBiasUI = 3.0;
+let shadowConstantBiasUI = 1.0;
+let shadowDepthBiasUI = 0.0015;
+let shadowPcfRadiusUI = 1.0;
+let shadowOrthoExtentUI = 20.0;
+
+function dirToYawPitchDeg(
+  x: number,
+  y: number,
+  z: number,
+): { yaw: number; pitch: number } {
+  // Y up. yaw about +Y from +X axis, pitch elevation from horizon.
+  const pitch = Math.asin(Math.max(-1, Math.min(1, y))); // [-pi/2, pi/2]
+  const yaw = Math.atan2(z, x); // [-pi, pi]
+  return { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI };
+}
+function yawPitchDegToDir(
+  yawDeg: number,
+  pitchDeg: number,
+): [number, number, number] {
+  const yaw = (yawDeg * Math.PI) / 180;
+  const pitch = (pitchDeg * Math.PI) / 180;
+  const cp = Math.cos(pitch);
+  const x = cp * Math.cos(yaw);
+  const y = Math.sin(pitch);
+  const z = cp * Math.sin(yaw);
+  return [x, y, z];
+}
+
 const updateHud = (nowMs: number) => {
   // Limit DOM updates to the target HUD frequency
   if (nowMs - lastHudUpdateTime < HUD_UPDATE_INTERVAL_MS) return;
@@ -220,6 +294,7 @@ worker.postMessage(
     canvas: offscreen,
     sharedInputBuffer: inputBuffer,
     sharedMetricsBuffer: metricsBuffer,
+    sharedEngineStateBuffer: engineStateBuffer,
   },
   [offscreen],
 );
@@ -261,11 +336,39 @@ worker.addEventListener("message", (ev) => {
   if (msg.type === "READY") {
     // Worker finished initialization; allow first frame
     canSendFrame = true;
+
+    // Initialize UI from engine snapshot
+    const snap = readEngineSnapshot(engineStateCtx);
+    fogEnabledUI = snap.fog.enabled;
+    fogColorUI = [snap.fog.color[0], snap.fog.color[1], snap.fog.color[2]];
+    fogDensityUI = snap.fog.density;
+    fogHeightUI = snap.fog.height;
+    fogFalloffUI = snap.fog.heightFalloff;
+    fogInscatterUI = snap.fog.inscatteringIntensity;
+
+    sunEnabledUI = snap.sun.enabled;
+    sunColorUI = [snap.sun.color[0], snap.sun.color[1], snap.sun.color[2]];
+    sunIntensityUI = snap.sun.intensity;
+    const { yaw, pitch } = dirToYawPitchDeg(
+      snap.sun.direction[0],
+      snap.sun.direction[1],
+      snap.sun.direction[2],
+    );
+    sunYawDegUI = yaw;
+    sunPitchDegUI = pitch;
+
+    shadowMapSizeUI = snap.shadow.mapSize;
+    shadowSlopeScaleBiasUI = snap.shadow.slopeScaleBias;
+    shadowConstantBiasUI = snap.shadow.constantBias;
+    shadowDepthBiasUI = snap.shadow.depthBias;
+    shadowPcfRadiusUI = snap.shadow.pcfRadius;
+    shadowOrthoExtentUI = snap.shadow.orthoHalfExtent;
+
+    engineReady = true;
     return;
   }
 
   if (msg.type === "FRAME_DONE") {
-    // Worker finished the last frame; allow next
     canSendFrame = true;
     return;
   }
@@ -277,13 +380,8 @@ function drawUI() {
   beginDebugUIFrame(uiCanvas);
 
   // --- ImGui widgets ---
-  const showMyEditorWindowRef: [boolean] = [showMyEditorWindow];
   ImGui.Begin("Editor");
-  ImGui.Text("Hello, world!");
-  ImGui.Checkbox("Show My Editor Window", showMyEditorWindowRef);
-  showMyEditorWindow = showMyEditorWindowRef[0];
 
-  // Debug info
   ImGui.Separator();
   ImGui.Text(`Pointer Lock: ${isPointerLockedState ? "ON" : "OFF"}`);
   ImGui.Text("Press ESC to exit pointer lock");
@@ -292,6 +390,207 @@ function drawUI() {
   const io = ImGui.GetIO();
   ImGui.Text(`ImGui WantCaptureMouse: ${io.WantCaptureMouse}`);
   ImGui.Text(`ImGui WantCaptureKeyboard: ${io.WantCaptureKeyboard}`);
+
+  ImGui.Separator();
+  if (ImGui.CollapsingHeader("Fog", ImGui.TreeNodeFlags.DefaultOpen)) {
+    const fogEnabledRef: [boolean] = [fogEnabledUI];
+    if (ImGui.Checkbox("Enabled##Fog", fogEnabledRef) && engineReady) {
+      fogEnabledUI = fogEnabledRef[0];
+      setFogEnabled(engineStateCtx, fogEnabledUI);
+    }
+
+    const fogColorRef: [number, number, number] = [
+      fogColorUI[0],
+      fogColorUI[1],
+      fogColorUI[2],
+    ];
+    if (ImGui.ColorEdit3("Color##Fog", fogColorRef) && engineReady) {
+      fogColorUI = [fogColorRef[0], fogColorRef[1], fogColorRef[2]];
+      setFogColor(
+        engineStateCtx,
+        fogColorUI[0],
+        fogColorUI[1],
+        fogColorUI[2],
+        1.0,
+      );
+    }
+
+    const densityRef: [number] = [fogDensityUI];
+    if (
+      ImGui.SliderFloat("Density##Fog", densityRef, 0.0, 1.0) &&
+      engineReady
+    ) {
+      fogDensityUI = densityRef[0];
+      setFogParams(
+        engineStateCtx,
+        fogDensityUI,
+        fogHeightUI,
+        fogFalloffUI,
+        fogInscatterUI,
+      );
+    }
+
+    const heightRef: [number] = [fogHeightUI];
+    if (
+      ImGui.SliderFloat("Height##Fog", heightRef, -50.0, 50.0) &&
+      engineReady
+    ) {
+      fogHeightUI = heightRef[0];
+      setFogParams(
+        engineStateCtx,
+        fogDensityUI,
+        fogHeightUI,
+        fogFalloffUI,
+        fogInscatterUI,
+      );
+    }
+    const falloffRef: [number] = [fogFalloffUI];
+    if (
+      ImGui.SliderFloat("Height Falloff##Fog", falloffRef, 0.0, 1.0) &&
+      engineReady
+    ) {
+      fogFalloffUI = falloffRef[0];
+      setFogParams(
+        engineStateCtx,
+        fogDensityUI,
+        fogHeightUI,
+        fogFalloffUI,
+        fogInscatterUI,
+      );
+    }
+    const inscatterRef: [number] = [fogInscatterUI];
+    if (
+      ImGui.SliderFloat("Inscatter Intensity##Fog", inscatterRef, 0.0, 10.0) &&
+      engineReady
+    ) {
+      fogInscatterUI = inscatterRef[0];
+      setFogParams(
+        engineStateCtx,
+        fogDensityUI,
+        fogHeightUI,
+        fogFalloffUI,
+        fogInscatterUI,
+      );
+    }
+  }
+
+  if (ImGui.CollapsingHeader("Sun", ImGui.TreeNodeFlags.DefaultOpen)) {
+    const sunEnabledRef: [boolean] = [sunEnabledUI];
+    if (ImGui.Checkbox("Enabled##Sun", sunEnabledRef) && engineReady) {
+      sunEnabledUI = sunEnabledRef[0];
+      setSunEnabled(engineStateCtx, sunEnabledUI);
+    }
+
+    const sunColorRef: [number, number, number] = [
+      sunColorUI[0],
+      sunColorUI[1],
+      sunColorUI[2],
+    ];
+    if (ImGui.ColorEdit3("Color##Sun", sunColorRef) && engineReady) {
+      sunColorUI = [sunColorRef[0], sunColorRef[1], sunColorRef[2]];
+      setSunColorAndIntensity(
+        engineStateCtx,
+        sunColorUI[0],
+        sunColorUI[1],
+        sunColorUI[2],
+        sunIntensityUI,
+      );
+    }
+
+    const sunIntensityRef: [number] = [sunIntensityUI];
+    if (
+      ImGui.SliderFloat("Intensity##Sun", sunIntensityRef, 0.0, 50.0) &&
+      engineReady
+    ) {
+      sunIntensityUI = sunIntensityRef[0];
+      setSunColorAndIntensity(
+        engineStateCtx,
+        sunColorUI[0],
+        sunColorUI[1],
+        sunColorUI[2],
+        sunIntensityUI,
+      );
+    }
+
+    const yawRef: [number] = [sunYawDegUI];
+    const pitchRef: [number] = [sunPitchDegUI];
+    let changedAngles = false;
+    if (ImGui.SliderFloat("Yaw (deg)##Sun", yawRef, -180.0, 180.0)) {
+      changedAngles = true;
+    }
+    if (ImGui.SliderFloat("Pitch (deg)##Sun", pitchRef, -89.9, 89.9)) {
+      changedAngles = true;
+    }
+    if (changedAngles && engineReady) {
+      sunYawDegUI = yawRef[0];
+      sunPitchDegUI = pitchRef[0];
+      const [dx, dy, dz] = yawPitchDegToDir(sunYawDegUI, sunPitchDegUI);
+      setSunDirection(engineStateCtx, dx, dy, dz);
+    }
+
+    if (ImGui.TreeNode("Advanced Vector (normalized)")) {
+      // Display only; editing raw XYZ is discouraged in v1
+      const [dx, dy, dz] = yawPitchDegToDir(sunYawDegUI, sunPitchDegUI);
+      ImGui.Text(`Dir: ${dx.toFixed(3)}, ${dy.toFixed(3)}, ${dz.toFixed(3)}`);
+      ImGui.TreePop();
+    }
+  }
+
+  if (ImGui.CollapsingHeader("Shadows", ImGui.TreeNodeFlags.DefaultOpen)) {
+    const sizes = [512, 1024, 2048, 4096];
+
+    const currentLabel = `${shadowMapSizeUI}`;
+    if (ImGui.BeginCombo("Map Size", currentLabel)) {
+      for (const size of sizes) {
+        const label = `${size}`;
+        const isSelected = shadowMapSizeUI === size;
+        if (ImGui.Selectable(label, isSelected)) {
+          shadowMapSizeUI = size;
+          if (engineReady) setShadowMapSize(engineStateCtx, shadowMapSizeUI);
+        }
+        if (isSelected) ImGui.SetItemDefaultFocus();
+      }
+      ImGui.EndCombo();
+    }
+
+    const slopeRef: [number] = [shadowSlopeScaleBiasUI];
+    const constRef: [number] = [shadowConstantBiasUI];
+    const depthRef: [number] = [shadowDepthBiasUI];
+    const pcfRef: [number] = [shadowPcfRadiusUI];
+    let changedShadow0 = false;
+
+    if (ImGui.SliderFloat("Slope Scale Bias", slopeRef, 0.0, 16.0))
+      changedShadow0 = true;
+    if (ImGui.SliderFloat("Constant Bias", constRef, 0.0, 4096.0))
+      changedShadow0 = true;
+    if (ImGui.SliderFloat("Depth Bias", depthRef, 0.0, 0.02))
+      changedShadow0 = true;
+    if (ImGui.SliderFloat("PCF Radius", pcfRef, 0.0, 5.0))
+      changedShadow0 = true;
+
+    if (changedShadow0 && engineReady) {
+      shadowSlopeScaleBiasUI = slopeRef[0];
+      shadowConstantBiasUI = constRef[0];
+      shadowDepthBiasUI = depthRef[0];
+      shadowPcfRadiusUI = pcfRef[0];
+      setShadowParams0(
+        engineStateCtx,
+        shadowSlopeScaleBiasUI,
+        shadowConstantBiasUI,
+        shadowDepthBiasUI,
+        shadowPcfRadiusUI,
+      );
+    }
+
+    const orthoRef: [number] = [shadowOrthoExtentUI];
+    if (
+      ImGui.SliderFloat("Ortho Half Extent", orthoRef, 1.0, 500.0) &&
+      engineReady
+    ) {
+      shadowOrthoExtentUI = orthoRef[0];
+      setShadowOrthoHalfExtent(engineStateCtx, shadowOrthoExtentUI);
+    }
+  }
 
   ImGui.End();
 

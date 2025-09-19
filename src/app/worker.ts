@@ -46,6 +46,12 @@ import {
 } from "@/core/ecs/components/sunComponent";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
 import { FogComponent } from "@/core/ecs/components/fogComponent";
+import {
+  createEngineStateContext as createEngineStateCtx,
+  EngineStateContext as EngineStateCtx,
+  syncEngineState,
+  publishSnapshotFromWorld,
+} from "@/core/engineState";
 
 // Message constants
 const MSG_INIT = "INIT";
@@ -57,6 +63,7 @@ interface InitMsg {
   canvas: OffscreenCanvas;
   sharedInputBuffer: SharedArrayBuffer;
   sharedMetricsBuffer: SharedArrayBuffer;
+  sharedEngineStateBuffer: SharedArrayBuffer;
 }
 interface ResizeMsg {
   type: typeof MSG_RESIZE;
@@ -68,6 +75,8 @@ interface FrameMsg {
   type: typeof MSG_FRAME;
   now: number;
 }
+
+let engineStateCtx: EngineStateCtx | null = null;
 
 let renderer: Renderer | null = null;
 let resourceManager: ResourceManager | null = null;
@@ -99,6 +108,7 @@ async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
+  sharedEngineStateBuffer: SharedArrayBuffer,
 ) {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -139,6 +149,30 @@ async function initWorker(
     getMouseDelta: () => inputReader.getMouseDelta(),
     isPointerLocked: () => inputReader.isPointerLocked(),
   };
+
+  // Engine editor state: validate buffer before using
+  try {
+    if (
+      sharedEngineStateBuffer &&
+      (sharedEngineStateBuffer as any) instanceof SharedArrayBuffer
+    ) {
+      engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
+      console.log(
+        "[Worker] EngineState SAB created. i32.len=",
+        engineStateCtx.i32.length,
+        " f32.len=",
+        engineStateCtx.f32.length,
+      );
+    } else {
+      console.warn(
+        "[Worker] sharedEngineStateBuffer missing or not a SharedArrayBuffer.",
+      );
+      engineStateCtx = null;
+    }
+  } catch (e) {
+    console.error("[Worker] Failed to create EngineState context:", e);
+    engineStateCtx = null;
+  }
 
   cameraControllerSystem = new CameraControllerSystem(actionController);
 
@@ -336,6 +370,18 @@ async function initWorker(
   world.addResource(new SceneSunComponent());
   world.addResource(new ShadowSettingsComponent());
 
+  if (engineStateCtx) {
+    // Only publish if the buffer looks large enough to hold header+flags
+    if ((engineStateCtx.i32.length | 0) >= 4) {
+      publishSnapshotFromWorld(world, engineStateCtx);
+    } else {
+      console.warn(
+        "[Worker] EngineState SAB too small; skipping snapshot. i32.len=",
+        engineStateCtx.i32.length,
+      );
+    }
+  }
+
   (self as any).postMessage({ type: "READY" });
 }
 
@@ -348,6 +394,12 @@ function frame(now: number) {
     !actionController
   )
     return;
+
+  // apply editor state before systems
+  // Only sync if we have a plausible shared state array
+  if (engineStateCtx && engineStateCtx.i32.length >= (8 >> 2) + 1) {
+    syncEngineState(world, engineStateCtx);
+  }
 
   const MAX_PAUSE = 0.5;
   let dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0;
@@ -441,6 +493,7 @@ self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
       msg.canvas,
       msg.sharedInputBuffer,
       msg.sharedMetricsBuffer,
+      msg.sharedEngineStateBuffer,
     );
     return;
   }
