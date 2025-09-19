@@ -57,12 +57,13 @@ export async function equirectangularToCubemap(
     size: [cubemapSize, cubemapSize, 6],
     format: "rgba16float",
     dimension: "2d",
+    // We only write mip level 0 for the environment map; downstream passes build their own mips.
     mipLevelCount: 1,
     usage:
       GPUTextureUsage.TEXTURE_BINDING |
       GPUTextureUsage.STORAGE_BINDING |
       GPUTextureUsage.COPY_DST |
-      GPUTextureUsage.COPY_SRC, // Needed for potential future mip generation
+      GPUTextureUsage.COPY_SRC,
   });
 
   const bindGroup = device.createBindGroup({

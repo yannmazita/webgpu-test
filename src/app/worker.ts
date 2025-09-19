@@ -76,6 +76,11 @@ interface FrameMsg {
   now: number;
 }
 
+interface ToneMapMsg {
+  type: "SET_TONE_MAPPING";
+  enabled: boolean;
+}
+
 let engineStateCtx: EngineStateCtx | null = null;
 
 let renderer: Renderer | null = null;
@@ -484,7 +489,9 @@ function frame(now: number) {
   (self as any).postMessage({ type: "FRAME_DONE" });
 }
 
-self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
+self.onmessage = async (
+  ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg | ToneMapMsg>,
+) => {
   const msg = ev.data;
 
   if (msg.type === MSG_INIT) {
@@ -517,6 +524,15 @@ self.onmessage = async (ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg>) => {
     }
     case MSG_FRAME: {
       frame(msg.now);
+      break;
+    }
+    // Tone mapping toggle from UI
+    case "SET_TONE_MAPPING": {
+      if (renderer) {
+        renderer.setToneMappingEnabled(!!msg.enabled);
+        // Optional: console log for visibility while testing
+        console.log("[Worker] Tone mapping set to:", !!msg.enabled);
+      }
       break;
     }
   }

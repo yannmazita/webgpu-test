@@ -59,8 +59,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the cubemap with the view direction.
     var color = textureSample(skyboxTexture, skyboxSampler, in.view_dir);
     
-    // Always apply tone mapping as this is the final output stage.
-    let final_color = ACESFilmicToneMapping(color.rgb);
+    // Conditionally apply tone mapping based on scene.miscParams.y
+    var final_color = color.rgb;
+    if (scene.miscParams.y > 0.5) {
+        final_color = ACESFilmicToneMapping(color.rgb);
+    }
 
     return vec4<f32>(final_color, color.a);
 }

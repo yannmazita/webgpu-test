@@ -115,6 +115,9 @@ export class Renderer {
     clusterOverflows: 0,
   };
 
+  // UI-driven rendering flag
+  private toneMappingEnabled = true;
+
   private resizeObserver?: ResizeObserver;
   private resizePending = true;
   private cssWidth = 0;
@@ -388,6 +391,14 @@ export class Renderer {
     }
   }
 
+  /**
+   * Enables or disables ACES tone mapping in shaders.
+   * This is a UI-driven toggle and does not reconfigure the canvas.
+   */
+  public setToneMappingEnabled(enabled: boolean): void {
+    this.toneMappingEnabled = !!enabled;
+  }
+
   private _setupResizeObserver(): void {
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver((entries) => {
@@ -625,7 +636,7 @@ export class Renderer {
       sceneData.fogHeight,
       sceneData.fogHeightFalloff,
       sceneData.fogInscatteringIntensity,
-      this.hdrSupported,
+      this.toneMappingEnabled,
       sceneData.prefilteredMipLevels,
     );
 
