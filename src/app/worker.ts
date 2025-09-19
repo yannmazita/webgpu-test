@@ -36,6 +36,16 @@ import { animationSystem } from "@/core/ecs/systems/animationSystem";
 import { createDefaultScene } from "./scene";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import {
+  InitMsg,
+  ResizeMsg,
+  FrameMsg,
+  ToneMapMsg,
+  MSG_INIT,
+  MSG_RESIZE,
+  MSG_FRAME,
+  MSG_SET_TONE_MAPPING,
+} from "@/core/types/worker";
+import {
   createEngineStateContext as createEngineStateCtx,
   EngineStateContext as EngineStateCtx,
   syncEngineState,
@@ -43,34 +53,6 @@ import {
 } from "@/core/engineState";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { mat4, quat, vec3 } from "wgpu-matrix";
-
-// Message constants
-const MSG_INIT = "INIT";
-const MSG_RESIZE = "RESIZE";
-const MSG_FRAME = "FRAME";
-
-interface InitMsg {
-  type: typeof MSG_INIT;
-  canvas: OffscreenCanvas;
-  sharedInputBuffer: SharedArrayBuffer;
-  sharedMetricsBuffer: SharedArrayBuffer;
-  sharedEngineStateBuffer: SharedArrayBuffer;
-}
-interface ResizeMsg {
-  type: typeof MSG_RESIZE;
-  cssWidth: number;
-  cssHeight: number;
-  devicePixelRatio: number;
-}
-interface FrameMsg {
-  type: typeof MSG_FRAME;
-  now: number;
-}
-
-interface ToneMapMsg {
-  type: "SET_TONE_MAPPING";
-  enabled: boolean;
-}
 
 let engineStateCtx: EngineStateCtx | null = null;
 
@@ -329,8 +311,7 @@ self.onmessage = async (
       frame(msg.now);
       break;
     }
-    // Tone mapping toggle from UI
-    case "SET_TONE_MAPPING": {
+    case MSG_SET_TONE_MAPPING: {
       if (renderer) {
         renderer.setToneMappingEnabled(!!msg.enabled);
         // Optional: console log for visibility while testing

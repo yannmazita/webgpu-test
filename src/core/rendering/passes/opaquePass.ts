@@ -1,15 +1,8 @@
 // src/core/rendering/passes/opaquePass.ts
+import { DrawBatch } from "@/core/types/renderer";
 import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { Renderer } from "@/core/renderer";
-
-export interface DrawBatch {
-  pipeline: GPURenderPipeline;
-  materialInstance: MaterialInstance;
-  mesh: Mesh;
-  instanceCount: number;
-  firstInstance: number;
-}
 
 export class OpaquePass {
   public record(

@@ -11,30 +11,15 @@ import { testAABBFrustum, transformAABB } from "./utils/bounds";
 import { ClusterPass } from "./rendering/passes/clusterPass";
 import { ShadowPass } from "./rendering/passes/shadowPass";
 import { SkyboxPass } from "./rendering/passes/skyboxPass";
-import { OpaquePass, DrawBatch } from "./rendering/passes/opaquePass";
-import { TransparentPass } from "./rendering/passes/transparentPass";
-import { UIPass } from "./rendering/passes/uiPass";
+import { DrawBatch, RendererStats } from "@/core/types/renderer";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
 import { MaterialInstance } from "./materials/materialInstance";
-
-export interface RendererStats {
-  canvasWidth: number;
-  canvasHeight: number;
-  lightCount: number;
-  visibleOpaque: number;
-  visibleTransparent: number;
-  drawsOpaque: number;
-  drawsTransparent: number;
-  instancesOpaque: number;
-  instancesTransparent: number;
-  cpuTotalUs: number;
-  clusterAvgLpcX1000?: number;
-  clusterMaxLpc?: number;
-  clusterOverflows?: number;
-}
+import { OpaquePass } from "./rendering/passes/opaquePass";
+import { TransparentPass } from "./rendering/passes/transparentPass";
+import { UIPass } from "./rendering/passes/uiPass";
 
 /**
  * The central rendering engine.
