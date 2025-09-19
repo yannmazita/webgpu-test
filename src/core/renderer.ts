@@ -1,5 +1,5 @@
 // src/core/renderer.ts
-import { Vec3, vec3 } from "wgpu-matrix";
+import { vec3 } from "wgpu-matrix";
 import { Light, Mesh, Renderable } from "./types/gpu";
 import { Material } from "@/core/materials/material";
 import { SceneRenderData } from "./types/rendering";
@@ -8,8 +8,12 @@ import { BatchManager } from "./rendering/batchManager";
 import { UniformManager } from "./rendering/uniformManager";
 import { Profiler } from "./utils/profiler";
 import { testAABBFrustum, transformAABB } from "./utils/bounds";
-import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
-import { ShadowSubsystem } from "@/core/rendering/shadow";
+import { ClusterPass } from "./rendering/passes/clusterPass";
+import { ShadowPass } from "./rendering/passes/shadowPass";
+import { SkyboxPass } from "./rendering/passes/skyboxPass";
+import { OpaquePass, DrawBatch } from "./rendering/passes/opaquePass";
+import { TransparentPass } from "./rendering/passes/transparentPass";
+import { UIPass } from "./rendering/passes/uiPass";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
@@ -30,17 +34,6 @@ export interface RendererStats {
   clusterAvgLpcX1000?: number;
   clusterMaxLpc?: number;
   clusterOverflows?: number;
-}
-
-/**
- * A pre-computed batch of objects that can be drawn with a single instanced draw call.
- */
-interface DrawBatch {
-  pipeline: GPURenderPipeline;
-  materialInstance: MaterialInstance;
-  mesh: Mesh;
-  instanceCount: number;
-  firstInstance: number; // The starting offset in the global instance buffer.
 }
 
 /**
@@ -69,14 +62,20 @@ export class Renderer {
   private adapter!: GPUAdapter;
   private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
-  private clusterBuilder!: ClusterBuilder;
   private dummyTexture!: GPUTexture;
   private dummyCubemapTexture!: GPUTexture;
 
   // Optimization managers
   private batchManager!: BatchManager;
   private uniformManager!: UniformManager;
-  private shadowSubsystem!: ShadowSubsystem;
+
+  // Rendering passes
+  private clusterPass!: ClusterPass;
+  private shadowPass!: ShadowPass;
+  private skyboxPass!: SkyboxPass;
+  private opaquePass!: OpaquePass;
+  private transparentPass!: TransparentPass;
+  private uiPass!: UIPass;
 
   // Per-frame data
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -94,10 +93,6 @@ export class Renderer {
   private visibleRenderables: Renderable[] = [];
   private transparentRenderables: Renderable[] = [];
   private opaqueBatches: DrawBatch[] = [];
-
-  private tempVec3A: Vec3 = vec3.create();
-  private tempVec3B: Vec3 = vec3.create();
-  private tempCameraPos: Vec3 = vec3.create();
 
   private stats: RendererStats = {
     canvasWidth: 0,
@@ -126,10 +121,10 @@ export class Renderer {
 
   // The number of f32 values for a single instance.
   // mat4(16) + flag(1) + 3 bytes of padding
-  private static readonly INSTANCE_STRIDE_IN_FLOATS = 20; // 16 for mat4 + 4 for vec4 alignment of the next element
+  public static readonly INSTANCE_STRIDE_IN_FLOATS = 20; // 16 for mat4 + 4 for vec4 alignment of the next element
 
   // The byte size for a single instance.
-  private static readonly INSTANCE_BYTE_STRIDE =
+  public static readonly INSTANCE_BYTE_STRIDE =
     Renderer.INSTANCE_STRIDE_IN_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 
   public static readonly INSTANCE_DATA_LAYOUT: GPUVertexBufferLayout = {
@@ -258,13 +253,16 @@ export class Renderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
-    this.clusterBuilder = new ClusterBuilder(this.device, {
-      gridX: 16,
-      gridY: 8,
-      gridZ: 64,
-      maxPerCluster: 128,
-    });
-    await this.clusterBuilder.init();
+    this.clusterPass = new ClusterPass(this.device);
+    await this.clusterPass.init();
+
+    this.shadowPass = new ShadowPass(this.device);
+    await this.shadowPass.init();
+
+    this.skyboxPass = new SkyboxPass();
+    this.opaquePass = new OpaquePass();
+    this.transparentPass = new TransparentPass();
+    this.uiPass = new UIPass();
 
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",
@@ -341,47 +339,6 @@ export class Renderer {
     this.uniformManager = new UniformManager();
     this.frameInstanceData = new Float32Array(
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
-    );
-
-    // Initialize the shadow subsystem with current mesh/instance layouts
-    this.shadowSubsystem = new ShadowSubsystem(this.device);
-    await this.shadowSubsystem.init(
-      // Use any mesh's layouts as a template; they are consistent across meshes.
-      // We don't have meshes at init time; we can pass an example layout. Reuse the PBR layout expectation:
-      [
-        // Positions
-        {
-          arrayStride: 12,
-          stepMode: "vertex",
-          attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }],
-        },
-        // Normals
-        {
-          arrayStride: 12,
-          stepMode: "vertex",
-          attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" }],
-        },
-        // UV0
-        {
-          arrayStride: 8,
-          stepMode: "vertex",
-          attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }],
-        },
-        // Tangents
-        {
-          arrayStride: 16,
-          stepMode: "vertex",
-          attributes: [{ shaderLocation: 3, offset: 0, format: "float32x4" }],
-        },
-        // UV1
-        {
-          arrayStride: 8,
-          stepMode: "vertex",
-          attributes: [{ shaderLocation: 9, offset: 0, format: "float32x2" }],
-        },
-      ],
-      Renderer.INSTANCE_DATA_LAYOUT,
-      "depth32float",
     );
 
     // Check for errors after init
@@ -612,13 +569,7 @@ export class Renderer {
     sun?: SceneSunComponent,
     shadowSettings?: ShadowSettingsComponent,
   ): void {
-    // Update sun shadow uniforms first (if available)
-    if (sun && sun.enabled && shadowSettings) {
-      this.shadowSubsystem.updatePerFrame(camera, sun, shadowSettings);
-    } else {
-      // No sun or disabled: ensure uniforms carry zero intensity so FS adds no sun term
-      this.shadowSubsystem.writeDisabled();
-    }
+    this.shadowPass.updatePerFrame(camera, sun, shadowSettings);
 
     // Camera + scene uniforms
     this.uniformManager.updateCameraUniform(
@@ -657,10 +608,11 @@ export class Renderer {
       });
     }
 
-    // We create the frame bind group every frame. This is cheap
-    // and ensures it's always valid and uses the latest resources.
     const ibl = sceneData.iblComponent;
-    const shadowBindings = this.shadowSubsystem.getFrameBindings();
+    const shadowBindings = this.shadowPass
+      .getShadowSubsystem()
+      .getFrameBindings();
+    const clusterBuilder = this.clusterPass.getClusterBuilder();
 
     this.frameBindGroup = this.device.createBindGroup({
       label: "FRAME_BIND_GROUP",
@@ -671,15 +623,15 @@ export class Renderer {
         { binding: 2, resource: { buffer: this.sceneDataBuffer } },
         {
           binding: 3,
-          resource: { buffer: this.clusterBuilder.clusterParamsBuffer },
+          resource: { buffer: clusterBuilder.clusterParamsBuffer },
         },
         {
           binding: 4,
-          resource: { buffer: this.clusterBuilder.clusterCountsBuffer },
+          resource: { buffer: clusterBuilder.clusterCountsBuffer },
         },
         {
           binding: 5,
-          resource: { buffer: this.clusterBuilder.clusterIndicesBuffer },
+          resource: { buffer: clusterBuilder.clusterIndicesBuffer },
         },
         {
           binding: 6,
@@ -711,14 +663,6 @@ export class Renderer {
         },
       ],
     });
-
-    this.clusterBuilder.updateParams(
-      camera,
-      this.canvas.width,
-      this.canvas.height,
-    );
-    // Ensure compute bind group references the current lights buffer
-    this.clusterBuilder.createComputeBindGroup(this.lightStorageBuffer);
 
     // Header: u32 count + 3 pad u32 (16 bytes)
     const headerU32 = new Uint32Array(lightDataBuffer, 0, 4);
@@ -1038,7 +982,6 @@ export class Renderer {
       return;
     }
 
-    // Update all frame uniforms, including shadow matrices. This creates the frameBindGroup.
     Profiler.begin("Render.UpdateUniforms");
     this._updateFrameUniforms(
       camera,
@@ -1049,7 +992,6 @@ export class Renderer {
     );
     Profiler.end("Render.UpdateUniforms");
 
-    // Frustum cull and separate opaque/transparent lists for the main camera view.
     Profiler.begin("Render.FrustumCullAndSeparate");
     this.visibleRenderables.length = 0;
     this.transparentRenderables.length = 0;
@@ -1067,13 +1009,9 @@ export class Renderer {
     this.stats.lightCount = sceneData.lights.length;
     this.stats.canvasWidth = this.canvas.width;
     this.stats.canvasHeight = this.canvas.height;
-    const cls = this.clusterBuilder.getLastStats();
-    this.stats.clusterAvgLpcX1000 = cls.avgLpcX1000;
-    this.stats.clusterMaxLpc = cls.maxLpc;
-    this.stats.clusterOverflows = cls.overflow;
+    this.clusterPass.updateStats(this.stats);
     Profiler.end("Render.FrustumCullAndSeparate");
 
-    // --- Prepare Shadow Casters ---
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
@@ -1083,11 +1021,9 @@ export class Renderer {
         : [];
     const shadowCasterCount = shadowCasters.length;
 
-    // --- Prepare Main Pass Renderables ---
     const opaqueInstanceTotal = this.visibleRenderables.length;
     const transparentInstanceTotal = this.transparentRenderables.length;
 
-    // --- Ensure GPU/CPU Buffers are large enough for EITHER pass ---
     const requiredInstanceCapacity = Math.max(
       shadowCasterCount,
       opaqueInstanceTotal + transparentInstanceTotal,
@@ -1095,59 +1031,41 @@ export class Renderer {
     this.ensureCpuInstanceCapacity(requiredInstanceCapacity);
     this._prepareInstanceBuffer(requiredInstanceCapacity);
 
-    // --- Command Buffers for the frame ---
     const commandBuffers: GPUCommandBuffer[] = [];
 
-    // 1. Cluster Compute Pass
     const clusterEncoder = this.device.createCommandEncoder({
       label: "CLUSTER_COMMAND_ENCODER",
     });
-    this.clusterBuilder.record(clusterEncoder, this.stats.lightCount);
+    this.clusterPass.record(
+      clusterEncoder,
+      this.stats.lightCount,
+      camera,
+      this.canvas.width,
+      this.canvas.height,
+      this.lightStorageBuffer,
+    );
     commandBuffers.push(clusterEncoder.finish());
 
-    // 2. Shadow Pass
     if (shadowCasterCount > 0 && shadowSettings) {
       Profiler.begin("Render.ShadowPass");
       const shadowEncoder = this.device.createCommandEncoder({
         label: "SHADOW_COMMAND_ENCODER",
       });
-      // Pack and upload instance data for shadow casters
-      const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
-      const u32 = new Uint32Array(this.frameInstanceData.buffer);
-      for (let i = 0; i < shadowCasterCount; i++) {
-        const floatOffset = i * floatsPerInstance;
-        this.frameInstanceData.set(shadowCasters[i].modelMatrix, floatOffset);
-        const flags =
-          (shadowCasters[i].isUniformlyScaled ? 1 : 0) |
-          ((shadowCasters[i].receiveShadows !== false ? 1 : 0) << 1);
-        u32[floatOffset + 16] = flags;
-      }
-      this.device.queue.writeBuffer(
-        this.instanceBuffer,
-        0,
-        this.frameInstanceData.buffer,
-        0,
-        shadowCasterCount * Renderer.INSTANCE_BYTE_STRIDE,
-      );
-
-      // Record the pass
-      this.shadowSubsystem.recordShadowPass(
+      this.shadowPass.record(
         shadowEncoder,
-        shadowSettings.mapSize,
         shadowCasters,
+        shadowSettings,
         this.instanceBuffer,
+        this.frameInstanceData,
       );
       commandBuffers.push(shadowEncoder.finish());
       Profiler.end("Render.ShadowPass");
     }
 
-    // --- Main Command Encoder for Scene and UI ---
     const mainEncoder = this.device.createCommandEncoder({
       label: "MAIN_COMMAND_ENCODER",
     });
 
-    // 3. Main Scene Pass
-    // Get or build opaque batches
     Profiler.begin("Render.Batching");
     const getPipelineCallback = (material: Material, mesh: Mesh) =>
       material.getPipeline(
@@ -1162,7 +1080,6 @@ export class Renderer {
       getPipelineCallback,
     );
 
-    // Pack opaque instance data and create draw batches
     this.opaqueBatches.length = 0;
     let currentInstanceOffset = 0;
     for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
@@ -1197,7 +1114,6 @@ export class Renderer {
     this.stats.instancesTransparent = transparentInstanceTotal;
     Profiler.end("Render.Batching");
 
-    // Upload instance data for the main pass (opaque part)
     Profiler.begin("Render.WriteInstanceBuffer");
     if (opaqueInstanceTotal > 0) {
       this.device.queue.writeBuffer(
@@ -1210,7 +1126,6 @@ export class Renderer {
     }
     Profiler.end("Render.WriteInstanceBuffer");
 
-    // --- Begin Main Render Pass ---
     const textureView = this.context.getCurrentTexture().createView();
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
@@ -1255,52 +1170,55 @@ export class Renderer {
     );
     scenePassEncoder.setBindGroup(0, this.frameBindGroup);
 
-    // Draw Skybox
     if (sceneData.skyboxMaterial) {
-      const skyboxMatInstance = sceneData.skyboxMaterial;
-      const pipeline = skyboxMatInstance.material.getPipeline(
-        [],
-        Renderer.INSTANCE_DATA_LAYOUT,
+      this.skyboxPass.record(
+        scenePassEncoder,
+        sceneData.skyboxMaterial,
         this.frameBindGroupLayout,
         this.canvasFormat,
         this.depthFormat,
       );
-      scenePassEncoder.setPipeline(pipeline);
-      scenePassEncoder.setBindGroup(1, skyboxMatInstance.bindGroup);
-      scenePassEncoder.draw(3, 1, 0, 0);
     }
 
-    // Draw Opaque
     Profiler.begin("Render.OpaquePass");
-    this.stats.drawsOpaque = this._renderOpaquePass(
+    this.stats.drawsOpaque = this.opaquePass.record(
       scenePassEncoder,
       this.opaqueBatches,
+      this.instanceBuffer,
     );
     Profiler.end("Render.OpaquePass");
 
-    // Draw Transparent
     Profiler.begin("Render.TransparentPass");
-    this.stats.drawsTransparent = this._renderTransparentPass(
+    this.stats.drawsTransparent = this.transparentPass.record(
       scenePassEncoder,
       this.transparentRenderables,
       camera,
+      this.instanceBuffer,
       opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE,
+      this.frameInstanceData,
+      this.frameBindGroupLayout,
+      this.canvasFormat,
+      this.depthFormat,
     );
     Profiler.end("Render.TransparentPass");
 
     scenePassEncoder.end();
 
-    // 4. UI Pass
     if (postSceneDrawCallback) {
-      this._renderUIPass(mainEncoder, textureView, postSceneDrawCallback);
+      this.uiPass.record(
+        mainEncoder,
+        textureView,
+        this.canvas.width,
+        this.canvas.height,
+        postSceneDrawCallback,
+      );
     }
 
     commandBuffers.push(mainEncoder.finish());
 
-    // 5. Submit all recorded commands
     Profiler.begin("Render.Submit");
     this.device.queue.submit(commandBuffers);
-    this.clusterBuilder.onSubmitted();
+    this.clusterPass.onSubmitted();
     Profiler.end("Render.Submit");
 
     this.stats.cpuTotalUs = Math.max(
