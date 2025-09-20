@@ -69,7 +69,7 @@ struct LightsBuffer {
 struct PBRMaterialUniforms {
     albedo: vec4<f32>,
     metallicRoughnessNormalOcclusion: vec4<f32>, // metallic, roughness, normalIntensity, occlusionStrength
-    emissive: vec4<f32>,
+    emissive: vec4<f32>, // xyz: emissiveFactor, w: emissiveStrength (KHR_materials_emissive_strength)
     textureFlags: vec4<f32>, // hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive
     textureUVs: vec4<f32>, // albedoUV, mrUV, normalUV, emissiveUV
     textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
@@ -510,8 +510,8 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         color = mix(total_inscattering, color, extinction);
     }
 
-    // Add emissive color after fog so it cuts through
-    color += emissive;
+    // Add emissive color after fog so it cuts through, scaled by emissiveStrength
+    color += emissive * material.emissive.w;
 
     // Conditionally apply tone mapping based on scene.miscParams.y
     var final_color = color;

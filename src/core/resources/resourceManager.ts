@@ -744,25 +744,56 @@ export class ResourceManager {
     return sceneRootEntity;
   }
 
+  /**
+   * Builds PBR material options from a glTF material, resolving factors,
+   * textures, UV set indices, and optional extensions.
+   *
+   * Behavior:
+   * - Reads core PBR Metallic-Roughness properties (baseColorFactor, metallicFactor,
+   *   roughnessFactor) and associated textures.
+   * - Reads normal/emissive/occlusion textures and their auxiliary parameters
+   *   (normalTexture.scale, occlusionTexture.strength), plus per-texture UV set indices.
+   * - Resolves image URIs for textures including bufferView-embedded images, using
+   *   the response URL from the glTF fetch as baseUri for relative paths.
+   * - Supports KHR_materials_emissive_strength: stores its scalar into
+   *   options.emissiveStrength (default 1.0). If KHR_materials_unlit is present,
+   *   emissiveStrength is ignored (reset to 1.0) per the spec exclusion.
+   *
+   * @param gltfMat The parsed glTF material object.
+   * @param gltf The parsed glTF asset (JSON + buffers), used to resolve image URIs.
+   * @param baseUri The base URI used to resolve relative texture/image paths.
+   * @returns A PBRMaterialOptions object suitable for creating material instances.
+   */
   private _getGLTFMaterialOptions(
     gltfMat: GLTFMaterial,
     gltf: ParsedGLTF,
     baseUri: string,
   ): PBRMaterialOptions {
     const pbr = gltfMat.pbrMetallicRoughness ?? {};
+
     const options: PBRMaterialOptions = {
+      // Core factors
       albedo: pbr.baseColorFactor,
       metallic: pbr.metallicFactor,
       roughness: pbr.roughnessFactor,
+
+      // Additional factors
       emissive: gltfMat.emissiveFactor,
       normalIntensity: gltfMat.normalTexture?.scale,
       occlusionStrength: gltfMat.occlusionTexture?.strength,
+
+      // Per-texture UV set indices (default 0)
       albedoUV: pbr.baseColorTexture?.texCoord ?? 0,
       metallicRoughnessUV: pbr.metallicRoughnessTexture?.texCoord ?? 0,
       normalUV: gltfMat.normalTexture?.texCoord ?? 0,
       emissiveUV: gltfMat.emissiveTexture?.texCoord ?? 0,
       occlusionUV: gltfMat.occlusionTexture?.texCoord ?? 0,
+
+      // KHR_materials_emissive_strength (default handled below)
+      emissiveStrength: 1.0,
     };
+
+    // Resolve texture URIs (base color)
     if (pbr.baseColorTexture) {
       options.albedoMap = this.getImageUri(
         gltf,
@@ -770,6 +801,8 @@ export class ResourceManager {
         baseUri,
       );
     }
+
+    // Metallic-Roughness texture (glTF convention: G = roughness, B = metallic)
     if (pbr.metallicRoughnessTexture) {
       options.metallicRoughnessMap = this.getImageUri(
         gltf,
@@ -777,6 +810,8 @@ export class ResourceManager {
         baseUri,
       );
     }
+
+    // Normal map
     if (gltfMat.normalTexture) {
       options.normalMap = this.getImageUri(
         gltf,
@@ -784,6 +819,8 @@ export class ResourceManager {
         baseUri,
       );
     }
+
+    // Emissive map
     if (gltfMat.emissiveTexture) {
       options.emissiveMap = this.getImageUri(
         gltf,
@@ -791,6 +828,8 @@ export class ResourceManager {
         baseUri,
       );
     }
+
+    // Occlusion map
     if (gltfMat.occlusionTexture) {
       options.occlusionMap = this.getImageUri(
         gltf,
@@ -798,6 +837,27 @@ export class ResourceManager {
         baseUri,
       );
     }
+
+    // KHR_materials_emissive_strength
+    const matExt = gltfMat.extensions;
+    const strength = matExt?.KHR_materials_emissive_strength?.emissiveStrength;
+    if (typeof strength === "number" && strength >= 0.0) {
+      options.emissiveStrength = strength;
+    } else {
+      // Default if extension is absent or invalid
+      options.emissiveStrength = options.emissiveStrength ?? 1.0;
+    }
+
+    // Spec exclusion: must not be used with KHR_materials_unlit
+    if (matExt?.KHR_materials_unlit) {
+      if (options.emissiveStrength !== 1.0) {
+        console.warn(
+          "KHR_materials_emissive_strength present with KHR_materials_unlit; forcing emissiveStrength = 1.0 per spec.",
+        );
+      }
+      options.emissiveStrength = 1.0;
+    }
+
     return options;
   }
 

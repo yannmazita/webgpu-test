@@ -149,6 +149,7 @@ export class PBRMaterial extends Material {
     const roughness = options.roughness ?? 0.5;
     const normalIntensity = options.normalIntensity ?? 1.0;
     const emissive = options.emissive ?? [0, 0, 0];
+    const emissiveStrength = options.emissiveStrength ?? 1.0;
     const occlusionStrength = options.occlusionStrength ?? 1.0;
 
     // Texture flags (1.0 if texture provided, 0.0 otherwise)
@@ -177,8 +178,8 @@ export class PBRMaterial extends Material {
     uniformData[6] = normalIntensity;
     uniformData[7] = occlusionStrength;
 
-    // vec4: emissive + padding
-    uniformData.set([...emissive, 0.0], 8);
+    // vec4: emissive (rgb) + emissiveStrength in .w
+    uniformData.set([...emissive, emissiveStrength], 8);
 
     // vec4: texture flags (hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive)
     uniformData[12] = hasAlbedoMap;
