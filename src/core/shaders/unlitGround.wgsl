@@ -3,6 +3,7 @@
 struct CameraUniforms {
     viewProjectionMatrix: mat4x4<f32>,
     viewMatrix: mat4x4<f32>,
+    inverseViewProjectionMatrix: mat4x4<f32>,
 }
 
 struct UnlitSkyboxMaterialUniforms {

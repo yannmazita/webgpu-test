@@ -18,8 +18,9 @@ export const POINTER_LOCK_OFFSET = 28;
 
 // Keyboard Data
 export const KEY_STATE_OFFSET = 32;
-export const KEY_STATE_COUNT = 256; // Number of key states to track
-export const KEY_STATE_SIZE = KEY_STATE_COUNT * 4; // 256 * sizeof(Int32)
+// Track 256 keys as bytes (Uint8), 1 byte per key
+export const KEY_STATE_COUNT = 256;
+export const KEY_STATE_SIZE = KEY_STATE_COUNT; // 256 bytes
 
 // Total buffer size
 export const SHARED_BUFFER_SIZE = KEY_STATE_OFFSET + KEY_STATE_SIZE;
