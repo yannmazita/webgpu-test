@@ -18,7 +18,7 @@ fn vs_main(
   @location(5) m1: vec4<f32>,
   @location(6) m2: vec4<f32>,
   @location(7) m3: vec4<f32>,
-  @location(8) is_uniform: u32
+  @location(8) is_uniform: u32,
 ) -> VSOut {
   var out: VSOut;
   let model = mat4x4<f32>(m0, m1, m2, m3);

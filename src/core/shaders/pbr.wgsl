@@ -81,9 +81,9 @@ struct Cascade {
 
 struct ShadowUniforms {
     cascades: array<Cascade, 4>,
-    lightDir: vec4<f32>,
-    lightColor: vec4<f32>,
-    params0: vec4<f32>,
+    lightDir: vec4<f32>,  // xyz used
+    lightColor: vec4<f32>,  // rgb used
+    params0: vec4<f32>, // intensity, pcfRadius, mapSize, depthBias
 };
 
 // @group(0) - Per-frame data
@@ -324,6 +324,8 @@ fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
 }
 
 fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32, cascadeIndex: i32) -> f32 {
+    // The sampler is set to clamp-to-edge, so this out-of-bounds coords are handled
+    // automatically on the gpu
     let texel = vec2<f32>(1.0 / mapSize);
     var sum = 0.0;
     let taps = 9.0;
