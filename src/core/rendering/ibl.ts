@@ -34,6 +34,8 @@ export async function equirectangularToCubemap(
   equirectTexture: GPUTexture,
   cubemapSize: number,
 ): Promise<GPUTexture> {
+  device.pushErrorScope("validation");
+
   equirectToCubemapShader ??= await Shader.fromUrl(
     device,
     preprocessor,
@@ -52,6 +54,13 @@ export async function equirectangularToCubemap(
     },
   });
 
+  // check for shader compilation error
+  const shaderError = await device.popErrorScope();
+  if (shaderError) {
+    console.error("[IBL] Equirect shader/pipeline error:", shaderError);
+    throw shaderError;
+  }
+
   const cubemapTexture = device.createTexture({
     label: "IBL_ENVIRONMENT_CUBEMAP",
     size: [cubemapSize, cubemapSize, 6],
@@ -65,6 +74,9 @@ export async function equirectangularToCubemap(
       GPUTextureUsage.COPY_DST |
       GPUTextureUsage.COPY_SRC,
   });
+
+  // Error handling for bind group
+  device.pushErrorScope("validation");
 
   const bindGroup = device.createBindGroup({
     layout: equirectToCubemapPipeline.getBindGroupLayout(0),
@@ -80,6 +92,12 @@ export async function equirectangularToCubemap(
       },
     ],
   });
+
+  const bindGroupError = await device.popErrorScope();
+  if (bindGroupError) {
+    console.error("[IBL] Equirect bind group error:", bindGroupError);
+    throw bindGroupError;
+  }
 
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();

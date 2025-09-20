@@ -1,5 +1,4 @@
 // src/core/renderer.ts
-import { vec3 } from "wgpu-matrix";
 import { Light, Mesh, Renderable } from "@/core/types/gpu";
 import { Material } from "@/core/materials/material";
 import { SceneRenderData } from "@/core/types/rendering";
@@ -16,7 +15,6 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
-import { MaterialInstance } from "@/core/materials/materialInstance";
 import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
 import { UIPass } from "@/core/rendering/passes/uiPass";
@@ -305,7 +303,7 @@ export class Renderer {
         {
           binding: 10,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: "depth", viewDimension: "2d" },
+          texture: { sampleType: "depth", viewDimension: "2d-array" },
         }, // shadow map (depth)
         {
           binding: 11,
@@ -715,220 +713,6 @@ export class Renderer {
     this.frameInstanceData = new Float32Array(
       this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
     );
-  }
-
-  private _renderOpaquePass(
-    passEncoder: GPURenderPassEncoder,
-    batches: DrawBatch[],
-  ): number {
-    if (batches.length === 0) return 0;
-
-    let lastMaterialInstance: MaterialInstance | null = null;
-    let lastMesh: Mesh | null = null;
-
-    for (const batch of batches) {
-      const mesh = batch.mesh;
-      passEncoder.setPipeline(batch.pipeline);
-
-      if (batch.materialInstance !== lastMaterialInstance) {
-        passEncoder.setBindGroup(1, batch.materialInstance.bindGroup);
-        lastMaterialInstance = batch.materialInstance;
-      }
-
-      if (mesh !== lastMesh) {
-        // Validate expected buffer count
-        if (mesh.buffers.length !== mesh.layouts.length) {
-          console.error(
-            `[Renderer] Mesh buffer/layout mismatch: ${mesh.buffers.length} buffers, ${mesh.layouts.length} layouts`,
-          );
-        }
-
-        // Bind vertex buffers in exact order
-        for (let i = 0; i < mesh.buffers.length; i++) {
-          passEncoder.setVertexBuffer(i, mesh.buffers[i]);
-        }
-
-        if (mesh.indexBuffer) {
-          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-        }
-        lastMesh = mesh;
-      }
-
-      // Bind instance buffer to the slot after mesh buffers
-      const instanceSlot = mesh.buffers.length; // Should be 4
-      const instanceByteOffset =
-        batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
-      passEncoder.setVertexBuffer(
-        instanceSlot,
-        this.instanceBuffer,
-        instanceByteOffset,
-      );
-
-      // Draw
-      if (mesh.indexBuffer) {
-        passEncoder.drawIndexed(mesh.indexCount!, batch.instanceCount, 0, 0, 0);
-      } else {
-        passEncoder.draw(mesh.vertexCount, batch.instanceCount, 0, 0);
-      }
-    }
-
-    return batches.length;
-  }
-
-  private _renderTransparentPass(
-    passEncoder: GPURenderPassEncoder,
-    renderables: Renderable[],
-    camera: CameraComponent,
-    instanceBufferOffset: number, // bytes
-  ): number {
-    if (renderables.length === 0) return 0;
-
-    // Camera position (from inverse view)
-    this.tempCameraPos[0] = camera.inverseViewMatrix[12];
-    this.tempCameraPos[1] = camera.inverseViewMatrix[13];
-    this.tempCameraPos[2] = camera.inverseViewMatrix[14];
-
-    // Sort back-to-front (greater distance first)
-    renderables.sort((a, b) => {
-      this.tempVec3A[0] = a.modelMatrix[12];
-      this.tempVec3A[1] = a.modelMatrix[13];
-      this.tempVec3A[2] = a.modelMatrix[14];
-      this.tempVec3B[0] = b.modelMatrix[12];
-      this.tempVec3B[1] = b.modelMatrix[13];
-      this.tempVec3B[2] = b.modelMatrix[14];
-      const da = vec3.distanceSq(this.tempVec3A, this.tempCameraPos);
-      const db = vec3.distanceSq(this.tempVec3B, this.tempCameraPos);
-      return db - da;
-    });
-
-    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
-    const instanceDataView = new Float32Array(
-      this.frameInstanceData.buffer,
-      instanceBufferOffset,
-      renderables.length * floatsPerInstance,
-    );
-    const instanceUintView = new Uint32Array(
-      instanceDataView.buffer,
-      instanceDataView.byteOffset,
-    );
-
-    for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled, receiveShadows } = renderables[i];
-      const floatOff = i * floatsPerInstance;
-      const uintOff = floatOff;
-
-      // Model matrix
-      instanceDataView.set(modelMatrix, floatOff);
-
-      const flags =
-        (isUniformlyScaled ? 1 : 0) | (((receiveShadows ?? true) ? 1 : 0) << 1);
-      instanceUintView[uintOff + 16] = flags;
-    }
-
-    // Upload instance data for transparent objects
-    this.device.queue.writeBuffer(
-      this.instanceBuffer,
-      instanceBufferOffset,
-      instanceDataView,
-    );
-
-    // Draw, batching consecutive renderables with same mesh and material instance
-    let drawCalls = 0;
-    let i = 0;
-    while (i < renderables.length) {
-      const { mesh, material } = renderables[i];
-      const pipeline = material.material.getPipeline(
-        mesh.layouts,
-        Renderer.INSTANCE_DATA_LAYOUT,
-        this.frameBindGroupLayout,
-        this.canvasFormat,
-        this.depthFormat,
-      );
-
-      // Count consecutive instances with same mesh and material instance
-      let count = 1;
-      while (
-        i + count < renderables.length &&
-        renderables[i + count].mesh === mesh &&
-        renderables[i + count].material === material
-      ) {
-        count++;
-      }
-
-      // Bind pipeline and resources per group
-      passEncoder.setPipeline(pipeline);
-      passEncoder.setBindGroup(1, material.bindGroup);
-
-      // Bind mesh vertex buffers
-      for (let j = 0; j < mesh.buffers.length; j++) {
-        passEncoder.setVertexBuffer(j, mesh.buffers[j]);
-      }
-
-      // Bind the instance buffer with a per-group byte offset and size
-      const groupByteOffset =
-        instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
-      passEncoder.setVertexBuffer(
-        mesh.layouts.length,
-        this.instanceBuffer,
-        groupByteOffset,
-      );
-
-      if (mesh.indexBuffer) {
-        passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-        passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
-      } else {
-        passEncoder.draw(mesh.vertexCount, count, 0, 0);
-      }
-
-      drawCalls++;
-      i += count;
-    }
-
-    return drawCalls;
-  }
-
-  private _renderUIPass(
-    commandEncoder: GPUCommandEncoder,
-    textureView: GPUTextureView,
-    callback: (passEncoder: GPURenderPassEncoder) => void,
-  ): void {
-    const uiPassEncoder = commandEncoder.beginRenderPass({
-      colorAttachments: [
-        { view: textureView, loadOp: "load", storeOp: "store" },
-      ],
-    });
-    uiPassEncoder.setViewport(
-      0,
-      0,
-      this.canvas.width,
-      this.canvas.height,
-      0,
-      1,
-    );
-    callback(uiPassEncoder);
-    uiPassEncoder.end();
-  }
-
-  private validateMeshPipelineCompatibility(
-    mesh: Mesh,
-    material: Material,
-  ): void {
-    console.group(`[Renderer] Validating mesh-pipeline compatibility`);
-    console.log(`Mesh has ${mesh.buffers.length} buffers:`);
-
-    for (let i = 0; i < mesh.layouts.length; i++) {
-      const layout = mesh.layouts[i];
-      const attrs = layout.attributes
-        .map((a) => `@location(${a.shaderLocation}) ${a.format}`)
-        .join(", ");
-      console.log(
-        `  Slot ${i}: stride=${layout.arrayStride}, attrs=[${attrs}]`,
-      );
-    }
-
-    console.log(`Material ${material.id} expects these shader inputs`);
-    console.log(`Instance data will bind to slot ${mesh.layouts.length}`);
-    console.groupEnd();
   }
 
   /**

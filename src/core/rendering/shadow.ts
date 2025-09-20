@@ -10,9 +10,6 @@ import {
 import { mat4, Mat4, vec3, Vec3, vec4, Vec4 } from "wgpu-matrix";
 import { Shader } from "../shaders/shader";
 
-/**
- * Manages shadow resources and the depth-only shadow pass for a single directional light.
- */
 export class ShadowSubsystem {
   private device: GPUDevice;
   private pre: ShaderPreprocessor;
@@ -23,12 +20,12 @@ export class ShadowSubsystem {
   private shadowMap!: GPUTexture;
   private shadowViews!: GPUTextureView[];
   private shadowSampler!: GPUSampler;
-  private shadowUniformBuffer!: GPUBuffer;
+  private csmFrameUniformBuffer!: GPUBuffer;
+  private shadowPassUniformBuffer!: GPUBuffer;
 
   // Pipeline
   private pipeline!: GPURenderPipeline;
   private shader!: Shader;
-  private frameBgl!: GPUBindGroupLayout;
   private shadowBindGroupLayout!: GPUBindGroupLayout;
   private shadowBindGroup!: GPUBindGroup;
   private meshLayouts!: GPUVertexBufferLayout[];
@@ -42,13 +39,18 @@ export class ShadowSubsystem {
   private mapSize = 2048;
   // 4 cascades * (1 mat4x4 viewProj + 1 vec4 for split depth) = 4 * (16 + 4) = 80 floats
   // Plus lightDir (vec4), lightColor (vec4), params0 (vec4) = 12 floats
-  // Total = 92 floats
-  private shadowUniformsData = new Float32Array(92);
+  // Total = 92 floats. Pad to 96 for alignment.
+  private shadowUniformsData = new Float32Array(96);
 
   // Temp matrices/vectors
   private lightView: Mat4 = mat4.identity();
   private lightProj: Mat4 = mat4.identity();
-  private lightViewProj: Mat4[] = [mat4.identity(), mat4.identity(), mat4.identity(), mat4.identity()];
+  private lightViewProj: Mat4[] = [
+    mat4.identity(),
+    mat4.identity(),
+    mat4.identity(),
+    mat4.identity(),
+  ];
   private cascadeSplits = new Float32Array(ShadowSubsystem.NUM_CASCADES);
   private tmpUp: Vec3 = vec3.fromValues(0, 1, 0);
   private tmpVec4: Vec4 = vec4.create();
@@ -87,12 +89,13 @@ export class ShadowSubsystem {
 
     // Create shadow-specific bind group layout
     this.shadowBindGroupLayout = this.device.createBindGroupLayout({
-      label: "SHADOW_BIND_GROUP_LAYOUT",
+      label: "SHADOW_PASS_BIND_GROUP_LAYOUT",
       entries: [
         {
           binding: 0,
           visibility: GPUShaderStage.VERTEX,
-          buffer: { type: "uniform", hasDynamicOffset: true },
+          // REMOVE DYNAMIC OFFSET
+          buffer: { type: "uniform" },
         },
       ],
     });
@@ -157,9 +160,11 @@ export class ShadowSubsystem {
 
   private updateShadowBindGroup(): void {
     this.shadowBindGroup = this.device.createBindGroup({
-      label: "SHADOW_BIND_GROUP",
+      label: "SHADOW_PASS_BIND_GROUP",
       layout: this.shadowBindGroupLayout,
-      entries: [{ binding: 0, resource: { buffer: this.shadowUniformBuffer } }],
+      entries: [
+        { binding: 0, resource: { buffer: this.shadowPassUniformBuffer } },
+      ],
     });
   }
 
@@ -167,7 +172,10 @@ export class ShadowSubsystem {
     size: number,
     depthFormat: GPUTextureFormat,
   ): void {
+    // Destroy the old texture if it exists
     this.shadowMap?.destroy();
+
+    // Create a 2D texture array for the cascades
     this.shadowMap = this.device.createTexture({
       label: "SUN_SHADOW_MAP",
       size: [size, size, ShadowSubsystem.NUM_CASCADES],
@@ -176,6 +184,7 @@ export class ShadowSubsystem {
         GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
+    // Create a separate view for each cascade/layer
     this.shadowViews = [];
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; ++i) {
       this.shadowViews.push(
@@ -188,6 +197,7 @@ export class ShadowSubsystem {
       );
     }
 
+    // Create the comparison sampler for shadow lookups in the PBR shader
     this.shadowSampler = this.device.createSampler({
       label: "SUN_SHADOW_SAMPLER",
       compare: "less",
@@ -197,116 +207,28 @@ export class ShadowSubsystem {
       addressModeV: "clamp-to-edge",
     });
 
-    const uniformBufferSize = Math.max(
+    // Buffer 1: The LARGE uniform buffer for the PBR pass (frame bind group).
+    // It contains all cascade matrices and global shadow settings.
+    const frameUniformBufferSize = Math.max(
       this.shadowUniformsData.byteLength,
-      256 * ShadowSubsystem.NUM_CASCADES,
+      256, // Ensure it's at least 256 bytes for good practice
     );
-    this.shadowUniformBuffer ??= this.device.createBuffer({
-      label: "SUN_SHADOW_UNIFORMS",
-      size: uniformBufferSize,
+    this.csmFrameUniformBuffer ??= this.device.createBuffer({
+      label: "CSM_FRAME_UNIFORMS",
+      size: frameUniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // Buffer 2: The SMALL uniform buffer for the shadow pass itself.
+    // It only needs to hold data for a single cascade at a time.
+    const cascadeStructSizeBytes = 20 * 4; // 1 mat4x4 (16f) + 1 vec4 (4f)
+    this.shadowPassUniformBuffer ??= this.device.createBuffer({
+      label: "SHADOW_PASS_UNIFORM_BUFFER",
+      size: cascadeStructSizeBytes,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
   }
-  
-  // ... (rest of the class is the same until recordShadowPass)
 
-  public recordShadowPass(
-    encoder: GPUCommandEncoder,
-    mapSize: number,
-    renderables: Renderable[],
-    instanceBuffer: GPUBuffer,
-  ): void {
-    if (!this.pipeline || renderables.length === 0) {
-      return;
-    }
-
-    const cascadeUniformOffset = 256; // Must be a multiple of 256.
-
-    for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; ++i) {
-      const pass = encoder.beginRenderPass({
-        label: `SUN_SHADOW_PASS_CASCADE_${i}`,
-        colorAttachments: [],
-        depthStencilAttachment: {
-          view: this.shadowViews[i],
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
-          depthClearValue: 1.0,
-        },
-      });
-
-      pass.setPipeline(this.pipeline);
-      pass.setBindGroup(0, this.shadowBindGroup, [i * cascadeUniformOffset]);
-      pass.setViewport(0, 0, mapSize, mapSize, 0, 1);
-
-      let drawnCount = 0;
-      while (drawnCount < renderables.length) {
-        const mesh: Mesh = renderables[drawnCount].mesh;
-        let count = 1;
-        while (
-          drawnCount + count < renderables.length &&
-          renderables[drawnCount + count].mesh === mesh
-        ) {
-          count++;
-        }
-
-        for (let b = 0; b < mesh.buffers.length; b++) {
-          pass.setVertexBuffer(b, mesh.buffers[b]);
-        }
-        pass.setVertexBuffer(
-          mesh.layouts.length,
-          instanceBuffer,
-          drawnCount * this.instanceByteStride,
-        );
-
-        if (mesh.indexBuffer) {
-          pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-          pass.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
-        } else {
-          pass.draw(mesh.vertexCount, count, 0, 0);
-        }
-        drawnCount += count;
-      }
-      pass.end();
-    }
-  }
-
-  /**
-   * Updates the shadow subsystem's state for the current frame.
-   *
-   * This method computes the directional light's view and projection matrices
-   * to tightly fit the main camera's view frustum, a technique known as a
-   * single-cascade shadow map. It then packs all necessary data (matrices,
-   * light properties, quality settings) into a uniform buffer for the GPU.
-   * It also handles dynamic resizing of the shadow map texture and
-   * recreation of the depth pipeline if rasterization settings change.
-   *
-   * @param {CameraComponent} camera The main scene camera, used to define the
-   *     view frustum that shadows must cover.
-   * @param {SceneSunComponent} sun The directional light source providing
-   *     direction and color.
-   * @param {ShadowSettingsComponent} settings Global shadow quality settings
-   *     like map size and bias values.
-   * @returns {void}
-   */
-  /**
-   * Updates the shadow subsystem's state for the current frame.
-   *
-   * This method implements Cascaded Shadow Maps (CSM). It divides the camera's
-   * view frustum into several sub-frusta (cascades) and generates a separate
-   * shadow map for each one. This allows for high-resolution shadows in the
-   * foreground while still covering a large view distance. The method calculates
-   * a unique view-projection matrix for each cascade, fitting it tightly to
-   * its sub-frustum. Finally, it packs all matrices, cascade split depths,
-   * and light properties into a single uniform buffer for the GPU.
-   *
-   * @param {CameraComponent} camera The main scene camera, used to define the
-   *     view frustum that shadows must cover.
-   * @param {SceneSunComponent} sun The directional light source providing
-   *     direction and color.
-   * @param {ShadowSettingsComponent} settings Global shadow quality settings
-   *     like map size and bias values.
-   * @returns {void}
-   */
   public updatePerFrame(
     camera: CameraComponent,
     sun: SceneSunComponent,
@@ -322,17 +244,12 @@ export class ShadowSubsystem {
     );
 
     // --- Cascaded Shadow Map Frustum Calculation ---
-
-    // 1. Define the cascade splits. These are percentages of the camera's far plane.
-    // A logarithmic-style split is used to provide more resolution closer to the camera.
     const cascadeSplitLambda = 0.95;
     const cameraNear = camera.near;
     const cameraFar = camera.far;
     const clipRange = cameraFar - cameraNear;
-
     const minZ = cameraNear;
     const maxZ = cameraFar;
-
     const range = maxZ - minZ;
     const ratio = maxZ / minZ;
 
@@ -345,7 +262,6 @@ export class ShadowSubsystem {
       cascadeSplits[i] = (d - cameraNear) / clipRange;
     }
 
-    // 2. Prepare common values for the loop.
     const dir = vec3.normalize(sun.direction);
     const up =
       Math.abs(vec3.dot(dir, this.tmpUp)) > 0.95
@@ -359,30 +275,31 @@ export class ShadowSubsystem {
     let lastSplitDist = 0.0;
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; i++) {
       const splitDist = cascadeSplits[i];
-
-      // 3. Get the 8 corners of the current cascade's sub-frustum in world space.
       const frustumCorners: Vec3[] = [];
       const clipCorners: [number, number, number, number][] = [
-        [-1, -1, -1, 1], [1, -1, -1, 1], [-1, 1, -1, 1], [1, 1, -1, 1],
-        [-1, -1, 1, 1], [1, -1, 1, 1], [-1, 1, 1, 1], [1, 1, 1, 1],
+        [-1, -1, -1, 1],
+        [1, -1, -1, 1],
+        [-1, 1, -1, 1],
+        [1, 1, -1, 1],
+        [-1, -1, 1, 1],
+        [1, -1, 1, 1],
+        [-1, 1, 1, 1],
+        [1, 1, 1, 1],
       ];
 
-      // Project the corners of the sub-frustum slice into world space.
       for (const c of clipCorners) {
         const clip = vec4.fromValues(c[0], c[1], c[2], 1.0);
         const invClip = vec4.transformMat4(clip, invCam);
         frustumCorners.push(vec3.scale(invClip, 1.0 / invClip[3]));
       }
 
-      // 4. Compute the center of the sub-frustum to use as the look-at target.
       const frustumCenter = vec3.create();
       for (const p of frustumCorners) {
         vec3.add(frustumCenter, p, frustumCenter);
       }
       vec3.scale(frustumCenter, 1.0 / frustumCorners.length, frustumCenter);
 
-      // 5. Create the light's view matrix, looking at the sub-frustum center.
-      const lightDist = 100.0; // A safe distance to avoid clipping.
+      const lightDist = 100.0;
       const eye = vec3.fromValues(
         frustumCenter[0] - dir[0] * lightDist,
         frustumCenter[1] - dir[1] * lightDist,
@@ -390,34 +307,45 @@ export class ShadowSubsystem {
       );
       mat4.lookAt(eye, frustumCenter, up, this.lightView);
 
-      // 6. Find the min/max extents of the sub-frustum in light-space.
-      let minX = Infinity, minY = Infinity, minZ = Infinity;
-      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+      let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
       for (const p of frustumCorners) {
-        this.tmpVec4[0] = p[0]; this.tmpVec4[1] = p[1]; this.tmpVec4[2] = p[2]; this.tmpVec4[3] = 1.0;
+        this.tmpVec4[0] = p[0];
+        this.tmpVec4[1] = p[1];
+        this.tmpVec4[2] = p[2];
+        this.tmpVec4[3] = 1.0;
         const v = vec4.transformMat4(this.tmpVec4, this.lightView);
-        if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
-        if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
-        if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+        if (v[0] < minX) minX = v[0];
+        if (v[0] > maxX) maxX = v[0];
+        if (v[1] < minY) minY = v[1];
+        if (v[1] > maxY) maxY = v[1];
+        if (v[2] < minZ) minZ = v[2];
+        if (v[2] > maxZ) maxZ = v[2];
       }
 
-      // 7. Create a tight orthographic projection matrix around these extents.
       const zNear = Math.max(0.1, minZ - 100.0);
       const zFar = maxZ + 100.0;
       mat4.ortho(minX, maxX, minY, maxY, zNear, zFar, this.lightProj);
-
-      // 8. Combine to get the final light view-projection matrix for this cascade.
       mat4.multiply(this.lightProj, this.lightView, this.lightViewProj[i]);
       this.cascadeSplits[i] = cameraNear + splitDist * clipRange;
       lastSplitDist = splitDist;
     }
 
-    // 9. Pack all data into the uniform buffer.
+    // 9. Pack all data into the uniform buffer, matching the shader struct layout.
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; ++i) {
+      // Each cascade struct is 20 floats (16 for matrix, 4 for split depth vec4)
       const offset = i * 20;
       this.shadowUniformsData.set(this.lightViewProj[i], offset);
-      this.shadowUniformsData.set([this.cascadeSplits[i]], offset + 16);
+      this.shadowUniformsData.set(
+        [this.cascadeSplits[i], 0, 0, 0],
+        offset + 16,
+      );
     }
+
     const baseOffset = ShadowSubsystem.NUM_CASCADES * 20;
     this.shadowUniformsData.set([dir[0], dir[1], dir[2], 0.0], baseOffset);
     this.shadowUniformsData.set(
@@ -429,8 +357,9 @@ export class ShadowSubsystem {
       baseOffset + 8,
     );
 
+    // Upload the LARGE buffer for the PBR pass
     this.device.queue.writeBuffer(
-      this.shadowUniformBuffer,
+      this.csmFrameUniformBuffer,
       0,
       this.shadowUniformsData,
     );
@@ -453,6 +382,13 @@ export class ShadowSubsystem {
     }
 
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; ++i) {
+      const cascadeData = this.shadowUniformsData.subarray(i * 20, i * 20 + 20);
+      this.device.queue.writeBuffer(
+        this.shadowPassUniformBuffer,
+        0,
+        cascadeData,
+      );
+
       const pass = encoder.beginRenderPass({
         label: `SUN_SHADOW_PASS_CASCADE_${i}`,
         colorAttachments: [],
@@ -501,7 +437,7 @@ export class ShadowSubsystem {
   }
 
   /**
-   * Provides resources for the frame bind group entries (bindings 10..12).
+   * Provides resources for the frame bind group entries
    */
   public getFrameBindings(): {
     shadowMapView: GPUTextureView;
@@ -514,7 +450,8 @@ export class ShadowSubsystem {
         dimension: "2d-array",
       }),
       shadowSampler: this.shadowSampler,
-      shadowUniformBuffer: this.shadowUniformBuffer,
+      // return the large CSM buffer
+      shadowUniformBuffer: this.csmFrameUniformBuffer,
     };
   }
 
@@ -526,7 +463,7 @@ export class ShadowSubsystem {
       this.shadowUniformsData.set(ident, i * 20);
     }
     this.device.queue.writeBuffer(
-      this.shadowUniformBuffer,
+      this.csmFrameUniformBuffer,
       0,
       this.shadowUniformsData,
     );

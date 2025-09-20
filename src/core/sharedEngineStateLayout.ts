@@ -10,8 +10,6 @@ export const ENGINE_STATE_VERSION_OFFSET = 4;
 
 // DIRTY FLAGS bitfields (Uint32)
 export const ENGINE_STATE_FLAGS0_OFFSET = 8;
-// RESERVED for future FLAGS1
-export const ENGINE_STATE_FLAGS1_OFFSET = 12;
 // GENERATION counter (Uint32): increments when worker applies any changes
 export const ENGINE_STATE_GEN_OFFSET = 12;
 

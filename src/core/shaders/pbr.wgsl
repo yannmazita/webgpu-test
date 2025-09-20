@@ -295,7 +295,28 @@ fn getShadowCascade(viewZ: f32) -> i32 {
 
 fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
     let wp = vec4<f32>(worldPos, 1.0);
+
     let sp = shadow.cascades[cascadeIndex].lightViewProj * wp;
+
+    /*
+    var sp: vec4<f32>;
+
+    switch (cascadeIndex) {
+        case 0: {
+            sp = shadow.cascades[0].lightViewProj * wp;
+        }
+        case 1: {
+            sp = shadow.cascades[1].lightViewProj * wp;
+        }
+        case 2: {
+            sp = shadow.cascades[2].lightViewProj * wp;
+        }
+        default: {
+            sp = shadow.cascades[3].lightViewProj * wp;
+        }
+    }
+    */
+
     let ndc = sp.xyz / sp.w;
     let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
     let depth = ndc.z;
@@ -417,8 +438,8 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let Ls = normalize(-shadow.lightDir.xyz);
     let sunColor = shadow.lightColor.rgb * intensity;
 
-    let viewZ = dot(fi.worldPosition - scene.cameraPos.xyz, camera.viewMatrix[2].xyz);
-    let cascadeIndex = getShadowCascade(viewZ);
+    let VIEW_Z_SHADOW = dot(fi.worldPosition - scene.cameraPos.xyz, camera.viewMatrix[2].xyz);
+    let cascadeIndex = getShadowCascade(VIEW_Z_SHADOW);
     
     let sh = projectToShadowSpace(fi.worldPosition, cascadeIndex);
     let cmpDepth = sh.z - depthBias;

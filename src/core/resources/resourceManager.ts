@@ -49,6 +49,8 @@ import {
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 
+const DEBUG_MESH_VALIDATION = true;
+
 // MikkTSpace WASM loader and wrapper
 let mikktspace: {
   generateTangents: (
@@ -339,6 +341,10 @@ export class ResourceManager {
     url: string,
     cubemapSize = 512,
   ): Promise<EnvironmentMap> {
+    console.log(
+      `[ResourceManager] Creating environment map from ${url}, size=${cubemapSize}`,
+    );
+
     if (!this.skyboxMaterialInitialized) {
       await SkyboxMaterial.initialize(this.renderer.device, this.preprocessor);
       this.skyboxMaterialInitialized = true;
@@ -346,6 +352,10 @@ export class ResourceManager {
 
     // --- 1. Load and prepare equirectangular source texture ---
     const hdrData = await loadHDR(url);
+    console.log(
+      `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
+    );
+
     const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
     for (let i = 0; i < hdrData.width * hdrData.height; i++) {
       rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
@@ -353,6 +363,7 @@ export class ResourceManager {
       rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
       rgbaData[i * 4 + 3] = 1.0;
     }
+
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
       size: [hdrData.width, hdrData.height],
@@ -367,6 +378,7 @@ export class ResourceManager {
     );
 
     // --- 2. Convert to base environment cubemap ---
+    console.log(`[ResourceManager] Converting equirect to cubemap...`);
     const environmentMap = await equirectangularToCubemap(
       this.renderer.device,
       this.preprocessor,
@@ -954,6 +966,7 @@ export class ResourceManager {
     },
     vertexCount: number,
   ): void {
+    if (!DEBUG_MESH_VALIDATION) return;
     console.group(`[ResourceManager] Validating mesh data for "${key}"`);
 
     // Check positions

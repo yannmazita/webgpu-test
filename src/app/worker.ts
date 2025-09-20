@@ -156,9 +156,16 @@ async function initWorker(
   sceneRenderData = new SceneRenderData();
 
   // --- Scene Setup ---
-  const sceneEntities = await createDefaultScene(world, resourceManager);
-  cameraEntity = sceneEntities.cameraEntity;
-  demoModelEntity = sceneEntities.demoModelEntity;
+  try {
+    console.log("[Worker] Creating default scene...");
+    const sceneEntities = await createDefaultScene(world, resourceManager);
+    cameraEntity = sceneEntities.cameraEntity;
+    demoModelEntity = sceneEntities.demoModelEntity;
+    console.log("[Worker] Scene created successfully");
+  } catch (error) {
+    console.error("[Worker] Failed to create scene:", error);
+    throw error;
+  }
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
