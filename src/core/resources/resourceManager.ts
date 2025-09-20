@@ -49,6 +49,8 @@ import {
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 
+const DEBUG_MESH_VALIDATION = true;
+
 // MikkTSpace WASM loader and wrapper
 let mikktspace: {
   generateTangents: (
@@ -339,6 +341,10 @@ export class ResourceManager {
     url: string,
     cubemapSize = 512,
   ): Promise<EnvironmentMap> {
+    console.log(
+      `[ResourceManager] Creating environment map from ${url}, size=${cubemapSize}`,
+    );
+
     if (!this.skyboxMaterialInitialized) {
       await SkyboxMaterial.initialize(this.renderer.device, this.preprocessor);
       this.skyboxMaterialInitialized = true;
@@ -346,6 +352,10 @@ export class ResourceManager {
 
     // --- 1. Load and prepare equirectangular source texture ---
     const hdrData = await loadHDR(url);
+    console.log(
+      `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
+    );
+
     const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
     for (let i = 0; i < hdrData.width * hdrData.height; i++) {
       rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
@@ -353,20 +363,50 @@ export class ResourceManager {
       rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
       rgbaData[i * 4 + 3] = 1.0;
     }
+
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
       size: [hdrData.width, hdrData.height],
       format: "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    this.renderer.device.queue.writeTexture(
-      { texture: equirectTexture },
-      rgbaData.buffer,
-      { bytesPerRow: hdrData.width * 4 * 4 },
-      { width: hdrData.width, height: hdrData.height },
-    );
+
+    // Ensure bytesPerRow meets WebGPU 256-byte alignment
+    const rowBytes = hdrData.width * 4 /*channels*/ * 4; /*bytes/chan*/
+    const isAligned = (rowBytes & 0xff) === 0; // rowBytes % 256 === 0
+
+    if (isAligned) {
+      // Fast path: upload directly
+      this.renderer.device.queue.writeTexture(
+        { texture: equirectTexture },
+        rgbaData.buffer,
+        { bytesPerRow: rowBytes },
+        { width: hdrData.width, height: hdrData.height },
+      );
+    } else {
+      // Padded upload: copy rows into a buffer with 256-byte stride
+      const alignedRowBytes = (rowBytes + 255) & ~255; // round up to 256
+      const padded = new ArrayBuffer(alignedRowBytes * hdrData.height);
+      const paddedView = new Uint8Array(padded);
+      const srcView = new Uint8Array(rgbaData.buffer);
+
+      for (let y = 0; y < hdrData.height; y++) {
+        const srcOff = y * rowBytes;
+        const dstOff = y * alignedRowBytes;
+        // copy rowBytes bytes for this row
+        paddedView.set(srcView.subarray(srcOff, srcOff + rowBytes), dstOff);
+      }
+
+      this.renderer.device.queue.writeTexture(
+        { texture: equirectTexture },
+        padded,
+        { bytesPerRow: alignedRowBytes },
+        { width: hdrData.width, height: hdrData.height },
+      );
+    }
 
     // --- 2. Convert to base environment cubemap ---
+    console.log(`[ResourceManager] Converting equirect to cubemap...`);
     const environmentMap = await equirectangularToCubemap(
       this.renderer.device,
       this.preprocessor,
@@ -954,6 +994,7 @@ export class ResourceManager {
     },
     vertexCount: number,
   ): void {
+    if (!DEBUG_MESH_VALIDATION) return;
     console.group(`[ResourceManager] Validating mesh data for "${key}"`);
 
     // Check positions

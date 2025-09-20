@@ -156,9 +156,16 @@ async function initWorker(
   sceneRenderData = new SceneRenderData();
 
   // --- Scene Setup ---
-  const sceneEntities = await createDefaultScene(world, resourceManager);
-  cameraEntity = sceneEntities.cameraEntity;
-  demoModelEntity = sceneEntities.demoModelEntity;
+  try {
+    console.log("[Worker] Creating default scene...");
+    const sceneEntities = await createDefaultScene(world, resourceManager);
+    cameraEntity = sceneEntities.cameraEntity;
+    demoModelEntity = sceneEntities.demoModelEntity;
+    console.log("[Worker] Scene created successfully");
+  } catch (error) {
+    console.error("[Worker] Failed to create scene:", error);
+    throw error;
+  }
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
@@ -298,13 +305,21 @@ self.onmessage = async (
 
   switch (msg.type) {
     case MSG_RESIZE: {
-      const cam = world.getComponent(cameraEntity, CameraComponent)!;
-      renderer.requestResize(
-        msg.cssWidth,
-        msg.cssHeight,
-        msg.devicePixelRatio,
-        cam,
-      );
+      // camera may not be ready if scene creation failed/hasn't finished
+      const cam =
+        cameraEntity !== -1
+          ? world.getComponent(cameraEntity, CameraComponent)
+          : undefined;
+      if (cam) {
+        renderer.requestResize(
+          msg.cssWidth,
+          msg.cssHeight,
+          msg.devicePixelRatio,
+          cam,
+        );
+      } else {
+        console.warn("[Worker] Resize skipped: camera not ready yet");
+      }
       break;
     }
     case MSG_FRAME: {
@@ -314,8 +329,6 @@ self.onmessage = async (
     case MSG_SET_TONE_MAPPING: {
       if (renderer) {
         renderer.setToneMappingEnabled(!!msg.enabled);
-        // Optional: console log for visibility while testing
-        console.log("[Worker] Tone mapping set to:", !!msg.enabled);
       }
       break;
     }

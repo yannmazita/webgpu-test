@@ -74,12 +74,17 @@ struct PBRMaterialUniforms {
     textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
 }
 
-struct ShadowUniforms {
+struct Cascade {
     lightViewProj: mat4x4<f32>,
-    lightDir: vec4<f32>,    // xyz used
+    splitDepth: vec4<f32>, // Only .x is used.
+};
+
+struct ShadowUniforms {
+    cascades: array<Cascade, 4>,
+    lightDir: vec4<f32>,  // xyz used
     lightColor: vec4<f32>,  // rgb used
-    params0: vec4<f32>,     // intensity, pcfRadius, mapSize, depthBias
-}
+    params0: vec4<f32>, // intensity, pcfRadius, mapSize, depthBias
+};
 
 // @group(0) - Per-frame data
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
@@ -92,7 +97,7 @@ struct ShadowUniforms {
 @group(0) @binding(7) var prefilteredMap: texture_cube<f32>;
 @group(0) @binding(8) var brdfLUT: texture_2d<f32>;
 @group(0) @binding(9) var iblSampler: sampler;
-@group(0) @binding(10) var shadowMap: texture_depth_2d;
+@group(0) @binding(10) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(11) var shadowSampler: sampler_comparison;
 @group(0) @binding(12) var<uniform> shadow: ShadowUniforms;
 
@@ -277,28 +282,57 @@ fn calculateLightContribution(
     return (diffuse + specular) * lightColor * NdotL;
 }
 
-fn projectToShadowSpace(worldPos: vec3<f32>) -> vec3<f32> {
+fn getShadowCascade(viewZ: f32) -> i32 {
+    if (viewZ > shadow.cascades[2].splitDepth.x) {
+        return 3;
+    } else if (viewZ > shadow.cascades[1].splitDepth.x) {
+        return 2;
+    } else if (viewZ > shadow.cascades[0].splitDepth.x) {
+        return 1;
+    }
+    return 0;
+}
+
+fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
     let wp = vec4<f32>(worldPos, 1.0);
-    let sp = shadow.lightViewProj * wp;
+
+    let sp = shadow.cascades[cascadeIndex].lightViewProj * wp;
+
+    /*
+    var sp: vec4<f32>;
+
+    switch (cascadeIndex) {
+        case 0: {
+            sp = shadow.cascades[0].lightViewProj * wp;
+        }
+        case 1: {
+            sp = shadow.cascades[1].lightViewProj * wp;
+        }
+        case 2: {
+            sp = shadow.cascades[2].lightViewProj * wp;
+        }
+        default: {
+            sp = shadow.cascades[3].lightViewProj * wp;
+        }
+    }
+    */
+
     let ndc = sp.xyz / sp.w;
-    // WebGPU NDC z in [0,1], orthographic/perspective handled by matrix
     let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
     let depth = ndc.z;
     return vec3<f32>(uv, depth);
 }
 
-fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32) -> f32 {
+fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32, cascadeIndex: i32) -> f32 {
     // The sampler is set to clamp-to-edge, so this out-of-bounds coords are handled
     // automatically on the gpu
     let texel = vec2<f32>(1.0 / mapSize);
     var sum = 0.0;
-    var taps = 0.0;
-    // 3x3 kernel centered
+    let taps = 9.0;
     for (var j: i32 = -1; j <= 1; j = j + 1) {
         for (var i: i32 = -1; i <= 1; i = i + 1) {
             let offs = vec2<f32>(f32(i), f32(j)) * texel * pcfRadius;
-            sum += textureSampleCompare(shadowMap, shadowSampler, uv + offs, depth);
-            taps += 1.0;
+            sum += textureSampleCompare(shadowMap, shadowSampler, uv + offs, cascadeIndex, depth);
         }
     }
     return sum / taps;
@@ -405,10 +439,13 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let receiveShadowsFloat = select(0.0, 1.0, (fi.instanceFlags & 2u) != 0u);
     let Ls = normalize(-shadow.lightDir.xyz);
     let sunColor = shadow.lightColor.rgb * intensity;
+
+    let VIEW_Z_SHADOW = dot(fi.worldPosition - scene.cameraPos.xyz, camera.viewMatrix[2].xyz);
+    let cascadeIndex = getShadowCascade(VIEW_Z_SHADOW);
     
-    let sh = projectToShadowSpace(fi.worldPosition);
+    let sh = projectToShadowSpace(fi.worldPosition, cascadeIndex);
     let cmpDepth = sh.z - depthBias;
-    let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, pcfRadius, mapSize);
+    let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, pcfRadius, mapSize, cascadeIndex);
     let shadowFactor = mix(1.0, shadowSample, receiveShadowsFloat);
     
     let sunTerm = calculateLightContribution(Ls, N, V, F0, albedo, metallic, roughness, sunColor);
