@@ -44,6 +44,8 @@ import {
   MSG_RESIZE,
   MSG_FRAME,
   MSG_SET_TONE_MAPPING,
+  MSG_SET_ENVIRONMENT,
+  SetEnvironmentMsg,
 } from "@/core/types/worker";
 import {
   createEngineStateContext as createEngineStateCtx,
@@ -53,6 +55,8 @@ import {
 } from "@/core/engineState";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { mat4, quat, vec3 } from "wgpu-matrix";
+import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
+import { IBLComponent } from "@/core/ecs/components/iblComponent";
 
 let engineStateCtx: EngineStateCtx | null = null;
 
@@ -282,7 +286,9 @@ function frame(now: number) {
 }
 
 self.onmessage = async (
-  ev: MessageEvent<InitMsg | ResizeMsg | FrameMsg | ToneMapMsg>,
+  ev: MessageEvent<
+    InitMsg | ResizeMsg | FrameMsg | ToneMapMsg | SetEnvironmentMsg
+  >,
 ) => {
   const msg = ev.data;
 
@@ -329,6 +335,26 @@ self.onmessage = async (
     case MSG_SET_TONE_MAPPING: {
       if (renderer) {
         renderer.setToneMappingEnabled(!!msg.enabled);
+      }
+      break;
+    }
+    case MSG_SET_ENVIRONMENT: {
+      // Narrow typing guard
+      const m = msg as any;
+      try {
+        if (!resourceManager || !world) break;
+        const env = await resourceManager.createEnvironmentMap(
+          String(m.url),
+          Math.max(16, Math.min(4096, Number(m.size) | 0)),
+        );
+        // Replace global resources
+        world.removeResource(SkyboxComponent);
+        world.addResource(new SkyboxComponent(env.skyboxMaterial));
+        world.removeResource(IBLComponent);
+        world.addResource(env.iblComponent);
+        console.log("[Worker] Environment updated:", m.url, "size=", m.size);
+      } catch (e) {
+        console.error("[Worker] Failed to update environment:", e);
       }
       break;
     }

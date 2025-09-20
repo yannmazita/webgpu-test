@@ -21,6 +21,7 @@ export const FOG_PARAMS0_OFFSET = 48; // Float32[4] = [density, height, heightFa
 
 // Sun
 export const SUN_ENABLED_OFFSET = 64; // Int32 (0/1)
+export const SUN_CASTS_SHADOWS_OFFSET = 68; // Int32 (0/1)
 export const SUN_DIRECTION_OFFSET = 80; // Float32[4] = dir.xyz, pad
 export const SUN_COLOR_OFFSET = 96; // Float32[4] = rgb + intensity in w
 
@@ -40,6 +41,7 @@ export const DF_FOG_PARAMS0 = 1 << 2;
 export const DF_SUN_ENABLED = 1 << 3;
 export const DF_SUN_DIRECTION = 1 << 4;
 export const DF_SUN_COLOR = 1 << 5;
+export const DF_SUN_CASTS_SHADOWS = 1 << 9;
 
 export const DF_SHADOW_MAP_SIZE = 1 << 6;
 export const DF_SHADOW_PARAMS0 = 1 << 7;

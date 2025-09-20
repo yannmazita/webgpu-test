@@ -49,6 +49,16 @@ export class World {
     return this.getComponent(this.globalEntity, componentType);
   }
 
+  /**
+   * Removes a global resource component from the world.
+   * @param componentType The type of the component to remove.
+   */
+  public removeResource<T extends IComponent>(
+    componentType: ComponentConstructor<T>,
+  ): void {
+    this.removeComponent(this.globalEntity, componentType);
+  }
+
   // The core of the ECS: stores components in maps for fast lookups.
   // The outer map is keyed by the component's constructor (its type).
   // The inner map is keyed by the entity's ID.

@@ -21,6 +21,11 @@ export const MSG_FRAME = "FRAME";
 export const MSG_SET_TONE_MAPPING = "SET_TONE_MAPPING";
 
 /**
+ * Message type constant for setting environment.
+ */
+export const MSG_SET_ENVIRONMENT = "SET_ENVIRONMENT";
+
+/**
  * Defines the message structure for initializing the render worker.
  */
 export interface InitMsg {
@@ -69,4 +74,10 @@ export interface ToneMapMsg {
   type: typeof MSG_SET_TONE_MAPPING;
   /** Whether tone mapping should be enabled. */
   enabled: boolean;
+}
+
+export interface SetEnvironmentMsg {
+  type: typeof MSG_SET_ENVIRONMENT;
+  url: string;
+  size: number;
 }

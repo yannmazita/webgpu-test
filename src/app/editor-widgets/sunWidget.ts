@@ -5,6 +5,7 @@ import {
   setSunEnabled,
   setSunColorAndIntensity,
   setSunDirection,
+  setSunCastsShadows,
 } from "@/core/engineState";
 
 function yawPitchDegToDir(
@@ -28,6 +29,7 @@ export function render(
     sunIntensityUI: number;
     sunYawDegUI: number;
     sunPitchDegUI: number;
+    sunCastsShadowsUI: boolean;
   },
   engineReady: boolean,
 ): void {
@@ -36,6 +38,12 @@ export function render(
     if (ImGui.Checkbox("Enabled##Sun", sunEnabledRef) && engineReady) {
       uiState.sunEnabledUI = sunEnabledRef[0];
       setSunEnabled(engineStateCtx, uiState.sunEnabledUI);
+    }
+
+    const sunCastsRef: [boolean] = [uiState.sunCastsShadowsUI];
+    if (ImGui.Checkbox("Casts Shadows##Sun", sunCastsRef) && engineReady) {
+      uiState.sunCastsShadowsUI = sunCastsRef[0];
+      setSunCastsShadows(engineStateCtx, uiState.sunCastsShadowsUI);
     }
 
     const sunColorRef: [number, number, number] = [

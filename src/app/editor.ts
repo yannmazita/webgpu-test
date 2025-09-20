@@ -17,6 +17,7 @@ import * as fogWidget from "./editor-widgets/fogWidget";
 import * as sunWidget from "./editor-widgets/sunWidget";
 import * as shadowWidget from "./editor-widgets/shadowWidget";
 import * as renderingWidget from "./editor-widgets/renderingWidget";
+import * as iblWidget from "./editor-widgets/iblWidget";
 
 let uiDevice: GPUDevice;
 let uiContext: GPUCanvasContext;
@@ -42,6 +43,7 @@ const uiState = {
   sunIntensityUI: 1.0,
   sunYawDegUI: -26,
   sunPitchDegUI: -50,
+  sunCastsShadowsUI: true,
   shadowMapSizeUI: 2048,
   shadowSlopeScaleBiasUI: 3.0,
   shadowConstantBiasUI: 1.0,
@@ -49,6 +51,8 @@ const uiState = {
   shadowPcfRadiusUI: 1.0,
   shadowOrthoExtentUI: 20.0,
   toneMappingEnabledUI: true,
+  iblSelectedIndexUI: 0,
+  iblSizeUI: 1024,
 };
 
 let engineReady = false;
@@ -92,6 +96,7 @@ export function init(
         snap.sun.direction[1],
         snap.sun.direction[2],
       );
+      uiState.sunCastsShadowsUI = snap.sun.castsShadows ?? true;
       uiState.sunYawDegUI = yaw;
       uiState.sunPitchDegUI = pitch;
       uiState.shadowMapSizeUI = snap.shadow.mapSize;
@@ -250,6 +255,7 @@ export function update(): void {
   sunWidget.render(engineStateCtx, uiState, engineReady);
   shadowWidget.render(engineStateCtx, uiState, engineReady);
   renderingWidget.render(worker, uiState);
+  iblWidget.render(worker, uiState);
 
   ImGui.End();
   updateUICanvasInteractivity();

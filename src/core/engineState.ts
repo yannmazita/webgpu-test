@@ -42,6 +42,8 @@ import {
   DF_SHADOW_MAP_SIZE,
   DF_SHADOW_PARAMS0,
   DF_SHADOW_PARAMS1,
+  SUN_CASTS_SHADOWS_OFFSET,
+  DF_SUN_CASTS_SHADOWS,
 } from "@/core/sharedEngineStateLayout";
 import { World } from "@/core/ecs/world";
 import { FogComponent } from "@/core/ecs/components/fogComponent";
@@ -214,6 +216,14 @@ export function setFogParams(
 export function setSunEnabled(ctx: EngineStateContext, enabled: boolean): void {
   Atomics.store(ctx.i32, idx(SUN_ENABLED_OFFSET), enabled ? 1 : 0);
   Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SUN_ENABLED);
+}
+
+export function setSunCastsShadows(
+  ctx: EngineStateContext,
+  enabled: boolean,
+): void {
+  Atomics.store(ctx.i32, idx(SUN_CASTS_SHADOWS_OFFSET), enabled ? 1 : 0);
+  Atomics.or(ctx.i32, idx(ENGINE_STATE_FLAGS0_OFFSET), DF_SUN_CASTS_SHADOWS);
 }
 
 /**
@@ -418,6 +428,14 @@ export function syncEngineState(world: World, ctx: EngineStateContext): void {
     sun.color[2] = Math.max(0, ctx.f32[base + 2]);
     sun.color[3] = Math.max(0, ctx.f32[base + 3]); // intensity
   }
+  if (
+    mask & DF_SUN_CASTS_SHADOWS &&
+    sun &&
+    inBoundsI32(ctx, SUN_CASTS_SHADOWS_OFFSET)
+  ) {
+    sun.castsShadows =
+      Atomics.load(ctx.i32, idx(SUN_CASTS_SHADOWS_OFFSET)) !== 0;
+  }
 
   // Shadow updates
   if (shadows) {
@@ -517,10 +535,17 @@ export function publishSnapshotFromWorld(
           idx(SUN_COLOR_OFFSET),
         );
       }
+      if (inBoundsI32(ctx, SUN_CASTS_SHADOWS_OFFSET)) {
+        Atomics.store(
+          ctx.i32,
+          idx(SUN_CASTS_SHADOWS_OFFSET),
+          sun.castsShadows ? 1 : 0,
+        );
+      }
       Atomics.or(
         ctx.i32,
         idx(ENGINE_STATE_FLAGS0_OFFSET),
-        DF_SUN_ENABLED | DF_SUN_DIRECTION | DF_SUN_COLOR,
+        DF_SUN_ENABLED | DF_SUN_DIRECTION | DF_SUN_COLOR | DF_SUN_CASTS_SHADOWS,
       );
     }
 
@@ -588,6 +613,7 @@ export function readSnapshot(ctx: EngineStateContext): {
     direction: [number, number, number];
     color: [number, number, number];
     intensity: number;
+    castsShadows: boolean;
   };
   shadow: {
     mapSize: number;
@@ -618,6 +644,7 @@ export function readSnapshot(ctx: EngineStateContext): {
 
   // Sun
   const sunEnabled = Atomics.load(ctx.i32, idx(SUN_ENABLED_OFFSET)) !== 0;
+  const sunCasts = Atomics.load(ctx.i32, idx(SUN_CASTS_SHADOWS_OFFSET)) !== 0;
   const sdir = [
     ctx.f32[idx(SUN_DIRECTION_OFFSET) + 0],
     ctx.f32[idx(SUN_DIRECTION_OFFSET) + 1],
@@ -651,6 +678,7 @@ export function readSnapshot(ctx: EngineStateContext): {
       direction: sdir,
       color: scol,
       intensity: sint,
+      castsShadows: sunCasts,
     },
     shadow,
   };
