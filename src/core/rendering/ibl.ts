@@ -20,6 +20,8 @@ let prefilterParamsBuffer: GPUBuffer | null = null;
 let brdfLookupTableShader: Shader | null = null;
 let brdfLookupTablePipeline: GPUComputePipeline | null = null;
 
+let equirectToCubemapBGL: GPUBindGroupLayout | null = null;
+
 /**
  * Converts an equirectangular HDR texture to a cubemap texture using a compute shader.
  * @param device The GPU device.
@@ -34,7 +36,33 @@ export async function equirectangularToCubemap(
   equirectTexture: GPUTexture,
   cubemapSize: number,
 ): Promise<GPUTexture> {
-  device.pushErrorScope("validation");
+  // Ensure shared shader/pipeline/BGL are initialized
+  if (!equirectToCubemapBGL) {
+    equirectToCubemapBGL = device.createBindGroupLayout({
+      label: "EQUIRECT_TO_CUBEMAP_BGL",
+      entries: [
+        // @binding(0) equirectangularTexture: texture_2d<f32>
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+          },
+        },
+        // @binding(1) cubemapTexture: texture_storage_2d_array<rgba16float, write>
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            access: "write-only",
+            format: "rgba16float",
+            viewDimension: "2d-array",
+          },
+        },
+      ],
+    });
+  }
 
   equirectToCubemapShader ??= await Shader.fromUrl(
     device,
@@ -45,20 +73,19 @@ export async function equirectangularToCubemap(
     "main",
   );
 
-  equirectToCubemapPipeline ??= device.createComputePipeline({
-    label: "EQUIRECT_TO_CUBEMAP_PIPELINE",
-    layout: "auto",
-    compute: {
-      module: equirectToCubemapShader.module,
-      entryPoint: "main",
-    },
-  });
-
-  // check for shader compilation error
-  const shaderError = await device.popErrorScope();
-  if (shaderError) {
-    console.error("[IBL] Equirect shader/pipeline error:", shaderError);
-    throw shaderError;
+  if (!equirectToCubemapPipeline) {
+    const pl = device.createPipelineLayout({
+      label: "EQUIRECT_TO_CUBEMAP_PL",
+      bindGroupLayouts: [equirectToCubemapBGL],
+    });
+    equirectToCubemapPipeline = device.createComputePipeline({
+      label: "EQUIRECT_TO_CUBEMAP_PIPELINE",
+      layout: pl,
+      compute: {
+        module: equirectToCubemapShader.module,
+        entryPoint: "main",
+      },
+    });
   }
 
   const cubemapTexture = device.createTexture({
@@ -66,7 +93,6 @@ export async function equirectangularToCubemap(
     size: [cubemapSize, cubemapSize, 6],
     format: "rgba16float",
     dimension: "2d",
-    // We only write mip level 0 for the environment map; downstream passes build their own mips.
     mipLevelCount: 1,
     usage:
       GPUTextureUsage.TEXTURE_BINDING |
@@ -75,11 +101,9 @@ export async function equirectangularToCubemap(
       GPUTextureUsage.COPY_SRC,
   });
 
-  // Error handling for bind group
-  device.pushErrorScope("validation");
-
   const bindGroup = device.createBindGroup({
-    layout: equirectToCubemapPipeline.getBindGroupLayout(0),
+    label: "EQUIRECT_TO_CUBEMAP_BG",
+    layout: equirectToCubemapBGL!,
     entries: [
       { binding: 0, resource: equirectTexture.createView() },
       {
@@ -93,22 +117,19 @@ export async function equirectangularToCubemap(
     ],
   });
 
-  const bindGroupError = await device.popErrorScope();
-  if (bindGroupError) {
-    console.error("[IBL] Equirect bind group error:", bindGroupError);
-    throw bindGroupError;
-  }
-
-  const commandEncoder = device.createCommandEncoder();
-  const passEncoder = commandEncoder.beginComputePass();
+  const commandEncoder = device.createCommandEncoder({
+    label: "EQUIRECT_TO_CUBEMAP_CMDS",
+  });
+  const passEncoder = commandEncoder.beginComputePass({
+    label: "EQUIRECT_TO_CUBEMAP_PASS",
+  });
   passEncoder.setPipeline(equirectToCubemapPipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  const workgroupCount = Math.ceil(cubemapSize / 8);
-  passEncoder.dispatchWorkgroups(workgroupCount, workgroupCount, 6);
+  const wg = Math.ceil(cubemapSize / 8);
+  passEncoder.dispatchWorkgroups(wg, wg, 6);
   passEncoder.end();
 
   device.queue.submit([commandEncoder.finish()]);
-
   return cubemapTexture;
 }
 

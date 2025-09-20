@@ -305,13 +305,21 @@ self.onmessage = async (
 
   switch (msg.type) {
     case MSG_RESIZE: {
-      const cam = world.getComponent(cameraEntity, CameraComponent)!;
-      renderer.requestResize(
-        msg.cssWidth,
-        msg.cssHeight,
-        msg.devicePixelRatio,
-        cam,
-      );
+      // camera may not be ready if scene creation failed/hasn't finished
+      const cam =
+        cameraEntity !== -1
+          ? world.getComponent(cameraEntity, CameraComponent)
+          : undefined;
+      if (cam) {
+        renderer.requestResize(
+          msg.cssWidth,
+          msg.cssHeight,
+          msg.devicePixelRatio,
+          cam,
+        );
+      } else {
+        console.warn("[Worker] Resize skipped: camera not ready yet");
+      }
       break;
     }
     case MSG_FRAME: {
@@ -321,8 +329,6 @@ self.onmessage = async (
     case MSG_SET_TONE_MAPPING: {
       if (renderer) {
         renderer.setToneMappingEnabled(!!msg.enabled);
-        // Optional: console log for visibility while testing
-        console.log("[Worker] Tone mapping set to:", !!msg.enabled);
       }
       break;
     }
