@@ -1,6 +1,5 @@
 // src/core/types/gpu.ts
-import { Mat3, Mat4, Vec3, Vec4 } from "wgpu-matrix";
-import { Material } from "@/core/materials/material";
+import { Mat4, Vec3, Vec4 } from "wgpu-matrix";
 import { MaterialInstance } from "../materials/materialInstance";
 
 /**
@@ -156,7 +155,7 @@ export interface PBRMaterialOptions {
    */
   occlusionMap?: string;
 
-  // --- NEW: UV Set Selectors ---
+  // --- UV Set Selectors ---
   /** UV set index for the albedo map. Defaults to 0. */
   albedoUV?: number;
   /** UV set index for the metallic-roughness map. Defaults to 0. */
@@ -167,6 +166,12 @@ export interface PBRMaterialOptions {
   emissiveUV?: number;
   /** UV set index for the occlusion map. Defaults to 0. */
   occlusionUV?: number;
+
+  /**
+   * Scalar multiplier for the emissive contribution (KHR_materials_emissive_strength).
+   * Default: 1.0
+   */
+  emissiveStrength?: number;
 }
 
 /**

@@ -17,6 +17,8 @@ export interface GLTF {
   images?: GLTFImage[];
   samplers?: GLTFSampler[];
   animations?: GLTFAnimation[];
+  extensionsUsed?: string[];
+  extensionsRequired?: string[];
 }
 
 export interface GLTFScene {
@@ -48,6 +50,17 @@ export interface GLTFPrimitive {
   mode?: number; // 4 = TRIANGLES
 }
 
+export interface GLTFMaterialExtensions {
+  // optional scalar emissive strength
+  KHR_materials_emissive_strength?: {
+    emissiveStrength?: number; // default 1.0
+  };
+  // marker extension (no params)
+  KHR_materials_unlit?: Record<string, never>;
+  // Allow other extensions without breaking types
+  [key: string]: any;
+}
+
 export interface GLTFMaterial {
   name?: string;
   pbrMetallicRoughness?: {
@@ -63,6 +76,7 @@ export interface GLTFMaterial {
   emissiveFactor?: [number, number, number];
   alphaMode?: "OPAQUE" | "MASK" | "BLEND";
   doubleSided?: boolean;
+  extensions?: GLTFMaterialExtensions;
 }
 
 export interface GLTFAccessor {
