@@ -1,5 +1,5 @@
 // src/core/rendering/uniformManager.ts
-import { Vec4 } from "wgpu-matrix";
+import { Vec4, mat4 } from "wgpu-matrix";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
 /**
@@ -28,7 +28,7 @@ export class UniformManager {
   constructor() {
     // scene array: cameraPos(4) + fogColor(4) + fogParams(4) + hdr(1) + prefiltered(1) + pad(2) = 16 floats
     this.sceneDataArray = new Float32Array(16);
-    this.cameraDataArray = new Float32Array(32); // For 2 matrices
+    this.cameraDataArray = new Float32Array(48); // For 3 mat4x4<f32>
     this.lightStorageBufferCapacity = 4;
     const lightStructSize = 12 * Float32Array.BYTES_PER_ELEMENT; // 3 vec4 per light
     const bufferSize = 16 + this.lightStorageBufferCapacity * lightStructSize; // 16-byte header
@@ -36,8 +36,8 @@ export class UniformManager {
   }
 
   /**
-   * Updates the camera uniform buffer with the latest view and view-projection
-   * matrices.
+   * Updates the camera uniform buffer with the latest view, view-projection,
+   * and inverse view-projection matrices.
    *
    * This method packs the matrices into a pre-allocated Float32Array and
    * queues a write to the specified GPU buffer.
@@ -51,10 +51,19 @@ export class UniformManager {
     buffer: GPUBuffer,
     camera: CameraComponent,
   ): void {
-    // Copy view-projection matrix to the start of the array
+    // Layout (mat4x4<f32> each):
+    // [0..15]   viewProjectionMatrix
+    // [16..31]  viewMatrix
+    // [32..47]  inverseViewProjectionMatrix
     this.cameraDataArray.set(camera.viewProjectionMatrix, 0);
-    // Copy view matrix after the first matrix (16 floats offset)
     this.cameraDataArray.set(camera.viewMatrix, 16);
+
+    // inverse(VP) = inverse(V) * inverse(P) since VP = P * V
+    const invVP = mat4.multiply(
+      camera.inverseViewMatrix,
+      camera.inverseProjectionMatrix,
+    );
+    this.cameraDataArray.set(invVP, 32);
 
     device.queue.writeBuffer(buffer, 0, this.cameraDataArray);
   }

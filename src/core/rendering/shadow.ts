@@ -229,31 +229,61 @@ export class ShadowSubsystem {
     });
   }
 
+  /**
+   * Updates per-frame data for Cascaded Shadow Maps (CSM).
+   *
+   * This method:
+   * - Resizes shadow map and rebuilds the depth-only pipeline if quality/bias params changed.
+   * - Computes cascade split depths using a hybrid logarithmic/uniform distribution.
+   * - Builds a directional light view for each cascade.
+   * - Stabilizes each cascade by snapping the light-space frustum center to texel-sized increments
+   *   (reduces shimmering when the camera moves).
+   * - Computes orthographic projection extents for the cascade and composes LightViewProj matrices.
+   * - Packs all cascade matrices, split depths, sun parameters, and shadow settings into a single
+   *   uniform buffer consumed by the lighting pass.
+   * - Updates the shadow pass's bind group.
+   *
+   * Notes:
+   * - Current implementation uses a constant light distance and does not crop using near/far per-split
+   *   (keeps the implementation simple and robust); adding split-specific cropping can further tighten
+   *   extents.
+   * - Cascade stabilization is based on light-space texel snapping and works best when the light
+   *   direction is stable.
+   *
+   * @param camera The active scene camera providing view and projection data.
+   * @param sun The scene-wide directional sun (direction, color, intensity).
+   * @param settings The shadow quality settings (map size, biases, PCF radius).
+   * @returns void
+   */
   public updatePerFrame(
     camera: CameraComponent,
     sun: SceneSunComponent,
     settings: ShadowSettingsComponent,
   ): void {
+    // Recreate GPU resources if the map size changed.
     if (settings.mapSize !== this.mapSize) {
       this.mapSize = settings.mapSize;
       this.createShadowResources(this.mapSize, this.depthFormat);
     }
+
+    // Rebuild pipeline if raster bias settings changed.
     this.rebuildPipelineIfNeeded(
       settings.slopeScaleBias,
       settings.constantBias,
     );
 
-    // --- Cascaded Shadow Map Frustum Calculation ---
+    // --- Cascade split computation (log-uniform hybrid) ---
     const cascadeSplitLambda = 0.95;
     const cameraNear = camera.near;
     const cameraFar = camera.far;
     const clipRange = cameraFar - cameraNear;
+
     const minZ = cameraNear;
     const maxZ = cameraFar;
     const range = maxZ - minZ;
     const ratio = maxZ / minZ;
 
-    const cascadeSplits = [0.0, 0.0, 0.0, 0.0];
+    const cascadeSplits = [0.0, 0.0, 0.0, 0.0] as number[];
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; i++) {
       const p = (i + 1) / ShadowSubsystem.NUM_CASCADES;
       const log = minZ * Math.pow(ratio, p);
@@ -262,20 +292,25 @@ export class ShadowSubsystem {
       cascadeSplits[i] = (d - cameraNear) / clipRange;
     }
 
+    // --- Build light basis ---
     const dir = vec3.normalize(sun.direction);
     const up =
       Math.abs(vec3.dot(dir, this.tmpUp)) > 0.95
         ? vec3.fromValues(1, 0, 0)
         : this.tmpUp;
+
+    // Inverse View-Projection = inv(VP) = inv(V) * inv(P)
     const invCam = mat4.multiply(
       camera.inverseViewMatrix,
       camera.inverseProjectionMatrix,
     );
 
     let lastSplitDist = 0.0;
+
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; i++) {
       const splitDist = cascadeSplits[i];
-      const frustumCorners: Vec3[] = [];
+
+      // --- Compute the 8 frustum corners in world-space by unprojecting clip-space cube ---
       const clipCorners: [number, number, number, number][] = [
         [-1, -1, -1, 1],
         [1, -1, -1, 1],
@@ -286,19 +321,21 @@ export class ShadowSubsystem {
         [-1, 1, 1, 1],
         [1, 1, 1, 1],
       ];
-
+      const frustumCorners: Vec3[] = [];
       for (const c of clipCorners) {
         const clip = vec4.fromValues(c[0], c[1], c[2], 1.0);
         const invClip = vec4.transformMat4(clip, invCam);
         frustumCorners.push(vec3.scale(invClip, 1.0 / invClip[3]));
       }
 
+      // --- Find center of the corners in world space ---
       const frustumCenter = vec3.create();
       for (const p of frustumCorners) {
         vec3.add(frustumCenter, p, frustumCenter);
       }
       vec3.scale(frustumCenter, 1.0 / frustumCorners.length, frustumCenter);
 
+      // --- Build initial light view looking at frustum center from far along sun dir ---
       const lightDist = 100.0;
       const eye = vec3.fromValues(
         frustumCenter[0] - dir[0] * lightDist,
@@ -307,12 +344,14 @@ export class ShadowSubsystem {
       );
       mat4.lookAt(eye, frustumCenter, up, this.lightView);
 
+      // --- Compute initial bounds in light space ---
       let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;
       let maxX = -Infinity,
         maxY = -Infinity,
         maxZ = -Infinity;
+
       for (const p of frustumCorners) {
         this.tmpVec4[0] = p[0];
         this.tmpVec4[1] = p[1];
@@ -327,17 +366,87 @@ export class ShadowSubsystem {
         if (v[2] > maxZ) maxZ = v[2];
       }
 
+      // --- Cascade stabilization: snap light-space center to texel grid ---
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      const texelSizeX = width / this.mapSize;
+      const texelSizeY = height / this.mapSize;
+
+      // Transform frustum center into light space
+      this.tmpVec4[0] = frustumCenter[0];
+      this.tmpVec4[1] = frustumCenter[1];
+      this.tmpVec4[2] = frustumCenter[2];
+      this.tmpVec4[3] = 1.0;
+      const centerLV = vec4.transformMat4(this.tmpVec4, this.lightView);
+
+      // Snap XY to texel increments
+      const snappedCenterLVx =
+        Math.round(centerLV[0] / texelSizeX) * texelSizeX;
+      const snappedCenterLVy =
+        Math.round(centerLV[1] / texelSizeY) * texelSizeY;
+
+      const snappedCenterLV = vec4.fromValues(
+        snappedCenterLVx,
+        snappedCenterLVy,
+        centerLV[2],
+        1.0,
+      );
+
+      // Transform snapped center back to world space and rebuild light view
+      const invLightView = mat4.invert(this.lightView);
+      const snappedCenterWorld4 = vec4.transformMat4(
+        snappedCenterLV,
+        invLightView,
+      );
+      const snappedCenterWorld = vec3.fromValues(
+        snappedCenterWorld4[0] / snappedCenterWorld4[3],
+        snappedCenterWorld4[1] / snappedCenterWorld4[3],
+        snappedCenterWorld4[2] / snappedCenterWorld4[3],
+      );
+
+      const eyeSnapped = vec3.fromValues(
+        snappedCenterWorld[0] - dir[0] * lightDist,
+        snappedCenterWorld[1] - dir[1] * lightDist,
+        snappedCenterWorld[2] - dir[2] * lightDist,
+      );
+      mat4.lookAt(eyeSnapped, snappedCenterWorld, up, this.lightView);
+
+      // Recompute bounds in stabilized light space
+      minX = Infinity;
+      minY = Infinity;
+      minZ = Infinity;
+      maxX = -Infinity;
+      maxY = -Infinity;
+      maxZ = -Infinity;
+      for (const p of frustumCorners) {
+        this.tmpVec4[0] = p[0];
+        this.tmpVec4[1] = p[1];
+        this.tmpVec4[2] = p[2];
+        this.tmpVec4[3] = 1.0;
+        const v2 = vec4.transformMat4(this.tmpVec4, this.lightView);
+        if (v2[0] < minX) minX = v2[0];
+        if (v2[0] > maxX) maxX = v2[0];
+        if (v2[1] < minY) minY = v2[1];
+        if (v2[1] > maxY) maxY = v2[1];
+        if (v2[2] < minZ) minZ = v2[2];
+        if (v2[2] > maxZ) maxZ = v2[2];
+      }
+
+      // --- Compose orthographic projection and lightViewProj for this cascade ---
       const zNear = Math.max(0.1, minZ - 100.0);
       const zFar = maxZ + 100.0;
       mat4.ortho(minX, maxX, minY, maxY, zNear, zFar, this.lightProj);
       mat4.multiply(this.lightProj, this.lightView, this.lightViewProj[i]);
+
+      // Store split distance in world units
       this.cascadeSplits[i] = cameraNear + splitDist * clipRange;
       lastSplitDist = splitDist;
     }
 
-    // 9. Pack all data into the uniform buffer, matching the shader struct layout.
+    // --- Pack uniforms (matrices + split depths + sun + params) ---
+    // 4 cascades × (mat4 (16f) + splitDepth (vec4 -> only x used)) = 4 × 20 floats
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; ++i) {
-      // Each cascade struct is 20 floats (16 for matrix, 4 for split depth vec4)
       const offset = i * 20;
       this.shadowUniformsData.set(this.lightViewProj[i], offset);
       this.shadowUniformsData.set(
@@ -346,6 +455,8 @@ export class ShadowSubsystem {
       );
     }
 
+    // Light direction (xyz), color (rgba with intensity in w), params0
+    // params0: [intensity, pcfRadius, mapSize, depthBias]
     const baseOffset = ShadowSubsystem.NUM_CASCADES * 20;
     this.shadowUniformsData.set([dir[0], dir[1], dir[2], 0.0], baseOffset);
     this.shadowUniformsData.set(
@@ -357,13 +468,14 @@ export class ShadowSubsystem {
       baseOffset + 8,
     );
 
-    // Upload the LARGE buffer for the PBR pass
+    // Upload to the large (frame) uniform buffer
     this.device.queue.writeBuffer(
       this.csmFrameUniformBuffer,
       0,
       this.shadowUniformsData,
     );
 
+    // Ensure the shadow pass bind group sees the latest buffer
     this.updateShadowBindGroup();
   }
 

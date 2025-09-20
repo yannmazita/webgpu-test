@@ -216,7 +216,7 @@ export class Renderer {
 
     this.cameraUniformBuffer = this.device.createBuffer({
       label: "CAMERA_UNIFORM_BUFFER",
-      size: 128, // 2 * mat4x4<f32> (viewProjection + view)
+      size: 192, // 3 * mat4x4<f32> (viewProjection + view + inverseViewProjection)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 

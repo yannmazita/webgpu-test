@@ -3,9 +3,8 @@
 
 struct CameraUniforms {
     viewProjectionMatrix: mat4x4<f32>,
-    // only need the view matrix for the skybox
-    // updating the CameraUniforms struct in the renderer later.
     viewMatrix: mat4x4<f32>,
+    inverseViewProjectionMatrix: mat4x4<f32>,
 }
 
 struct SceneUniforms {
@@ -30,39 +29,21 @@ struct VertexOutput {
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
 
-    // Fullscreen triangle trick.
+    // Fullscreen triangle trick
     let x = f32(in_vertex_index / 2u);
     let y = f32(in_vertex_index & 1u);
     let screen_pos = vec2<f32>(x * 4.0 - 1.0, y * 4.0 - 1.0);
-    out.clip_position = vec4<f32>(screen_pos, 1.0, 1.0);
+    let clip = vec4<f32>(screen_pos, 1.0, 1.0);
 
-    // --- View direction calculation ---
-    // We're calculating the world-space view direction
-    // using only the camera's rotation
+    // Unproject to world space using inverseViewProjection
+    let world_h = camera.inverseViewProjectionMatrix * clip;
+    let world = world_h.xyz / world_h.w;
 
-    // 1. Calculate the inverse projection matrix: inv(P) = V * inv(VP)
-    let inv_view_proj = mat4_inverse(camera.viewProjectionMatrix);
-    let inv_proj = camera.viewMatrix * inv_view_proj;
+    // Build view direction in world-space using camera position from SceneUniforms
+    out.view_dir = world - scene.cameraPos.xyz;
 
-    // 2. Un-project the clip-space position to a point in view-space.
-    let view_pos_h = inv_proj * out.clip_position;
-    
-    // 3. The direction in view-space is from the origin to this point.
-    //    We don't normalize here; we do it per-fragment for better quality.
-    let view_dir = view_pos_h.xyz / view_pos_h.w;
-
-    // 4. Get the camera's world rotation matrix (the upper 3x3 of the view matrix,
-    //    transposed, since inverse(rotation) = transpose(rotation)).
-    let inv_view_mat3 = mat3x3<f32>(
-        camera.viewMatrix[0].xyz,
-        camera.viewMatrix[1].xyz,
-        camera.viewMatrix[2].xyz
-    );
-    let world_rot_mat = transpose(inv_view_mat3);
-    
-    // 5. Transform the view-space direction into world-space.
-    out.view_dir = world_rot_mat * view_dir;
-
+    // Standard position for fullscreen triangle
+    out.clip_position = clip;
     return out;
 }
 
