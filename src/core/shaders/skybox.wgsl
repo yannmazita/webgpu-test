@@ -30,34 +30,49 @@ struct VertexOutput {
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
 
-    // A fullscreen triangle trick. No vertex buffer needed.
+    // Fullscreen triangle trick.
     let x = f32(in_vertex_index / 2u);
     let y = f32(in_vertex_index & 1u);
     let screen_pos = vec2<f32>(x * 4.0 - 1.0, y * 4.0 - 1.0);
-
-    // Use a 1.0 z-value to ensure the skybox is always at the far plane.
     out.clip_position = vec4<f32>(screen_pos, 1.0, 1.0);
 
-    // Using the inverse view matrix to transform the clip-space position 
-    // back into a direction (simple way to unproject and get the world-space 
-    // view direction for a skybox)
-    
-    // The camera's world position is the 4th column of the inverse view matrix.
-    let inv_view = mat4_inverse(camera.viewMatrix);
-    let camera_pos = inv_view[3].xyz;
+    // --- View direction calculation ---
+    // We're calculating the world-space view direction
+    // using only the camera's rotation
 
+    // 1. Calculate the inverse projection matrix: inv(P) = V * inv(VP)
     let inv_view_proj = mat4_inverse(camera.viewProjectionMatrix);
-    let world_pos = inv_view_proj * out.clip_position;
+    let inv_proj = camera.viewMatrix * inv_view_proj;
 
-    out.view_dir = normalize(world_pos.xyz / world_pos.w - camera_pos);
+    // 2. Un-project the clip-space position to a point in view-space.
+    let view_pos_h = inv_proj * out.clip_position;
+    
+    // 3. The direction in view-space is from the origin to this point.
+    //    We don't normalize here; we do it per-fragment for better quality.
+    let view_dir = view_pos_h.xyz / view_pos_h.w;
+
+    // 4. Get the camera's world rotation matrix (the upper 3x3 of the view matrix,
+    //    transposed, since inverse(rotation) = transpose(rotation)).
+    let inv_view_mat3 = mat3x3<f32>(
+        camera.viewMatrix[0].xyz,
+        camera.viewMatrix[1].xyz,
+        camera.viewMatrix[2].xyz
+    );
+    let world_rot_mat = transpose(inv_view_mat3);
+    
+    // 5. Transform the view-space direction into world-space.
+    out.view_dir = world_rot_mat * view_dir;
 
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample the cubemap with the view direction.
-    var color = textureSample(skyboxTexture, skyboxSampler, in.view_dir);
+    // Normalize the interpolated view direction per-fragment to fix distortion.
+    let view_dir = normalize(in.view_dir);
+    
+    // Sample the cubemap with the corrected view direction.
+    var color = textureSample(skyboxTexture, skyboxSampler, view_dir);
     
     // Conditionally apply tone mapping based on scene.miscParams.y
     var final_color = color.rgb;
