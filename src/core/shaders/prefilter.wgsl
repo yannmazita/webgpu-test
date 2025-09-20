@@ -51,7 +51,7 @@ fn main(
     var prefiltered_color = vec3<f32>(0.0);
     var total_weight = 0.0;
 
-    let sample_count = 1024u;
+    let sample_count = 8192u;
     for (var i: u32 = 0u; i < sample_count; i = i + 1u) {
         let xi = hammersley(i, sample_count);
         let H = importance_sample_ggx(xi, N, params.roughness);

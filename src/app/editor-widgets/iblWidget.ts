@@ -37,7 +37,7 @@ export function render(
     }
 
     // Cubemap size (powers of two)
-    const sizes = [128, 256, 512, 1024];
+    const sizes = [128, 256, 512, 1024, 2048, 4096, 8192];
     const sizeLabel = `${uiState.iblSizeUI}`;
     if (ImGui.BeginCombo("Cubemap Size", sizeLabel)) {
       for (const s of sizes) {

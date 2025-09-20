@@ -52,7 +52,7 @@ const uiState = {
   shadowOrthoExtentUI: 20.0,
   toneMappingEnabledUI: true,
   iblSelectedIndexUI: 0,
-  iblSizeUI: 1024,
+  iblSizeUI: 2048,
 };
 
 let engineReady = false;
