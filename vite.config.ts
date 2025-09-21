@@ -28,10 +28,20 @@ export default defineConfig({
     },
   },
 
-  // jsimgui and mikktspace load their own wasm files and we don't want
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          physics: ["@dimforge/rapier3d"], // Separate chunk for physics
+        },
+      },
+    },
+  },
+
+  // these libraries load their own wasm files and we don't want
   // Vite to try and process them.
   optimizeDeps: {
-    exclude: ["@mori2003/jsimgui", "mikktspace"],
+    exclude: ["@mori2003/jsimgui", "mikktspace", "@dimforge/rapier3d"],
   },
   server: {
     // These headers are required for SharedArrayBuffer, which is used by
