@@ -1,7 +1,6 @@
 // src/app/physicsWorker.ts
 /// <reference lib="webworker" />
 
-import * as RAPIER from "@dimforge/rapier3d-simd";
 import {
   PhysicsInitMsg,
   PhysicsStepMsg,
@@ -32,7 +31,16 @@ import {
   COMMANDS_SLOT_SIZE,
   STATES_SLOT_COUNT,
   STATES_SLOT_SIZE,
+  STATES_READ_GEN_OFFSET,
 } from "@/core/sharedPhysicsLayout";
+
+// Type imports from Rapier (guide: maintain type safety)
+type RAPIER = typeof import("@dimforge/rapier3d");
+type World = import("@dimforge/rapier3d").World;
+type RigidBodyDesc = import("@dimforge/rapier3d").RigidBodyDesc;
+type RigidBody = import("@dimforge/rapier3d").RigidBody;
+type ColliderDesc = import("@dimforge/rapier3d").ColliderDesc;
+type IntegrationParameters = import("@dimforge/rapier3d").IntegrationParameters;
 
 /**
  * Physics worker: Initializes Rapier, processes commands from ring buffer,
@@ -43,6 +51,22 @@ import {
  *
  * Fixed timestep: 1/60s with accumulator for stability.
  */
+
+let RAPIER: RAPIER | null = null;
+let world: World | null = null;
+let commandsView: Int32Array | null = null;
+let statesI32: Int32Array | null = null;
+let statesF32: Float32Array | null = null;
+let stepInterval: number | null = null; // setInterval in workers returns number
+const entityToBody = new Map<number, RigidBody>(); // PHYS_ID → RigidBody
+const bodyToEntity = new WeakMap<RigidBody, number>(); // RigidBody → PHYS_ID
+let nextPhysId = 0; // Auto-increment PHYS_ID (mirrors ECS later)
+let accumulator = 0;
+const FIXED_DT = 1 / 60; // 16.666ms
+const GRAVITY = { x: 0.0, y: -9.81, z: 0.0 };
+let isInitialized = false;
+
+let rapierPromise: Promise<void> | null = null;
 
 /**
  * Validates a SAB header (magic/version).
@@ -88,28 +112,51 @@ function statesNextWriteSlot(view: Int32Array): number {
   return idx;
 }
 
-// --- Main Worker Logic ---
-
-let rapier: typeof RAPIER;
-let world: RAPIER.World | null = null;
-let commandsView: Int32Array | null = null;
-let statesI32: Int32Array | null = null;
-let statesF32: Float32Array | null = null;
-let stepInterval: NodeJS.Timeout | null = null;
-const entityToBody = new Map<number, number>(); // PHYS_ID (u32) → Rapier body handle
-let nextPhysId = 0; // Auto-increment PHYS_ID (mirrors ECS later)
-let accumulator = 0;
-const FIXED_DT = 1 / 60; // 16.666ms
-const GRAVITY = { x: 0.0, y: -9.81, z: 0.0 };
-
 /**
  * Initializes Rapier WASM and world.
+ * Logs load time and detailed errors. Sets fixed dt via integrationParameters.
  */
 async function initRapier(): Promise<void> {
-  await RAPIER.init();
-  rapier = RAPIER;
-  world = new rapier.World(GRAVITY);
-  console.log("[PhysicsWorker] Rapier initialized. World gravity:", GRAVITY);
+  if (rapierPromise) return rapierPromise;
+
+  console.log("Starting Rapier initialization..."); // Guide debugging
+
+  rapierPromise = new Promise(async (resolve, reject) => {
+    try {
+      const start = performance.now(); // Guide perf logging
+
+      // Dynamic import (guide: handles WASM automatically; no separate init() in recent versions)
+      RAPIER = await import("@dimforge/rapier3d");
+      const loadTime = performance.now() - start;
+
+      console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`); // Guide logging
+
+      // Create physics world (no module.init() needed)
+      world = new RAPIER.World(GRAVITY);
+      console.log("Physics world created successfully"); // Guide success log
+
+      // Set fixed timestep (docs: via integrationParameters; step() uses this without args)
+      const params: IntegrationParameters = world.integrationParameters;
+      params.dt = FIXED_DT;
+      console.log(
+        "[PhysicsWorker] Rapier initialized successfully. World gravity:",
+        GRAVITY,
+        `Fixed dt: ${FIXED_DT}`,
+      );
+
+      isInitialized = true;
+      resolve();
+    } catch (error) {
+      console.error("Physics initialization failed:", error); // Guide error
+      console.error("Error stack:", error.stack); // Guide detailed stack
+      RAPIER = null;
+      world = null;
+      isInitialized = false;
+      resolve(); // Continue without physics (worker alive for messages)
+    }
+  });
+
+  return rapierPromise;
 }
 
 /**
@@ -130,32 +177,40 @@ function processCommands(): void {
 
     if (type === CMD_CREATE_BODY && physId === 0) {
       // Dummy create (no entity yet)
-      // Dummy: Create ground (static box) if not exists
       if (entityToBody.size === 0) {
-        const groundHandle = world.createCollider(
-          rapier.ColliderDesc.cuboid(5.0, 0.1, 5.0).setTranslation(0, -0.1, 0),
+        const groundBodyDesc: RigidBodyDesc =
+          RAPIER!.RigidBodyDesc.fixed().setTranslation(0, -0.1, 0);
+        const groundBody: RigidBody = world!.createRigidBody(groundBodyDesc);
+        const groundColliderDesc: ColliderDesc = RAPIER!.ColliderDesc.cuboid(
+          5.0,
+          0.1,
+          5.0,
         );
-        entityToBody.set(0, groundHandle); // PHYS_ID 0 = ground
-        nextPhysId = 1;
-        console.log("[PhysicsWorker] Created dummy ground.");
+        world!.createCollider(groundColliderDesc, groundBody);
+
+        const groundId = nextPhysId++;
+        entityToBody.set(groundId, groundBody);
+        bodyToEntity.set(groundBody, groundId);
+        console.log(`[PhysicsWorker] Created dummy ground (ID=${groundId}).`);
       }
 
-      // Create falling sphere (dynamic)
-      const sphereHandle = world.createRigidBody(
-        rapier.RigidBodyDesc.dynamic().setTranslation(0, 5, 0),
-      );
-      world.createCollider(
-        rapier.ColliderDesc.ball(0.5).setTranslation(0, 5, 0),
-        sphereHandle,
-      );
+      const sphereBodyDesc: RigidBodyDesc =
+        RAPIER!.RigidBodyDesc.dynamic().setTranslation(0, 5, 0);
+      const sphereBody: RigidBody = world!.createRigidBody(sphereBodyDesc);
+      const sphereColliderDesc: ColliderDesc = RAPIER!.ColliderDesc.ball(0.5);
+      world!.createCollider(sphereColliderDesc, sphereBody);
+
       const sphereId = nextPhysId++;
-      entityToBody.set(sphereId, sphereHandle.handle);
+      entityToBody.set(sphereId, sphereBody);
+      bodyToEntity.set(sphereBody, sphereId);
       console.log(`[PhysicsWorker] Created dummy sphere (ID=${sphereId}).`);
-    } else if (type === CMD_DESTROY_BODY) {
+    } else if (type === 2) {
+      // CMD_DESTROY_BODY
       const body = entityToBody.get(physId);
-      if (body !== undefined && world) {
+      if (body && world) {
         world.removeRigidBody(body, true);
         entityToBody.delete(physId);
+        // WeakMap auto-cleans; no delete needed for bodyToEntity
         console.log(`[PhysicsWorker] Destroyed body ID=${physId}.`);
       }
     }
@@ -168,7 +223,11 @@ function processCommands(): void {
 
   // Bump gen on changes
   if (tail !== head) {
-    Atomics.add(commandsView, COMMANDS_GEN_OFFSET >> 2, 1);
+    try {
+      Atomics.add(commandsView, COMMANDS_GEN_OFFSET >> 2, 1);
+    } catch (e) {
+      console.warn("[PhysicsWorker] Failed to bump commands GEN:", e);
+    }
   }
 }
 
@@ -182,15 +241,18 @@ function stepWorld(dt: number): void {
   accumulator += dt;
   while (accumulator >= FIXED_DT) {
     processCommands(); // Drain before step
-    world.step(FIXED_DT);
+    world.step(); // No args: uses integrationParameters.dt (docs)
     accumulator -= FIXED_DT;
   }
 
   // Log dummy sphere position every 60 steps (1s)
-  if (entityToBody.size > 0 && (world.timestep / FIXED_DT) % 60 === 0) {
-    const sphereBody = world.bodies.get(entityToBody.get(1)!); // ID=1
-    if (sphereBody) {
-      const pos = sphereBody.translation();
+  if (
+    entityToBody.size > 1 &&
+    Math.floor(world.timestep / FIXED_DT) % 60 === 0
+  ) {
+    const sphere = entityToBody.get(1); // demo sphere has ID=1
+    if (sphere) {
+      const pos = sphere.translation();
       console.log(
         `[PhysicsWorker] Sphere at [${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}]`,
       );
@@ -209,28 +271,33 @@ function publishSnapshot(): void {
   const slotIdx = statesNextWriteSlot(statesI32);
   const slotBaseI32 =
     (STATES_SLOT_OFFSET >> 2) + slotIdx * (STATES_SLOT_SIZE >> 2);
-  const slotBaseF32 = STATES_SLOT_OFFSET + slotIdx * STATES_SLOT_SIZE; // Byte offset for f32
+  const slotBaseF32Byte = STATES_SLOT_OFFSET + slotIdx * STATES_SLOT_SIZE;
 
-  // Clear slot: count=0
-  Atomics.store(statesI32, slotBaseI32, 0);
+  // Clear slot: count=0 (at offset 0)
+  try {
+    Atomics.store(statesI32, slotBaseI32, 0);
+  } catch (e) {
+    console.warn("[PhysicsWorker] Failed to clear snapshot slot:", e);
+    return;
+  }
 
   let count = 0;
-  world.bodies.forEach((body) => {
+  world.bodies.forEach((body: RigidBody) => {
     if (count >= STATES_MAX_BODIES) {
       console.warn("[PhysicsWorker] Snapshot overflow; truncating.");
       return;
     }
 
-    const physId =
-      [...entityToBody.entries()].find(([, h]) => h === body.handle)?.[0] ?? 0;
+    const physId = bodyToEntity.get(body) ?? 0;
     const pos = body.translation();
     const rot = body.rotation();
 
-    // Write to slot: ID (i32 at offset 4*count + 4) + pos/rot (f32[7] after)
-    const bodyOffsetI32 = slotBaseI32 + 1 + count * 8; // 8 u32 equiv per body (id + 7 f32)
+    // ID is at: slotBaseI32 + 1 + count * 8 (since 32 bytes/body = 8 Int32s)
+    const bodyOffsetI32 = slotBaseI32 + 1 + count * 8;
     Atomics.store(statesI32, bodyOffsetI32, physId);
 
-    const bodyOffsetF32 = (slotBaseF32 + 4 + count * 32) >> 2; // After count/ID, 32B/body
+    // f32 payload starts after count(4B)+id(4B): byte offset = slotBaseF32Byte + 8 + count * 32
+    const bodyOffsetF32 = (slotBaseF32Byte + 8 + count * 32) >> 2;
     statesF32.set(
       [pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w],
       bodyOffsetF32,
@@ -241,17 +308,23 @@ function publishSnapshot(): void {
 
   // Update count and gen
   Atomics.store(statesI32, slotBaseI32, count);
-  Atomics.add(statesI32, STATES_GEN_OFFSET >> 2, 1);
-  Atomics.store(
-    statesI32,
-    STATES_READ_GEN_OFFSET >> 2,
-    Atomics.load(statesI32, STATES_GEN_OFFSET >> 2),
-  );
+  try {
+    Atomics.add(statesI32, STATES_GEN_OFFSET >> 2, 1);
+    Atomics.store(
+      statesI32,
+      STATES_READ_GEN_OFFSET >> 2,
+      Atomics.load(statesI32, STATES_GEN_OFFSET >> 2),
+    );
+  } catch (e) {
+    console.warn("[PhysicsWorker] Failed to update snapshot GEN:", e);
+  }
 
   if (count > 0) {
+    /*
     console.log(
       `[PhysicsWorker] Published snapshot to slot ${slotIdx}: ${count} bodies`,
     );
+    */
   }
 }
 
@@ -279,11 +352,16 @@ function stopPhysicsLoop(): void {
     stepInterval = null;
   }
   if (world) {
+    entityToBody.forEach((body) => {
+      world!.removeRigidBody(body);
+    });
     world.free();
     world = null;
   }
   entityToBody.clear();
   nextPhysId = 0;
+  accumulator = 0;
+  isInitialized = false;
   console.log("[PhysicsWorker] Loop stopped and resources freed.");
 }
 
@@ -295,8 +373,11 @@ self.onmessage = async (
 
   if (msg.type === "INIT") {
     try {
-      // Init Rapier
+      // Init Rapier (lazy async)
       await initRapier();
+      if (!isInitialized || !RAPIER || !world) {
+        throw new Error("Rapier init failed; no world available.");
+      }
 
       // Validate/setup commands SAB
       if (msg.commandsBuffer.byteLength !== COMMANDS_BUFFER_SIZE) {
@@ -362,16 +443,16 @@ self.onmessage = async (
     return;
   }
 
-  if (!world) {
+  if (!world || !isInitialized) {
     console.warn("[PhysicsWorker] Ignoring message: World not initialized.");
     return;
   }
 
   switch (msg.type) {
-    case "STEP":
+    case "STEP": {
       const steps = msg.steps ?? 1;
       for (let i = 0; i < steps; i++) {
-        const dt = 1 / 60; // Fixed
+        const dt = FIXED_DT;
         stepWorld(dt);
         publishSnapshot();
       }
@@ -381,6 +462,7 @@ self.onmessage = async (
         log: "Dummy steps complete.",
       } as PhysicsStepDoneMsg);
       break;
+    }
 
     case "DESTROY":
       stopPhysicsLoop();
