@@ -27,6 +27,7 @@
     "vite-plugin-wasm": "^3.5.0"
   },
   "dependencies": {
+    "@dimforge/rapier3d-simd": "^0.19.0",
     "@tweakpane/core": "^2.0.5",
     "mikktspace": "^1.1.1",
     "tweakpane": "^4.0.5",
