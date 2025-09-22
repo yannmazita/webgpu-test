@@ -10,22 +10,6 @@ import {
   initializeEngineStateHeader,
 } from "@/core/engineState";
 import { init as initUIElements, initUI, tickUI } from "./ui";
-import {
-  COMMANDS_BUFFER_SIZE,
-  STATES_BUFFER_SIZE,
-  CMD_CREATE_BODY,
-} from "@/core/sharedPhysicsLayout";
-import {
-  createPhysicsContext,
-  initializePhysicsHeaders,
-  tryEnqueueCommand,
-} from "@/core/physicsState";
-
-import type {
-  PhysicsInitMsg,
-  PhysicsStepMsg,
-  PhysicsDestroyMsg,
-} from "@/core/types/physics";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
@@ -76,52 +60,6 @@ worker.postMessage(
   [offscreen],
 );
 
-// --- Physics Worker Setup ---
-const commandsBuffer = new SharedArrayBuffer(COMMANDS_BUFFER_SIZE);
-const statesBuffer = new SharedArrayBuffer(STATES_BUFFER_SIZE);
-
-// Initialize physics SAB headers (writer-side init for consistency)
-const physCtx = createPhysicsContext(commandsBuffer, statesBuffer);
-initializePhysicsHeaders(physCtx);
-
-// Enqueue a single dummy CREATE_BODY command for the physics worker to consume
-// This triggers the worker's dummy world (ground + falling sphere)
-tryEnqueueCommand(physCtx, CMD_CREATE_BODY, 0, []);
-
-// Create physics worker
-const physicsWorker = new Worker(
-  new URL("./physicsWorker.ts", import.meta.url),
-  {
-    type: "module",
-  },
-);
-
-let physicsReady = false;
-physicsWorker.addEventListener("message", (ev) => {
-  const msg = ev.data;
-  if (!msg || !msg.type) return;
-
-  if (msg.type === "READY") {
-    physicsReady = true;
-    console.log("[Main] Physics worker ready.");
-    // Test: Send 10 fixed steps after init
-    physicsWorker.postMessage({ type: "STEP", steps: 10 } as PhysicsStepMsg);
-    return;
-  }
-  if (msg.type === "STEP_DONE") {
-    console.log("[Main] Physics test complete:", msg.log);
-    return;
-  }
-  if (msg.type === "ERROR") {
-    console.error("[Main] Physics worker error:", msg.error);
-    return;
-  }
-  if (msg.type === "DESTROYED") {
-    console.log("[Main] Physics worker destroyed.");
-    return;
-  }
-});
-
 // Frame-driven resize polling
 let lastCssW = 0;
 let lastCssH = 0;
@@ -150,21 +88,13 @@ const sendResize = () => {
   }
 };
 
-// Listen for worker acks and hook physics init to render READY
+// Listen for worker acks
 let canSendFrame = false;
 worker.addEventListener("message", (ev) => {
   const msg = ev.data;
   if (!msg || !msg.type) return;
 
   if (msg.type === "READY") {
-    // Initialize physics after render worker is ready
-    const initMsg: PhysicsInitMsg = {
-      type: "INIT",
-      commandsBuffer,
-      statesBuffer,
-    };
-    // SABs are shared; no transfer list
-    physicsWorker.postMessage(initMsg);
     canSendFrame = true;
     return;
   }
@@ -195,9 +125,3 @@ const tick = (now: number) => {
 
 await initUI();
 requestAnimationFrame(tick);
-
-// Cleanup on unload
-window.addEventListener("beforeunload", () => {
-  physicsWorker.postMessage({ type: "DESTROY" } as PhysicsDestroyMsg);
-  physicsWorker.terminate();
-});

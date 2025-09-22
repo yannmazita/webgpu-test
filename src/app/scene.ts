@@ -14,6 +14,10 @@ import {
   ShadowSettingsComponent,
 } from "@/core/ecs/components/sunComponent";
 import { FogComponent } from "@/core/ecs/components/fogComponent";
+import {
+  PhysicsBodyComponent,
+  PhysicsColliderComponent,
+} from "@/core/ecs/components/physicsComponents";
 
 export async function createDefaultScene(
   world: World,
@@ -72,25 +76,22 @@ export async function createDefaultScene(
   fog.inscatteringIntensity = 4.0;
   world.addResource(fog);
 
-  // Load the demo model
+  // Demo model: Force sphere for physics test (fallback; disable GLTF for simplicity)
   let demoModelEntity = -1;
   try {
+    // Comment out GLTF for sphere demo test
+    /*
     console.log("[Scene] Awaiting GLTF scene load...");
     demoModelEntity = await resourceManager.loadSceneFromGLTF(
       world,
       "/assets/models/gltf/khronos-samples/AnimatedColorsCube.glb",
     );
     console.log("[Scene] GLTF scene loaded.");
+    */
 
-    const demoModelTransform = world.getComponent(
-      demoModelEntity,
-      TransformComponent,
-    )!;
-    demoModelTransform.setPosition(0, 0, 0);
-    demoModelTransform.setScale(1, 1, 1);
-  } catch (error) {
-    console.error("Failed to load model:", error);
-    demoModelEntity = world.createEntity();
+    // Force sphere fallback for demo (visual + physics test)
+    console.log("[Scene] Creating sphere demo model...");
+    demoModelEntity = world.createEntity("demo_sphere");
     const fallbackOptions = {
       albedo: [0.8, 0.6, 0.4, 1] as [number, number, number, number],
       metallic: 0.1,
@@ -104,17 +105,30 @@ export async function createDefaultScene(
     );
 
     const sphereMesh = await resourceManager.createMesh(
-      "fallback_sphere",
-      createIcosphereMeshData(1.0, 3),
+      "demo_sphere",
+      createIcosphereMeshData(1.0, 3), // radius=1, sub=3 for smooth sphere
     );
     const demoModelTransform = new TransformComponent();
-    demoModelTransform.setPosition(0, 0, 0);
+    demoModelTransform.setPosition(0, 5, 0); // Start elevated for fall test
     demoModelTransform.setScale(1, 1, 1);
     world.addComponent(demoModelEntity, demoModelTransform);
     world.addComponent(
       demoModelEntity,
       new MeshRendererComponent(sphereMesh, fallbackInstance),
     );
+    console.log("[Scene] Sphere demo model created (r=1 at y=5).");
+  } catch (error) {
+    console.error("Failed to create demo sphere:", error);
+    throw error; // Ensure scene fails if demo can't load
+  }
+
+  // Physics: Make the demo model a dynamic sphere (r=1). Acts as our falling test body.
+  {
+    const body = new PhysicsBodyComponent(true); // dynamic
+    const collider = new PhysicsColliderComponent(0, [1, 0, 0]); // sphere radius=1
+    world.addComponent(demoModelEntity, body);
+    world.addComponent(demoModelEntity, collider);
+    console.log("[Scene] Added dynamic physics to demo sphere (r=1 at y=5).");
   }
 
   // Lighting setup
@@ -194,6 +208,40 @@ export async function createDefaultScene(
     rimLightEntity,
     new MeshRendererComponent(lightMeshWhite, lightMaterialWhite),
   );
+
+  // Static ground: visual + physics (large box collider/platform)
+  {
+    const groundEntity = world.createEntity("ground");
+    const groundTransform = new TransformComponent();
+    // Visual scale: large flat box centered at y=-3 (so surface at ~y=-2.5)
+    groundTransform.setPosition(0, -3, 0);
+    groundTransform.setScale(100, 1, 100); // big flat
+    world.addComponent(groundEntity, groundTransform);
+
+    // Physics: static body with box collider matching half-extents ~ scale/2
+    const groundBody = new PhysicsBodyComponent(false); // static
+    const hx = 50,
+      hy = 0.5,
+      hz = 50; // half extents
+    const groundCollider = new PhysicsColliderComponent(1, [hx, hy, hz]); // box
+    world.addComponent(groundEntity, groundBody);
+    world.addComponent(groundEntity, groundCollider);
+
+    // Visual mesh/material (unlit gray for ground)
+    const groundMat = await resourceManager.createUnlitGroundMaterial({
+      color: [0.35, 0.35, 0.38, 1],
+    });
+    const groundMesh = await resourceManager.createMesh(
+      "ground_cube_unit",
+      createIcosphereMeshData(1, 1), // Use icosphere for unit, but scale via transform; or cube if preferred
+    );
+    world.addComponent(
+      groundEntity,
+      new MeshRendererComponent(groundMesh, groundMat),
+    );
+
+    console.log("[Scene] Added static ground (box collider) at y=-3.");
+  }
 
   // Sun and shadows
   world.addResource(new SceneSunComponent());

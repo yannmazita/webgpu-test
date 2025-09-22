@@ -76,7 +76,14 @@ import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import {
   COMMANDS_BUFFER_SIZE,
   STATES_BUFFER_SIZE,
+  STATES_GEN_OFFSET,
+  STATES_MAX_BODIES,
+  STATES_SLOT_COUNT,
+  STATES_SLOT_OFFSET,
+  STATES_SLOT_SIZE,
+  STATES_WRITE_INDEX_OFFSET,
 } from "@/core/sharedPhysicsLayout";
+import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 
 /**
  * Main render worker script.
@@ -119,16 +126,71 @@ const previousActionState: ActionStateMap = new Map();
 let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
 
-// Physics globals (Stage 2)
+// Physics globals
 let physicsCtx: PhysicsContext | null = null;
 let physicsCommandSystem: PhysicsCommandSystem | null = null;
 let physicsWorker: Worker | null = null;
+let lastSnapshotGen = 0; // track last applied physics snapshot generation
 
 // State for dt and camera orbit
 let lastFrameTime = 0;
 let animationStartTime = 0;
 const orbitRadius = 15.0;
 const orbitHeight = 2.0;
+
+function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
+  // Check if new snapshot published
+  const gen = Atomics.load(physCtx.statesI32, STATES_GEN_OFFSET >> 2);
+  if (gen === lastSnapshotGen) return;
+  lastSnapshotGen = gen;
+
+  // Read which slot to consume (triple buffer)
+  const writeIdx = Atomics.load(
+    physCtx.statesI32,
+    STATES_WRITE_INDEX_OFFSET >> 2,
+  );
+  if (writeIdx < 0 || writeIdx >= STATES_SLOT_COUNT) return;
+
+  const slotBaseI32 =
+    (STATES_SLOT_OFFSET >> 2) + writeIdx * (STATES_SLOT_SIZE >> 2);
+  const count = Atomics.load(physCtx.statesI32, slotBaseI32);
+  if (count <= 0) return;
+
+  // Build physId → entity map from current world
+  const physEntities = world.query([PhysicsBodyComponent]);
+  const physToEntity = new Map<number, number>();
+  for (const e of physEntities) {
+    const bc = world.getComponent(e, PhysicsBodyComponent)!;
+    if (bc.physId) physToEntity.set(bc.physId, e);
+  }
+
+  let updated = 0;
+  for (let i = 0; i < count && i < STATES_MAX_BODIES; i++) {
+    // Per-body record layout: [u32 physId][f32 pos3][f32 rot4] stride 32 bytes
+    const idOffsetI32 = slotBaseI32 + 1 + i * 8; // 8 i32 per body
+    const physId = Atomics.load(physCtx.statesI32, idOffsetI32);
+    const entity = physToEntity.get(physId);
+    if (!entity) continue;
+
+    const bodyPayloadF32 =
+      (STATES_SLOT_OFFSET + writeIdx * STATES_SLOT_SIZE + 8 + i * 32) >> 2;
+    const px = physCtx.statesF32[bodyPayloadF32 + 0];
+    const py = physCtx.statesF32[bodyPayloadF32 + 1];
+    const pz = physCtx.statesF32[bodyPayloadF32 + 2];
+    const rx = physCtx.statesF32[bodyPayloadF32 + 3];
+    const ry = physCtx.statesF32[bodyPayloadF32 + 4];
+    const rz = physCtx.statesF32[bodyPayloadF32 + 5];
+    const rw = physCtx.statesF32[bodyPayloadF32 + 6];
+
+    const t = world.getComponent(entity, TransformComponent);
+    if (t) {
+      t.setPosition(px, py, pz);
+      t.setRotation([rx, ry, rz, rw] as unknown as Float32Array);
+      t.isDirty = true;
+      updated++;
+    }
+  }
+}
 
 /**
  * Initializes the render worker.
@@ -381,14 +443,18 @@ function frame(now: number): void {
   }
   */
 
-  // Physics commands (early: queue async creates/destroys before systems, Stage 2)
+  // Physics commands
   if (physicsCommandSystem) {
     physicsCommandSystem.update(world);
   }
 
-  // Drive animations (node-TRS) before recomputing world transforms
-  animationSystem(world, dt);
+  // Physics snapshot -> ECS transforms
+  if (physicsCtx) {
+    applyPhysicsSnapshot(world, physicsCtx);
+  }
 
+  // Drive animations (then recompute transforms)
+  animationSystem(world, dt);
   transformSystem(world);
   cameraSystem(world);
 

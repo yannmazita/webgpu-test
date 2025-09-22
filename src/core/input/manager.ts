@@ -1,3 +1,4 @@
+// src/core/input/manager.ts
 import {
   SHARED_BUFFER_SIZE,
   INPUT_MAGIC,
