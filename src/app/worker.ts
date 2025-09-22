@@ -58,6 +58,48 @@ import { mat4, quat, vec3 } from "wgpu-matrix";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 
+// Physics imports (Stage 2)
+import {
+  PhysicsContext,
+  createPhysicsContext,
+  initializePhysicsHeaders,
+} from "@/core/physicsState";
+import {
+  PhysicsInitMsg,
+  PhysicsMessage,
+  PhysicsReadyMsg,
+  PhysicsErrorMsg,
+  PhysicsStepDoneMsg,
+  PhysicsDestroyedMsg,
+} from "@/core/types/physics";
+import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
+import {
+  COMMANDS_BUFFER_SIZE,
+  STATES_BUFFER_SIZE,
+} from "@/core/sharedPhysicsLayout";
+
+/**
+ * Main render worker script.
+ *
+ * This worker handles the core rendering loop, ECS systems, input processing,
+ * and shared state synchronization with the main thread. It receives messages
+ * from the main thread (e.g., INIT, FRAME, RESIZE) and responds with readiness
+ * signals (READY, FRAME_DONE). All heavy computation (rendering, physics commands)
+ * occurs here, isolated from the main thread for smooth 60FPS.
+ *
+ * Key flows:
+ * - INIT: Set up renderer, ECS world, scene, input/metrics, physics (Stage 2).
+ * - FRAME: Process input, run systems (physics commands, animation, transform,
+ *   camera, render), publish metrics.
+ * - RESIZE: Update canvas/viewport and camera aspect.
+ * - Shared state: SABs for input (real-time), metrics (UI), engine (editor tweaks),
+ *   physics (commands/states).
+ *
+ * Assumptions:
+ * - OffscreenCanvas transferred via postMessage.
+ * - COOP/COEP enabled for SABs.
+ * - No direct DOM access (all UI via main thread).
+ */
 let engineStateCtx: EngineStateCtx | null = null;
 
 let renderer: Renderer | null = null;
@@ -77,18 +119,37 @@ const previousActionState: ActionStateMap = new Map();
 let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
 
+// Physics globals (Stage 2)
+let physicsCtx: PhysicsContext | null = null;
+let physicsCommandSystem: PhysicsCommandSystem | null = null;
+let physicsWorker: Worker | null = null;
+
 // State for dt and camera orbit
 let lastFrameTime = 0;
 let animationStartTime = 0;
 const orbitRadius = 15.0;
 const orbitHeight = 2.0;
 
+/**
+ * Initializes the render worker.
+ *
+ * Sets up the GPU renderer, shared contexts (input, metrics, engine state),
+ * input action mapping, camera controller, resource manager, ECS world, and scene.
+ * Creates the physics worker and posts INIT to it (Stage 2). Publishes an initial
+ * engine state snapshot for the main thread UI. Posts READY to signal completion.
+ *
+ * @param offscreen OffscreenCanvas for WebGPU rendering (transferred from main).
+ * @param sharedInputBuffer SharedArrayBuffer for input state (keyboard/mouse).
+ * @param sharedMetricsBuffer SharedArrayBuffer for performance metrics.
+ * @param sharedEngineStateBuffer SharedArrayBuffer for editor state sync.
+ * @returns Promise that resolves when initialization completes.
+ */
 async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
-) {
+): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
   console.log("[Worker] Awaiting renderer init...");
@@ -171,6 +232,46 @@ async function initWorker(
     throw error;
   }
 
+  // --- Physics Setup (Stage 2) ---
+  console.log("[Worker] Setting up physics...");
+  const commandsBuffer = new SharedArrayBuffer(COMMANDS_BUFFER_SIZE);
+  const statesBuffer = new SharedArrayBuffer(STATES_BUFFER_SIZE);
+  physicsCtx = createPhysicsContext(commandsBuffer, statesBuffer);
+  initializePhysicsHeaders(physicsCtx);
+
+  // Create physics worker
+  physicsWorker = new Worker(new URL("./physicsWorker.ts", import.meta.url), {
+    type: "module",
+  });
+
+  // Listen for physics worker messages
+  physicsWorker.addEventListener(
+    "message",
+    (ev: MessageEvent<PhysicsMessage>) => {
+      const msg = ev.data;
+      if (msg.type === "READY") {
+        console.log("[Worker] Physics worker ready.");
+      } else if (msg.type === "ERROR") {
+        console.error("[Worker] Physics worker error:", msg.error);
+      } else if (msg.type === "STEP_DONE") {
+        console.log("[Worker] Physics step complete:", msg.log);
+      } else if (msg.type === "DESTROYED") {
+        console.log("[Worker] Physics worker destroyed.");
+      }
+    },
+  );
+
+  // Post INIT to physics worker
+  const initMsg: PhysicsInitMsg = {
+    type: "INIT",
+    commandsBuffer,
+    statesBuffer,
+  };
+  physicsWorker.postMessage(initMsg);
+
+  // Create command system
+  physicsCommandSystem = new PhysicsCommandSystem(physicsCtx!);
+
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
     if ((engineStateCtx.i32.length | 0) >= 4) {
@@ -186,7 +287,17 @@ async function initWorker(
   (self as any).postMessage({ type: "READY" });
 }
 
-function frame(now: number) {
+/**
+ * Main frame update loop.
+ *
+ * Processes input, applies editor state, updates camera (free/orbit mode),
+ * runs ECS systems in order (physics commands, animation, transform, camera, render),
+ * publishes metrics, and signals FRAME_DONE. Ensures frame-rate independent
+ * movement via delta time clamping.
+ *
+ * @param now Current timestamp (from requestAnimationFrame, in ms).
+ */
+function frame(now: number): void {
   if (
     !renderer ||
     !world ||
@@ -196,7 +307,7 @@ function frame(now: number) {
   )
     return;
 
-  // apply editor state before systems
+  // Apply editor state before systems
   if (engineStateCtx) {
     syncEngineState(world, engineStateCtx);
   }
@@ -270,6 +381,11 @@ function frame(now: number) {
   }
   */
 
+  // Physics commands (early: queue async creates/destroys before systems, Stage 2)
+  if (physicsCommandSystem) {
+    physicsCommandSystem.update(world);
+  }
+
   // Drive animations (node-TRS) before recomputing world transforms
   animationSystem(world, dt);
 
@@ -285,6 +401,20 @@ function frame(now: number) {
   (self as any).postMessage({ type: "FRAME_DONE" });
 }
 
+/**
+ * Message event handler for the worker.
+ *
+ * Dispatches incoming postMessages from the main thread:
+ * - INIT: Full worker setup (renderer, ECS, physics, etc.).
+ * - RESIZE: Update canvas dimensions and camera projection.
+ * - FRAME: Trigger one frame of update/render.
+ * - SET_TONE_MAPPING: Toggle post-processing tone mapping.
+ * - SET_ENVIRONMENT: Load new HDR environment map and update IBL/skybox.
+ *
+ * Physics messages are handled via SABs (no direct dispatch here).
+ *
+ * @param ev MessageEvent containing the payload (typed union).
+ */
 self.onmessage = async (
   ev: MessageEvent<
     InitMsg | ResizeMsg | FrameMsg | ToneMapMsg | SetEnvironmentMsg

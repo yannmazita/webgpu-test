@@ -46,6 +46,12 @@ export interface PhysicsDestroyedMsg {
   type: "DESTROYED";
 }
 
+/** Worker error response (like init failure). */
+export interface PhysicsErrorMsg {
+  type: "ERROR";
+  error: string;
+}
+
 /** Union of all physics messages. */
 export type PhysicsMessage =
   | PhysicsInitMsg
@@ -53,7 +59,8 @@ export type PhysicsMessage =
   | PhysicsDestroyMsg
   | PhysicsReadyMsg
   | PhysicsStepDoneMsg
-  | PhysicsDestroyedMsg;
+  | PhysicsDestroyedMsg
+  | PhysicsErrorMsg;
 
 /**
  * State record for a single body in snapshot (ID + pos + rot).
