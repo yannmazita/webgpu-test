@@ -19,6 +19,7 @@ import {
   METRICS_CLUSTER_AVG_X1000_OFFSET,
   METRICS_CLUSTER_MAX_OFFSET,
   METRICS_CLUSTER_OVERFLOWS_OFFSET,
+  METRICS_PHYSICS_TIME_US_OFFSET,
 } from "./sharedMetricsLayout";
 import { RendererStats } from "./types/renderer";
 
@@ -43,6 +44,7 @@ export interface MetricsSnapshot {
   instOpaque: number;
   instTransp: number;
   cpuUs: number;
+  physicsTimeUs: number;
   clusterAvgX1000?: number;
   clusterMax?: number;
   clusterOverflows?: number;
@@ -83,6 +85,7 @@ export function publishMetrics(
   stats: RendererStats,
   dtSeconds: number,
   frameId: number,
+  physicsTimeUs: number,
 ): void {
   const idx = (byteOffset: number) => byteOffset >> 2;
   const dtUs = Math.max(
@@ -149,6 +152,11 @@ export function publishMetrics(
     idx(METRICS_CLUSTER_OVERFLOWS_OFFSET),
     stats.clusterOverflows ?? 0,
   );
+  Atomics.store(
+    context.view,
+    idx(METRICS_PHYSICS_TIME_US_OFFSET),
+    physicsTimeUs,
+  );
 }
 
 /**
@@ -187,6 +195,10 @@ export function readMetricsSnapshot(context: MetricsContext): MetricsSnapshot {
         idx(METRICS_INSTANCES_TRANSPARENT_OFFSET),
       ),
       cpuUs: Atomics.load(context.view, idx(METRICS_CPU_TOTAL_US_OFFSET)),
+      physicsTimeUs: Atomics.load(
+        context.view,
+        idx(METRICS_PHYSICS_TIME_US_OFFSET),
+      ),
       clusterAvgX1000: Atomics.load(
         context.view,
         idx(METRICS_CLUSTER_AVG_X1000_OFFSET),

@@ -21,6 +21,62 @@ import {
   PhysicsBodyComponent,
   PhysicsColliderComponent,
 } from "@/core/ecs/components/physicsComponents";
+import { PRNG } from "@/core/utils/prng";
+
+async function createTallStaticObjects(
+  world: World,
+  resourceManager: ResourceManager,
+  count: number,
+): Promise<void> {
+  console.log(`[Scene] Creating ${count} tall static objects...`);
+
+  // Create a single shared mesh and material for this quick demo
+  const boxMesh = await resourceManager.createMesh(
+    "tall_box_unit",
+    createCubeMeshData(1),
+  );
+  const boxMaterial = await resourceManager.createPBRMaterialInstance(
+    await resourceManager.createPBRMaterialTemplate({
+      albedo: [0.4, 0.45, 0.5, 1],
+      metallic: 0.1,
+      roughness: 0.8,
+    }),
+  );
+
+  const prng = new PRNG(1337); // Seeded PRNG for deterministic layout
+  const SPREAD = 80;
+  const HALF_SPREAD = SPREAD / 2;
+
+  for (let i = 0; i < count; i++) {
+    const entity = world.createEntity(`tall_static_${i}`);
+    const transform = new TransformComponent();
+
+    const scaleX = prng.range(0.5, 2.0);
+    const scaleY = prng.range(20, 100);
+    const scaleZ = prng.range(0.5, 2.0);
+    transform.setScale(scaleX, scaleY, scaleZ);
+
+    const x = prng.range(-HALF_SPREAD, HALF_SPREAD);
+    const z = prng.range(-HALF_SPREAD, HALF_SPREAD);
+    // Position Y is half the height so the base is at y=0
+    transform.setPosition(x, scaleY / 2 - 2, z);
+
+    // Add visual components
+    world.addComponent(entity, transform);
+    world.addComponent(entity, new MeshRendererComponent(boxMesh, boxMaterial));
+
+    // Add physics components
+    const body = new PhysicsBodyComponent(false); // static
+    const collider = new PhysicsColliderComponent(1, [
+      scaleX / 2,
+      scaleY / 2,
+      scaleZ / 2,
+    ]); // box (half-extents)
+    world.addComponent(entity, body);
+    world.addComponent(entity, collider);
+  }
+  console.log(`[Scene] ${count} tall static objects created.`);
+}
 
 export async function createDefaultScene(
   world: World,
@@ -79,7 +135,7 @@ export async function createDefaultScene(
   fog.inscatteringIntensity = 4.0;
   world.addResource(fog);
 
-  // Demo model: Force sphere for physics test (fallback; disable GLTF for simplicity)
+  // Demo model: Force sphere for physics test
   let demoModelEntity = -1;
   try {
     // Comment out GLTF for sphere demo test
@@ -221,7 +277,7 @@ export async function createDefaultScene(
     groundTransform.setScale(100, 1, 100); // big flat
     world.addComponent(groundEntity, groundTransform);
 
-    // Physics: static body with box collider matching half-extents ~ scale/2
+    // Physics: static body with box collider matching half-extents ~ scale (of render transform)/2
     const groundBody = new PhysicsBodyComponent(false); // static
     const hx = 50,
       hy = 0.5,
@@ -232,7 +288,7 @@ export async function createDefaultScene(
 
     // Visual mesh/material (unlit gray for ground)
     const groundMat = await resourceManager.createUnlitGroundMaterial({
-      color: [0.35, 0.35, 0.38, 1],
+      color: [0.15, 0.15, 0.15, 1],
     });
     const groundMesh = await resourceManager.createMesh(
       "ground_cube_unit",
@@ -245,6 +301,9 @@ export async function createDefaultScene(
 
     console.log("[Scene] Added static ground (box collider) at y=-3.");
   }
+
+  // Add tall static objects
+  await createTallStaticObjects(world, resourceManager, 200);
 
   // Sun and shadows
   world.addResource(new SceneSunComponent());

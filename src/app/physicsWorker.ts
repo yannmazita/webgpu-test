@@ -36,6 +36,7 @@ import {
   // Command types
   CMD_CREATE_BODY,
   CMD_DESTROY_BODY,
+  STATES_PHYSICS_STEP_TIME_MS_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 // Type imports from Rapier
@@ -68,6 +69,7 @@ const bodyToEntity = new WeakMap<RigidBody, number>(); // RigidBody → PHYS_ID
 
 let accumulator = 0;
 let stepCounter = 0; // counts fixed steps since init (for periodic logs)
+let lastStepTimeMs = 0.0; // Metric: wall time for last step batch
 
 const FIXED_DT = 1 / 60;
 const GRAVITY = { x: 0.0, y: -9.81, z: 0.0 };
@@ -266,12 +268,20 @@ function stepWorld(dt: number): void {
   if (!world) return;
 
   accumulator += dt;
+  let totalStepTime = 0;
+  const stepStart = performance.now();
+
   while (accumulator >= FIXED_DT) {
     processCommands(); // drain before each fixed step
     world.step();
     accumulator -= FIXED_DT;
     stepCounter++;
   }
+
+  if (stepCounter > 0) {
+    totalStepTime = performance.now() - stepStart;
+  }
+  lastStepTimeMs = totalStepTime;
 
   if (stepCounter % 60 === 0 && entityToBody.size > 0) {
     const b = entityToBody.values().next().value;
@@ -288,6 +298,10 @@ function stepWorld(dt: number): void {
 
 function publishSnapshot(): void {
   if (!world || !statesI32 || !statesF32) return;
+
+  // (Publish metric) physics step time
+  // This is a non-atomic write, which is fine for metrics.
+  statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2] = lastStepTimeMs;
 
   // Triple buffering: write to next slot, then publish index at end
   const currIdx = Atomics.load(statesI32, STATES_WRITE_INDEX_OFFSET >> 2);

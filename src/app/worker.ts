@@ -58,7 +58,7 @@ import { mat4, quat, vec3 } from "wgpu-matrix";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 
-// Physics imports (Stage 2)
+// Physics imports
 import {
   PhysicsContext,
   createPhysicsContext,
@@ -74,6 +74,7 @@ import {
   STATES_SLOT_COUNT,
   STATES_SLOT_OFFSET,
   STATES_SLOT_SIZE,
+  STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   STATES_WRITE_INDEX_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
@@ -454,7 +455,20 @@ function frame(now: number): void {
   renderSystem(world, renderer, sceneRenderData);
 
   if (metricsContext && renderer) {
-    publishMetrics(metricsContext, renderer.getStats(), dt, ++metricsFrameId);
+    let physicsTimeUs = 0;
+    if (physicsCtx) {
+      // Read the metric non-atomically. It's just for display. it's ok, don't worry reader
+      const physicsTimeMs =
+        physicsCtx.statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2];
+      physicsTimeUs = Math.round(physicsTimeMs * 1000);
+    }
+    publishMetrics(
+      metricsContext,
+      renderer.getStats(),
+      dt,
+      ++metricsFrameId,
+      physicsTimeUs, // Pass new metric here
+    );
   }
 
   (self as any).postMessage({ type: "FRAME_DONE" });

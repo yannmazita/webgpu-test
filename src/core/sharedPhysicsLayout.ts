@@ -99,8 +99,11 @@ export const STATES_WRITE_INDEX_OFFSET = 8; // Atomic u32: 0-2 (current write sl
 export const STATES_READ_GEN_OFFSET = 12; // u32: read-side generation (optional)
 export const STATES_GEN_OFFSET = 16; // u32: global generation counter
 
-/** States header size (bytes). */
-export const STATES_HEADER_BYTES = 20;
+/** States: physics step time (ms, f32) */
+export const STATES_PHYSICS_STEP_TIME_MS_OFFSET = 20; // f32: wall time for world.step()
+
+/** States header size (bytes). Padded to 4-byte alignment. */
+export const STATES_HEADER_BYTES = 24;
 
 /** Number of snapshot slots (triple-buffer). */
 export const STATES_SLOT_COUNT = 3;

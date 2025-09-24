@@ -90,6 +90,8 @@ export const METRICS_CLUSTER_AVG_X1000_OFFSET = 56;
 export const METRICS_CLUSTER_MAX_OFFSET = 60;
 /** [16] CLUSTER_OVERFLOWS (total overflows) */
 export const METRICS_CLUSTER_OVERFLOWS_OFFSET = 64;
+/** [17] PHYSICS_TIME_US (physics worker step wall time in microseconds) */
+export const METRICS_PHYSICS_TIME_US_OFFSET = 68;
 
 /* ==========================================================================================
  * Total buffer sizing
@@ -97,9 +99,9 @@ export const METRICS_CLUSTER_OVERFLOWS_OFFSET = 64;
 
 /**
  * Total buffer size (bytes).
- * 17 Int32 fields × 4 bytes = 68 bytes
+ * 18 Int32 fields × 4 bytes = 72 bytes
  */
-export const METRICS_BUFFER_SIZE = 68; // 17 Int32 fields * 4 bytes
+export const METRICS_BUFFER_SIZE = 72; // 18 Int32 fields * 4 bytes
 
 /* ==========================================================================================
  * Usage Notes:
