@@ -6,7 +6,10 @@ import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { LightComponent } from "@/core/ecs/components/lightComponent";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
-import { createIcosphereMeshData } from "@/core/utils/primitives";
+import {
+  createCubeMeshData,
+  createIcosphereMeshData,
+} from "@/core/utils/primitives";
 import { mat4, quat, vec3 } from "wgpu-matrix";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
@@ -233,7 +236,7 @@ export async function createDefaultScene(
     });
     const groundMesh = await resourceManager.createMesh(
       "ground_cube_unit",
-      createIcosphereMeshData(1, 1), // Use icosphere for unit, but scale via transform; or cube if preferred
+      createCubeMeshData(1),
     );
     world.addComponent(
       groundEntity,
