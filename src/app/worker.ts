@@ -64,14 +64,7 @@ import {
   createPhysicsContext,
   initializePhysicsHeaders,
 } from "@/core/physicsState";
-import {
-  PhysicsInitMsg,
-  PhysicsMessage,
-  PhysicsReadyMsg,
-  PhysicsErrorMsg,
-  PhysicsStepDoneMsg,
-  PhysicsDestroyedMsg,
-} from "@/core/types/physics";
+import { PhysicsInitMsg, PhysicsMessage } from "@/core/types/physics";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import {
   COMMANDS_BUFFER_SIZE,

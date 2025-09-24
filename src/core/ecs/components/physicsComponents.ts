@@ -1,6 +1,6 @@
 // src/core/ecs/components/physicsComponents.ts
 import { IComponent } from "../component";
-import { Vec3, vec3, Quat, quat } from "wgpu-matrix";
+import { Vec3, vec3 } from "wgpu-matrix";
 
 /**
  * Component marking an entity with a physics body in Rapier.
@@ -85,7 +85,7 @@ export class PhysicsColliderComponent implements IComponent {
   constructor(type: 0 | 1 | 2 = 0, params: Vec3 | number[] = [1, 1, 1]) {
     this.type = type;
     if (Array.isArray(params)) {
-      vec3.fromValues(...params, this.params);
+      vec3.set(params[0] ?? 0, params[1] ?? 0, params[2] ?? 0, this.params);
     } else {
       vec3.copy(params, this.params);
     }

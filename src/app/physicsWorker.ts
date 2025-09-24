@@ -221,18 +221,19 @@ function processCommands(): void {
         world.createCollider(colliderDesc, body);
         entityToBody.set(physId, body);
         bodyToEntity.set(body, physId);
-        // Debug:
-        // console.log(`[PhysicsWorker] Created body ID=${physId} dynamic=${isDynamic} at [${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}]`);
+        console.log(
+          `[PhysicsWorker] Created body ID=${physId} dynamic=${isDynamic} at [${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)}]`,
+        );
       } else {
         // Cleanup bad body
-        world.removeRigidBody(body, true);
+        world.removeRigidBody(body);
       }
 
       processedAny = true;
     } else if (type === CMD_DESTROY_BODY) {
       const body = entityToBody.get(physId);
       if (body) {
-        world.removeRigidBody(body, true);
+        world.removeRigidBody(body);
         entityToBody.delete(physId);
         bodyToEntity.delete(body);
         // console.log(`[PhysicsWorker] Destroyed body ID=${physId}.`);
@@ -273,13 +274,15 @@ function stepWorld(dt: number): void {
   }
 
   if (stepCounter % 60 === 0 && entityToBody.size > 0) {
-    const b = entityToBody.values().next().value as RigidBody;
+    const b = entityToBody.values().next().value;
+    /*
     if (b) {
       const p = b.translation();
       console.log(
         `[PhysicsWorker] Sample body @ [${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}] (steps=${stepCounter})`,
       );
     }
+    */
   }
 }
 
@@ -364,7 +367,7 @@ function stopPhysicsLoop(): void {
   if (world) {
     // Remove all rigid bodies we created
     entityToBody.forEach((body) => {
-      world!.removeRigidBody(body, true);
+      world!.removeRigidBody(body);
     });
     world.free();
     world = null;
