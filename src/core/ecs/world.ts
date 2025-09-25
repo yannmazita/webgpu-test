@@ -131,7 +131,7 @@ export class World {
     if (!this.componentStores.has(componentType)) {
       this.componentStores.set(componentType, new Map());
     }
-    this.componentStores.get(componentType)!.set(entity, component);
+    this.componentStores.get(componentType)?.set(entity, component);
     this.worldVersion++; // Invalidate caches by version bump
   }
 
