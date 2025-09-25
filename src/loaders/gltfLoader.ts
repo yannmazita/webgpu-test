@@ -4,7 +4,7 @@
 // Based on the official specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
 
 export interface GLTF {
-  asset: { version: string; [k: string]: any };
+  asset: { version: string; [k: string]: unknown };
   scenes?: GLTFScene[];
   scene?: number;
   nodes?: GLTFNode[];
@@ -58,7 +58,7 @@ export interface GLTFMaterialExtensions {
   // marker extension (no params)
   KHR_materials_unlit?: Record<string, never>;
   // Allow other extensions without breaking types
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface GLTFMaterial {

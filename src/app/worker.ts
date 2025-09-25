@@ -33,7 +33,7 @@ import {
   wasActionPressed,
 } from "@/core/input/action";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
-import { createDefaultScene } from "./scene";
+import { createDefaultScene } from "./scene2";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import {
   InitMsg,
