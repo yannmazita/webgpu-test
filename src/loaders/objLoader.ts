@@ -78,8 +78,9 @@ export const parseOBJ = (text: string): OBJGeometry => {
       if (hasNormals) {
         // Path 1: The OBJ file has normals. Unroll vertices using the cache.
         for (const vertexString of triangleFace) {
-          if (vertexCache.has(vertexString)) {
-            final_indices.push(vertexCache.get(vertexString)!);
+          const cachedIndex = vertexCache.get(vertexString);
+          if (cachedIndex !== undefined) {
+            final_indices.push(cachedIndex);
           } else {
             const indices = vertexString
               .split("/")

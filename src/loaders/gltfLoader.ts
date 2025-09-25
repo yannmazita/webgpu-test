@@ -269,7 +269,10 @@ export function getAccessorData(
   accessorIndex: number,
 ): Float32Array | Uint32Array | Uint16Array {
   const { json, buffers } = parsedGltf;
-  const accessor = json.accessors![accessorIndex];
+  const accessor = json.accessors?.[accessorIndex];
+  if (!accessor) {
+    throw new Error(`Accessor ${accessorIndex} not found.`);
+  }
 
   const TypedArrayConstructor = COMPONENT_TYPE_MAP[accessor.componentType] as
     | typeof Float32Array
@@ -284,7 +287,10 @@ export function getAccessorData(
     return new TypedArrayConstructor();
   }
 
-  const bufferView = json.bufferViews![accessor.bufferView];
+  const bufferView = json.bufferViews?.[accessor.bufferView];
+  if (!bufferView) {
+    throw new Error(`BufferView ${accessor.bufferView} not found.`);
+  }
   const buffer = buffers[bufferView.buffer];
   const numComponents = TYPE_COMPONENT_COUNT[accessor.type];
   const elementSizeInBytes =
