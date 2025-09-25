@@ -305,8 +305,6 @@ export class ShadowSubsystem {
       camera.inverseProjectionMatrix,
     );
 
-    let lastSplitDist = 0.0;
-
     for (let i = 0; i < ShadowSubsystem.NUM_CASCADES; i++) {
       const splitDist = cascadeSplits[i];
 
@@ -441,7 +439,6 @@ export class ShadowSubsystem {
 
       // Store split distance in world units
       this.cascadeSplits[i] = cameraNear + splitDist * clipRange;
-      lastSplitDist = splitDist;
     }
 
     // --- Pack uniforms (matrices + split depths + sun + params) ---
@@ -537,8 +534,11 @@ export class ShadowSubsystem {
         );
 
         if (mesh.indexBuffer) {
-          pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
-          pass.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
+          pass.setIndexBuffer(
+            mesh.indexBuffer,
+            mesh.indexFormat ?? "uint32",
+          );
+          pass.drawIndexed(mesh.indexCount ?? 0, count, 0, 0, 0);
         } else {
           pass.draw(mesh.vertexCount, count, 0, 0);
         }
