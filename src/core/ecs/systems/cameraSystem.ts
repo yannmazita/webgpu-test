@@ -89,8 +89,10 @@ export function cameraSystem(world: World): void {
   const query = world.query([CameraComponent, TransformComponent]);
 
   for (const entity of query) {
-    const camera = world.getComponent(entity, CameraComponent)!;
-    const transform = world.getComponent(entity, TransformComponent)!;
+    const camera = world.getComponent(entity, CameraComponent);
+    const transform = world.getComponent(entity, TransformComponent);
+
+    if (!camera || !transform) continue;
 
     // The world matrix of the camera's transform is its inverse view matrix.
     // It represents the camera's position and orientation in world space.

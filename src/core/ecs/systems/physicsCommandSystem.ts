@@ -4,7 +4,6 @@ import { PhysicsBodyComponent } from "../components/physicsComponents";
 import { PhysicsColliderComponent } from "../components/physicsComponents";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import { CMD_CREATE_BODY, CMD_DESTROY_BODY } from "@/core/sharedPhysicsLayout";
-import { vec3, quat } from "wgpu-matrix";
 import { TransformComponent } from "../components/transformComponent";
 
 /**
