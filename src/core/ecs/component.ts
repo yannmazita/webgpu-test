@@ -3,6 +3,7 @@
 /**
  * A marker interface for components. All components must implement this.
  * Components should be treated as plain data objects.
+ * @see https://www.typescriptlang.org/docs/handbook/2/objects.html#interfaces-vs-intersections
  */
 export interface IComponent {}
 
@@ -13,5 +14,5 @@ export interface IComponent {}
  * @template T - The type of the component, which must extend IComponent.
  */
 export type ComponentConstructor<T extends IComponent = IComponent> = new (
-  ...args: any[]
+  ...args: unknown[]
 ) => T;
