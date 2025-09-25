@@ -37,7 +37,10 @@ export class ShaderPreprocessor {
         }),
       );
     }
-    const sourceCode = await this.fileCache.get(fileUrl)!;
+    const sourceCode = await this.fileCache.get(fileUrl);
+    if (!sourceCode) {
+      throw new Error(`Could not find cached shader file: ${fileUrl}`);
+    }
 
     const includePromises: Promise<void>[] = [];
     const replacements = new Map<string, string>();
