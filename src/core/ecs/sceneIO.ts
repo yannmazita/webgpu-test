@@ -201,6 +201,11 @@ function validatePbrOptions(
   return null;
 }
 
+export interface PBRMaterialV1 {
+  type: "PBR";
+  options: PBRMaterialOptions;
+}
+
 export interface SceneEntityV1 {
   id: string; // UUID
   name?: string;
@@ -212,10 +217,7 @@ export interface SceneEntityV1 {
     };
     MeshRenderer?: {
       mesh: string; // handle: PRIM:/OBJ:/STL:
-      material: {
-        type: "PBR";
-        options: import("@/core/types/gpu").PBRMaterialOptions;
-      };
+      material: PBRMaterialV1;
     };
     Light?: {
       color: [number, number, number, number];
@@ -228,6 +230,11 @@ export interface SceneEntityV1 {
     };
     Tags?: string[];
   };
+}
+
+export interface SceneDocumentV1 {
+  version: 1;
+  entities: SceneEntityV1[];
 }
 
 /**
@@ -251,7 +258,7 @@ export function validateSceneDocument(
   if (!doc || typeof doc !== "object") {
     return { ok: false, errors: ["$: document must be an object"] };
   }
-  const anyDoc = doc as any;
+  const anyDoc = doc as { version: unknown; entities: unknown };
   if (anyDoc.version !== 1) {
     return { ok: false, errors: ["$.version: must be 1"] };
   }
@@ -270,7 +277,7 @@ export function validateSceneDocument(
   const allIds: string[] = [];
 
   for (let i = 0; i < anyDoc.entities.length; i++) {
-    const ent = anyDoc.entities[i];
+    const ent = anyDoc.entities[i] as SceneEntityV1;
     if (!ent || typeof ent !== "object") {
       err(`$.entities[${i}]`, "must be an object");
       continue;
@@ -299,7 +306,7 @@ export function validateSceneDocument(
 
   // Validate entities fully
   for (let i = 0; i < anyDoc.entities.length; i++) {
-    const ent = anyDoc.entities[i];
+    const ent = anyDoc.entities[i] as SceneEntityV1;
     if (!ent || typeof ent !== "object") continue;
 
     if (ent.name !== undefined) {
@@ -338,9 +345,7 @@ export function validateSceneDocument(
           `$.entities[${i}].components.Transform.position`,
           "must be a [number,number,number]",
         );
-      } else if (
-        t.position.some((v: number) => Math.abs(v) > limits.POS_LIMIT)
-      ) {
+      } else if (t.position.some((v) => Math.abs(v) > limits.POS_LIMIT)) {
         err(
           `$.entities[${i}].components.Transform.position`,
           `values exceed ±${limits.POS_LIMIT}`,
@@ -360,9 +365,7 @@ export function validateSceneDocument(
           `$.entities[${i}].components.Transform.scale`,
           "must be a [number,number,number]",
         );
-      } else if (
-        t.scale.some((v: number) => v <= 0 || v > limits.SCALE_LIMIT)
-      ) {
+      } else if (t.scale.some((v) => v <= 0 || v > limits.SCALE_LIMIT)) {
         err(
           `$.entities[${i}].components.Transform.scale`,
           `values must be >0 and <= ${limits.SCALE_LIMIT}`,
@@ -481,10 +484,10 @@ export function validateSceneDocument(
 
   // Cycle detection for hierarchy (unchanged)
   const parentOf = new Map<string, string>();
-  for (let i = 0; i < anyDoc.entities.length; i++) {
-    const ent = anyDoc.entities[i];
-    if (ent?.components?.Hierarchy?.parent) {
-      parentOf.set(ent.id, ent.components.Hierarchy.parent);
+  for (const ent of anyDoc.entities) {
+    const sceneEnt = ent as SceneEntityV1;
+    if (sceneEnt?.components?.Hierarchy?.parent) {
+      parentOf.set(sceneEnt.id, sceneEnt.components.Hierarchy.parent);
     }
   }
   const WHITE = 0,
