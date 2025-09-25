@@ -52,48 +52,42 @@ import { MaterialInstance } from "@/core/materials/materialInstance";
 const DEBUG_MESH_VALIDATION = true;
 
 // MikkTSpace WASM loader and wrapper
-let mikktspace: {
-  generateTangents: (
-    pos: Float32Array,
-    norm: Float32Array,
-    uv: Float32Array,
-  ) => Float32Array;
-} | null = null;
+type MikkTSpace = typeof import("mikktspace");
+let mikktspace: MikkTSpace | null = null;
 let mikktspacePromise: Promise<void> | null = null;
 
-async function initMikkTSpace() {
+async function initMikkTSpace(): Promise<void> {
   if (mikktspace || mikktspacePromise) return mikktspacePromise;
 
-  mikktspacePromise = new Promise(async (resolve, reject) => {
-    try {
-      // Try different import approaches
-      const module = await import("mikktspace");
-
-      // Handle different module formats
-      if (typeof module.default === "function") {
-        await module.default();
-        mikktspace = module;
-      } else if (typeof module.init === "function") {
-        await module.init();
-        mikktspace = module;
-      } else if (module.generateTangents) {
-        // Module might be pre-initialized
-        mikktspace = module;
-      } else {
-        console.warn(
-          "MikkTSpace module format not recognized:",
-          Object.keys(module),
-        );
-        mikktspace = module;
-      }
-
-      console.log("MikkTSpace initialized successfully.");
-      resolve();
-    } catch (e) {
-      console.error("Failed to initialize MikkTSpace:", e);
-      // just continue without tangent generation
-      resolve();
-    }
+  mikktspacePromise = new Promise((resolve) => {
+    import("mikktspace")
+      .then((module) => {
+        const init = module.default ?? module.init;
+        if (typeof init === "function") {
+          init()
+            .then(() => {
+              mikktspace = module;
+              console.log("MikkTSpace initialized successfully.");
+              resolve();
+            })
+            .catch((e: Error) => {
+              console.error("Failed to initialize MikkTSpace:", e);
+              resolve();
+            });
+        } else if (module.generateTangents) {
+          mikktspace = module;
+          console.log("MikkTSpace initialized successfully.");
+          resolve();
+        } else {
+          console.warn("MikkTSpace module format not recognized.");
+          mikktspace = module;
+          resolve();
+        }
+      })
+      .catch((e: Error) => {
+        console.error("Failed to initialize MikkTSpace:", e);
+        resolve();
+      });
   });
   return mikktspacePromise;
 }
@@ -128,8 +122,12 @@ function computeAABB(positions: Float32Array): AABB {
   if (positions.length === 0) {
     return { min: vec3.create(0, 0, 0), max: vec3.create(0, 0, 0) };
   }
-  let minX = Infinity, minY = Infinity, minZ = Infinity; // prettier-ignore
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity; // prettier-ignore
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
   for (let i = 0; i < positions.length; i += 3) {
     const x = positions[i],
       y = positions[i + 1],
@@ -151,7 +149,7 @@ function computeAABB(positions: Float32Array): AABB {
 function _defineHidden<T extends object>(
   obj: T,
   key: string,
-  value: any,
+  value: unknown,
 ): void {
   Object.defineProperty(obj, key, {
     value,
@@ -163,13 +161,12 @@ function _defineHidden<T extends object>(
 function _setHandle(obj: object, handle: string): void {
   _defineHidden(obj, "__handle", handle);
 }
-function _getHandle(obj: any): string | undefined {
+function _getHandle(obj: { __handle?: string }): string | undefined {
   return obj?.__handle;
 }
-function _setPbrOptions(obj: object, options: PBRMaterialOptions): void {
-  _defineHidden(obj, "__pbrOptions", options);
-}
-function _getPbrOptions(obj: any): PBRMaterialOptions | undefined {
+function _getPbrOptions(obj: {
+  __pbrOptions?: PBRMaterialOptions;
+}): PBRMaterialOptions | undefined {
   return obj?.__pbrOptions;
 }
 
@@ -219,7 +216,9 @@ export class ResourceManager {
   public getHandleForMaterial(material: Material): string | undefined {
     return _getHandle(material);
   }
-  public getMaterialSpec(material: Material): PBRMaterialSpec | undefined {
+  public getMaterialSpec(
+    material: MaterialInstance,
+  ): PBRMaterialSpec | undefined {
     const opts = _getPbrOptions(material);
     return opts ? { type: "PBR", options: opts } : undefined;
   }
@@ -562,17 +561,15 @@ export class ResourceManager {
       if (meshIndex === undefined || meshIndex === -1) {
         throw new Error(`Mesh "${meshName}" not found in ${url}`);
       }
-      const gltfMesh = parsedGltf.json.meshes![meshIndex];
-      const primitive = gltfMesh.primitives[0];
-      const mesh = await this.createMeshFromPrimitive(
-        handle,
-        parsedGltf,
-        primitive,
-      );
-      _setHandle(mesh, handle);
-      this.meshes.set(handle, mesh);
-      return mesh;
-    }
+    const mesh = await this.createMeshFromPrimitive(
+      handle,
+      gltf,
+      primitive,
+    );
+    _setHandle(mesh, handle);
+    this.meshes.set(handle, mesh);
+    return mesh;
+  }
 
     throw new Error(`Unsupported mesh handle: ${handle}`);
   }
@@ -629,7 +626,10 @@ export class ResourceManager {
 
     // --- Step 2: Scene Instantiation ---
     const sceneIndex = gltf.json.scene ?? 0;
-    const scene = gltf.json.scenes![sceneIndex];
+    const scene = gltf.json.scenes?.[sceneIndex];
+    if (!scene) {
+      throw new Error(`Scene not found in glTF file.`);
+    }
     const sceneRootEntity = world.createEntity();
     world.addComponent(sceneRootEntity, new TransformComponent());
 
@@ -868,7 +868,10 @@ export class ResourceManager {
     parentEntity: Entity,
     ctx: NodeInstantiationContext,
   ): Promise<void> {
-    const node = gltf.json.nodes![nodeIndex];
+    const node = gltf.json.nodes?.[nodeIndex];
+    if (!node) {
+      throw new Error(`Node ${nodeIndex} not found in glTF file.`);
+    }
     const entity = world.createEntity(node.name ?? `node_${nodeIndex}`);
     ctx.nodeToEntityMap.set(nodeIndex, entity);
 
@@ -888,7 +891,10 @@ export class ResourceManager {
     setParent(world, entity, parentEntity);
 
     if (node.mesh !== undefined) {
-      const gltfMesh = gltf.json.meshes![node.mesh];
+      const gltfMesh = gltf.json.meshes?.[node.mesh];
+      if (!gltfMesh) {
+        throw new Error(`Mesh ${node.mesh} not found in glTF file.`);
+      }
       const meshRootEntity =
         gltfMesh.primitives.length > 1 ? world.createEntity() : entity;
       if (gltfMesh.primitives.length > 1) {
@@ -924,7 +930,10 @@ export class ResourceManager {
           ctx.materialToEntitiesMap.get(matIndex)!.push(primitiveEntity);
 
           const isAnimated = ctx.animatedMaterialIndices.has(matIndex);
-          const gltfMat = gltf.json.materials![matIndex];
+          const gltfMat = gltf.json.materials?.[matIndex];
+          if (!gltfMat) {
+            throw new Error(`Material ${matIndex} not found in glTF file.`);
+          }
           const options = this._getGLTFMaterialOptions(
             gltfMat,
             gltf,
@@ -989,7 +998,10 @@ export class ResourceManager {
         : new URL(image.uri, baseUri).href;
     }
     if (image.bufferView !== undefined && image.mimeType) {
-      const bufferView = json.bufferViews![image.bufferView];
+      const bufferView = gltf.json.bufferViews?.[image.bufferView];
+      if (!bufferView) {
+        throw new Error(`BufferView ${image.bufferView} not found in glTF file.`);
+      }
       const buffer = buffers[bufferView.buffer];
       const imageData = new Uint8Array(
         buffer,
@@ -1002,12 +1014,16 @@ export class ResourceManager {
     return undefined;
   }
 
-  private async createMeshFromPrimitive(
+  public async createMeshFromPrimitive(
     key: string,
     gltf: ParsedGLTF,
     primitive: GLTFPrimitive,
   ): Promise<Mesh> {
-    if (this.meshes.has(key)) return this.meshes.get(key)!;
+    const cachedMesh = this.meshes.get(key);
+    if (cachedMesh) {
+      return cachedMesh;
+    }
+
     const posAccessor = primitive.attributes.POSITION;
     const normAccessor = primitive.attributes.NORMAL;
     const uv0Accessor = primitive.attributes.TEXCOORD_0;
@@ -1204,8 +1220,9 @@ export class ResourceManager {
    * @returns The created mesh.
    */
   public async createMesh(key: string, data: MeshData): Promise<Mesh> {
-    if (this.meshes.has(key)) {
-      return this.meshes.get(key)!;
+    const cachedMesh = this.meshes.get(key);
+    if (cachedMesh) {
+      return cachedMesh;
     }
 
     const hasTexCoords = data.texCoords && data.texCoords.length > 0;
@@ -1576,7 +1593,7 @@ export class ResourceManager {
         )
       : undefined;
 
-    const mesh: Mesh = {
+    const mesh: Mesh & { id?: number } = {
       buffers: finalBuffers,
       layouts: finalLayouts,
       vertexCount: finalVertexCount,
@@ -1586,7 +1603,7 @@ export class ResourceManager {
       aabb,
     };
 
-    (mesh as any).id = ResourceManager.nextMeshId++;
+    mesh.id = ResourceManager.nextMeshId++;
 
     let handle = key;
     if (key === "cube") handle = "PRIM:cube:size=1";
