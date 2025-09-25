@@ -109,7 +109,6 @@ let world: World | null = null;
 let sceneRenderData: SceneRenderData | null = null;
 
 let cameraEntity = -1;
-let demoModelEntity = -1;
 
 let inputContext: InputContext | null = null;
 let actionController: IActionController | null = null;
@@ -154,11 +153,10 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
   const physEntities = world.query([PhysicsBodyComponent]);
   const physToEntity = new Map<number, number>();
   for (const e of physEntities) {
-    const bc = world.getComponent(e, PhysicsBodyComponent)!;
-    if (bc.physId) physToEntity.set(bc.physId, e);
+    const bc = world.getComponent(e, PhysicsBodyComponent);
+    if (bc?.physId) physToEntity.set(bc.physId, e);
   }
 
-  let updated = 0;
   for (let i = 0; i < count && i < STATES_MAX_BODIES; i++) {
     // Per-body record layout: [u32 physId][f32 pos3][f32 rot4] stride 32 bytes
     const idOffsetI32 = slotBaseI32 + 1 + i * 8; // 8 i32 per body
@@ -181,7 +179,6 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
       t.setPosition(px, py, pz);
       t.setRotation([rx, ry, rz, rw] as unknown as Float32Array);
       t.isDirty = true;
-      updated++;
     }
   }
 }
@@ -223,7 +220,9 @@ async function initWorker(
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
     getMousePosition: () => getMousePosition(inputContext!),
     isPointerLocked: () => isPointerLocked(inputContext!),
-    lateUpdate: () => {},
+    lateUpdate: () => {
+      //
+    },
   };
 
   const actionMap: ActionMapConfig = {
@@ -250,7 +249,8 @@ async function initWorker(
   try {
     if (
       sharedEngineStateBuffer &&
-      (sharedEngineStateBuffer as any) instanceof SharedArrayBuffer
+      (sharedEngineStateBuffer as SharedArrayBuffer) instanceof
+        SharedArrayBuffer
     ) {
       engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
       console.log(
@@ -281,7 +281,6 @@ async function initWorker(
     console.log("[Worker] Creating default scene...");
     const sceneEntities = await createDefaultScene(world, resourceManager);
     cameraEntity = sceneEntities.cameraEntity;
-    demoModelEntity = sceneEntities.demoModelEntity;
     console.log("[Worker] Scene created successfully");
   } catch (error) {
     console.error("[Worker] Failed to create scene:", error);
@@ -326,7 +325,7 @@ async function initWorker(
   physicsWorker.postMessage(initMsg);
 
   // Create command system
-  physicsCommandSystem = new PhysicsCommandSystem(physicsCtx!);
+  physicsCommandSystem = new PhysicsCommandSystem(physicsCtx);
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
@@ -340,7 +339,7 @@ async function initWorker(
     }
   }
 
-  (self as any).postMessage({ type: "READY" });
+  (self as Worker).postMessage({ type: "READY" });
 }
 
 /**
@@ -379,17 +378,19 @@ function frame(now: number): void {
       const cameraTransform = world.getComponent(
         cameraEntity,
         TransformComponent,
-      )!;
-      cameraControllerSystem.syncFromTransform(cameraTransform);
+      );
+      if (cameraTransform) {
+        cameraControllerSystem.syncFromTransform(cameraTransform);
+      }
     }
   }
 
-  const cameraTransform = world.getComponent(cameraEntity, TransformComponent)!;
+  const cameraTransform = world.getComponent(cameraEntity, TransformComponent);
 
   if (isFreeCameraActive) {
     // Free camera mode
     cameraControllerSystem.update(world, dt);
-  } else {
+  } else if (cameraTransform) {
     // Orbital camera animation around the model
     if (animationStartTime === 0) animationStartTime = now;
 
@@ -471,7 +472,7 @@ function frame(now: number): void {
     );
   }
 
-  (self as any).postMessage({ type: "FRAME_DONE" });
+  (self as Worker).postMessage({ type: "FRAME_DONE" });
 }
 
 /**
@@ -507,7 +508,7 @@ self.onmessage = async (
 
   if (!renderer || !world) {
     if (msg.type === MSG_FRAME) {
-      (self as any).postMessage({ type: "FRAME_DONE" });
+      (self as Worker).postMessage({ type: "FRAME_DONE" });
     }
     return;
   }
@@ -543,7 +544,7 @@ self.onmessage = async (
     }
     case MSG_SET_ENVIRONMENT: {
       // Narrow typing guard
-      const m = msg as any;
+      const m = msg as SetEnvironmentMsg;
       try {
         if (!resourceManager || !world) break;
         const env = await resourceManager.createEnvironmentMap(
