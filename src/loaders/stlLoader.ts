@@ -74,9 +74,9 @@ const parseASCII = (text: string): STLGeometry => {
   const indices: number[] = [];
 
   const vertexPattern =
-    /vertex\s+([\d\.\-eE]+)\s+([\d\.\-eE]+)\s+([\d\.\-eE]+)/g;
+    /vertex\s+([\d.\-eE]+)\s+([\d.\-eE]+)\s+([\d.\-eE]+)/g;
   const facetPattern =
-    /facet\s+normal\s+([\d\.\-eE]+)\s+([\d\.\-eE]+)\s+([\d\.\-eE]+)/g;
+    /facet\s+normal\s+([\d.\-eE]+)\s+([\d.\-eE]+)\s+([\d.\-eE]+)/g;
 
   let vertexMatch: RegExpExecArray | null;
   let facetMatch: RegExpExecArray | null;

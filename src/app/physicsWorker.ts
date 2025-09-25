@@ -103,33 +103,35 @@ async function initRapier(): Promise<void> {
 
   console.log("Starting Rapier initialization...");
 
-  rapierPromise = new Promise(async (resolve) => {
-    try {
-      const start = performance.now();
-      RAPIER = await import("@dimforge/rapier3d");
-      const loadTime = performance.now() - start;
-      console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`);
+  rapierPromise = new Promise((resolve) => {
+    import("@dimforge/rapier3d")
+      .then((r) => {
+        const start = performance.now();
+        RAPIER = r;
+        const loadTime = performance.now() - start;
+        console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`);
 
-      world = new RAPIER.World(GRAVITY);
-      const params: IntegrationParameters = world.integrationParameters;
-      params.dt = FIXED_DT;
+        world = new RAPIER.World(GRAVITY);
+        const params: IntegrationParameters = world.integrationParameters;
+        params.dt = FIXED_DT;
 
-      console.log(
-        "[PhysicsWorker] Rapier initialized. Gravity:",
-        GRAVITY,
-        "Fixed dt:",
-        FIXED_DT,
-      );
+        console.log(
+          "[PhysicsWorker] Rapier initialized. Gravity:",
+          GRAVITY,
+          "Fixed dt:",
+          FIXED_DT,
+        );
 
-      isInitialized = true;
-      resolve();
-    } catch (error: any) {
-      console.error("Physics initialization failed:", error);
-      RAPIER = null;
-      world = null;
-      isInitialized = false;
-      resolve();
-    }
+        isInitialized = true;
+        resolve();
+      })
+      .catch((error: Error) => {
+        console.error("Physics initialization failed:", error);
+        RAPIER = null;
+        world = null;
+        isInitialized = false;
+        resolve();
+      });
   });
 
   return rapierPromise;
@@ -284,7 +286,7 @@ function stepWorld(dt: number): void {
   lastStepTimeMs = totalStepTime;
 
   if (stepCounter % 60 === 0 && entityToBody.size > 0) {
-    const b = entityToBody.values().next().value;
+    // const b = entityToBody.values().next().value;
     /*
     if (b) {
       const p = b.translation();
@@ -381,7 +383,7 @@ function stopPhysicsLoop(): void {
   if (world) {
     // Remove all rigid bodies we created
     entityToBody.forEach((body) => {
-      world!.removeRigidBody(body);
+      world?.removeRigidBody(body);
     });
     world.free();
     world = null;
@@ -464,9 +466,10 @@ self.onmessage = async (
       startPhysicsLoop();
       postMessage({ type: "READY" } as PhysicsReadyMsg);
       console.log("[PhysicsWorker] Initialized successfully.");
-    } catch (e: any) {
-      console.error("[PhysicsWorker] Init failed:", e);
-      postMessage({ type: "ERROR", error: String(e?.message ?? e) });
+    } catch (e) {
+      const error = e as Error;
+      console.error("[PhysicsWorker] Init failed:", error);
+      postMessage({ type: "ERROR", error: String(error?.message) });
     }
     return;
   }
@@ -496,7 +499,9 @@ self.onmessage = async (
       postMessage({ type: "DESTROYED" } as PhysicsDestroyedMsg);
       break;
 
-    default:
-      console.warn("[PhysicsWorker] Unknown message:", (msg as any).type);
+    default: {
+      const unhandled: never = msg;
+      console.warn("[PhysicsWorker] Unknown message:", unhandled);
+    }
   }
 };

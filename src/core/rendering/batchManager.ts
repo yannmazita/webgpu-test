@@ -69,10 +69,8 @@ export class BatchManager {
   ): Map<string, number> {
     const counts = new Map<string, number>();
     for (const r of renderables) {
-      const key = this._getDrawGroupKey(
-        (r.material as any).id,
-        (r.mesh as any).id,
-      );
+      if (!r.mesh || !r.material) continue;
+      const key = this._getDrawGroupKey(r.material.id, r.mesh.id);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;

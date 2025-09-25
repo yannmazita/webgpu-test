@@ -18,7 +18,7 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.app.json", "./tsconfig.node.json"],
+        project: ["tsconfig.app.json", "tsconfig.node.json"],
         sourceType: "module",
       },
       globals: globals.browser,
@@ -32,6 +32,6 @@ export default tseslint.config(
     extends: [eslintConfigPrettier],
   },
   {
-    ignores: ["dist/", "build/", "src/core/client/", "src/common/shadcn/"],
+    ignores: ["dist/", "build/", "src/core/client/", "src/common/shadcn/", "eslint.config.js"],
   },
 );

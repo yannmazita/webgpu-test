@@ -54,19 +54,20 @@ export class Material {
     const layoutKey = `${getLayoutKey(
       meshLayouts,
     )}|${canvasFormat}|${depthFormat}`;
-    if (this.pipelineCache.has(layoutKey)) {
-      return this.pipelineCache.get(layoutKey)!;
+    const cachedPipeline = this.pipelineCache.get(layoutKey);
+    if (cachedPipeline) {
+      return cachedPipeline;
     }
 
-    const pipeline = this.createPipeline(
+    const newPipeline = this.createPipeline(
       meshLayouts,
       instanceDataLayout,
       frameBindGroupLayout,
       canvasFormat,
       depthFormat,
     );
-    this.pipelineCache.set(layoutKey, pipeline);
-    return pipeline;
+    this.pipelineCache.set(layoutKey, newPipeline);
+    return newPipeline;
   }
 
   protected createPipeline(

@@ -43,7 +43,7 @@ export class TransparentPass {
       return db - da;
     });
 
-    const floatsPerInstance = (Renderer as any).INSTANCE_STRIDE_IN_FLOATS;
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
     const instanceDataView = new Float32Array(
       frameInstanceData.buffer,
       instanceBufferOffset,
@@ -101,7 +101,7 @@ export class TransparentPass {
       }
 
       const groupByteOffset =
-        instanceBufferOffset + i * (Renderer as any).INSTANCE_BYTE_STRIDE;
+        instanceBufferOffset + i * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
         mesh.layouts.length,
         instanceBuffer,
@@ -109,7 +109,7 @@ export class TransparentPass {
       );
 
       if (mesh.indexBuffer) {
-        passEncoder.drawIndexed(mesh.indexCount!, count, 0, 0, 0);
+        passEncoder.drawIndexed(mesh.indexCount ?? 0, count, 0, 0, 0);
       } else {
         passEncoder.draw(mesh.vertexCount, count, 0, 0);
       }

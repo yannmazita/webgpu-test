@@ -45,8 +45,9 @@ export class Shader {
   ): Promise<Shader> {
     // Use module URL when available; fallback to globalThis.location if present
     const baseUrl =
-      (typeof import.meta !== "undefined" && (import.meta as any).url) ||
-      ((globalThis as any).location?.href ?? undefined);
+      (import.meta as { url: string } | undefined)?.url ??
+      (globalThis as unknown as { location: { href: string } } | undefined)
+        ?.location?.href;
     const absoluteUrl = baseUrl ? new URL(url, baseUrl).href : url;
 
     const processedCode = await preprocessor.process(absoluteUrl);

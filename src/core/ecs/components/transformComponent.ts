@@ -35,7 +35,7 @@ export class TransformComponent implements IComponent {
   public setPosition(x: number, y: number, z: number): void;
   public setPosition(xOrVec: number | Vec3, y?: number, z?: number): void {
     if (typeof xOrVec === "number") {
-      vec3.set(xOrVec, y!, z!, this.position);
+      vec3.set(xOrVec, y ?? 0, z ?? 0, this.position);
     } else {
       vec3.copy(xOrVec, this.position);
     }
@@ -65,7 +65,7 @@ export class TransformComponent implements IComponent {
   public setScale(x: number, y: number, z: number): void;
   public setScale(xOrVec: number | Vec3, y?: number, z?: number): void {
     if (typeof xOrVec === "number") {
-      vec3.set(xOrVec, y!, z!, this.scale);
+      vec3.set(xOrVec, y ?? 0, z ?? 0, this.scale);
     } else {
       vec3.copy(xOrVec, this.scale);
     }

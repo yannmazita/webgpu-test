@@ -302,7 +302,7 @@ export class ClusterBuilder {
       this.lastAvgLpcX1000 = Math.min(0x7fffffff, Math.round(avg * 1000));
       this.lastMaxLpc = max;
       this.lastOverflowCount = overflow;
-    } catch (e) {
+    } catch {
       // Mapping may fail if GPU timeline not ready; ignore this cycle
     } finally {
       this.readbackPending = false;

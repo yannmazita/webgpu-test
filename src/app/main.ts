@@ -88,11 +88,15 @@ const sendResize = () => {
   }
 };
 
+interface WorkerMessage {
+  type: string;
+}
+
 // Listen for worker acks
 let canSendFrame = false;
-worker.addEventListener("message", (ev) => {
+worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
   const msg = ev.data;
-  if (!msg || !msg.type) return;
+  if (!msg?.type) return;
 
   if (msg.type === "READY") {
     canSendFrame = true;

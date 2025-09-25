@@ -1,6 +1,6 @@
 // src/core/input/keycodes.ts
 
-export const KEY_MAP: Map<string, number> = new Map([
+export const KEY_MAP = new Map<string, number>([
   ["KeyW", 0],
   ["KeyA", 1],
   ["KeyS", 2],

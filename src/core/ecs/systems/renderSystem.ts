@@ -45,7 +45,11 @@ export function renderSystem(
     console.warn("RenderSystem: No main camera found. Skipping render.");
     return;
   }
-  const cameraComponent = world.getComponent(cameraQuery[0], CameraComponent)!;
+  const cameraComponent = world.getComponent(cameraQuery[0], CameraComponent);
+  if (!cameraComponent) {
+    console.warn("RenderSystem: Camera component not found. Skipping render.");
+    return;
+  }
 
   // Clear the reusable data container for the new frame's data
   sceneData.clear();
@@ -70,8 +74,10 @@ export function renderSystem(
   // Collect all lights
   const lightQuery = world.query([LightComponent, TransformComponent]);
   for (const entity of lightQuery) {
-    const lightComp = world.getComponent(entity, LightComponent)!;
-    const transform = world.getComponent(entity, TransformComponent)!;
+    const lightComp = world.getComponent(entity, LightComponent);
+    const transform = world.getComponent(entity, TransformComponent);
+
+    if (!lightComp || !transform) continue;
 
     // Update light position from its transform's world matrix
     lightComp.light.position[0] = transform.worldMatrix[12];
@@ -101,8 +107,10 @@ export function renderSystem(
   ]);
 
   for (const entity of renderableQuery) {
-    const transform = world.getComponent(entity, TransformComponent)!;
-    const meshRenderer = world.getComponent(entity, MeshRendererComponent)!;
+    const transform = world.getComponent(entity, TransformComponent);
+    const meshRenderer = world.getComponent(entity, MeshRendererComponent);
+
+    if (!transform || !meshRenderer) continue;
 
     if (typeof meshRenderer.mesh?.aabb === "undefined") {
       console.error(

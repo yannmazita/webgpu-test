@@ -30,14 +30,17 @@ export class OpaquePass {
         }
 
         if (mesh.indexBuffer) {
-          passEncoder.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat!);
+          passEncoder.setIndexBuffer(
+            mesh.indexBuffer,
+            mesh.indexFormat ?? "uint32",
+          );
         }
         lastMesh = mesh;
       }
 
       const instanceSlot = mesh.buffers.length;
       const instanceByteOffset =
-        batch.firstInstance * (Renderer as any).INSTANCE_BYTE_STRIDE;
+        batch.firstInstance * Renderer.INSTANCE_BYTE_STRIDE;
       passEncoder.setVertexBuffer(
         instanceSlot,
         instanceBuffer,
@@ -45,7 +48,13 @@ export class OpaquePass {
       );
 
       if (mesh.indexBuffer) {
-        passEncoder.drawIndexed(mesh.indexCount!, batch.instanceCount, 0, 0, 0);
+        passEncoder.drawIndexed(
+          mesh.indexCount ?? 0,
+          batch.instanceCount,
+          0,
+          0,
+          0,
+        );
       } else {
         passEncoder.draw(mesh.vertexCount, batch.instanceCount, 0, 0);
       }
