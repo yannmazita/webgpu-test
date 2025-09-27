@@ -33,12 +33,20 @@ const engineStateBuffer = new SharedArrayBuffer(
 const engineStateCtx = createEngineStateCtx(engineStateBuffer);
 initializeEngineStateHeader(engineStateCtx);
 
-// --- Worker Setup ---
+// --- Render Worker Setup ---
 const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 
-initUIElements(canvas, uiCanvas, hud, inputContext, metricsContext, engineStateCtx, worker);
+initUIElements(
+  canvas,
+  uiCanvas,
+  hud,
+  inputContext,
+  metricsContext,
+  engineStateCtx,
+  worker,
+);
 
 const offscreen = canvas.transferControlToOffscreen();
 worker.postMessage(
@@ -80,11 +88,15 @@ const sendResize = () => {
   }
 };
 
+interface WorkerMessage {
+  type: string;
+}
+
 // Listen for worker acks
 let canSendFrame = false;
-worker.addEventListener("message", (ev) => {
+worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
   const msg = ev.data;
-  if (!msg || !msg.type) return;
+  if (!msg?.type) return;
 
   if (msg.type === "READY") {
     canSendFrame = true;
@@ -99,7 +111,7 @@ worker.addEventListener("message", (ev) => {
 
 const tick = (now: number) => {
   // Always check for resize at the start of a frame.
-  // sendResize() is cheap and only posts a message when dimensions change.
+  // todo: refactor resizing (dumpster fire performance)
   sendResize();
 
   if (canSendFrame) {

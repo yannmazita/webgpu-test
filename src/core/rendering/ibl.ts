@@ -37,32 +37,30 @@ export async function equirectangularToCubemap(
   cubemapSize: number,
 ): Promise<GPUTexture> {
   // Ensure shared shader/pipeline/BGL are initialized
-  if (!equirectToCubemapBGL) {
-    equirectToCubemapBGL = device.createBindGroupLayout({
-      label: "EQUIRECT_TO_CUBEMAP_BGL",
-      entries: [
-        // @binding(0) equirectangularTexture: texture_2d<f32>
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            sampleType: "unfilterable-float",
-            viewDimension: "2d",
-          },
+  equirectToCubemapBGL ??= device.createBindGroupLayout({
+    label: "EQUIRECT_TO_CUBEMAP_BGL",
+    entries: [
+      // @binding(0) equirectangularTexture: texture_2d<f32>
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: {
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
         },
-        // @binding(1) cubemapTexture: texture_storage_2d_array<rgba16float, write>
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: {
-            access: "write-only",
-            format: "rgba16float",
-            viewDimension: "2d-array",
-          },
+      },
+      // @binding(1) cubemapTexture: texture_storage_2d_array<rgba16float, write>
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: {
+          access: "write-only",
+          format: "rgba16float",
+          viewDimension: "2d-array",
         },
-      ],
-    });
-  }
+      },
+    ],
+  });
 
   equirectToCubemapShader ??= await Shader.fromUrl(
     device,
@@ -103,7 +101,7 @@ export async function equirectangularToCubemap(
 
   const bindGroup = device.createBindGroup({
     label: "EQUIRECT_TO_CUBEMAP_BG",
-    layout: equirectToCubemapBGL!,
+    layout: equirectToCubemapBGL,
     entries: [
       { binding: 0, resource: equirectTexture.createView() },
       {

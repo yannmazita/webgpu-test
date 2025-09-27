@@ -13,10 +13,7 @@ let lastHudFrameId = 0;
  * @param hudElement The HTMLDivElement to display the HUD text in.
  * @param metCtx The metrics context for reading performance data.
  */
-export function init(
-  hudElement: HTMLDivElement,
-  metCtx: MetricsContext,
-): void {
+export function init(hudElement: HTMLDivElement, metCtx: MetricsContext): void {
   hud = hudElement;
   metricsContext = metCtx;
   hud.textContent = "Initializing...";
@@ -40,13 +37,14 @@ export function update(nowMs: number, isPointerLocked: boolean): void {
 
   const fps = m.dtUs > 0 ? 1_000_000 / m.dtUs : 0;
   const cpuMs = m.cpuUs / 1000;
+  const physMs = m.physicsTimeUs / 1000;
 
   const avgL = (m.clusterAvgX1000 ?? 0) / 1000;
   const maxL = m.clusterMax ?? 0;
   const ofl = m.clusterOverflows ?? 0;
 
   hud.textContent =
-    `FPS: ${fps.toFixed(1)}  |  CPU(ms): ${cpuMs.toFixed(2)}  |  Frame: ${m.frameId}\n` +
+    `FPS: ${fps.toFixed(1)}  |  CPU(ms): ${cpuMs.toFixed(2)}  |  Phys(ms): ${physMs.toFixed(2)} | Frame: ${m.frameId}\n` +
     `Canvas: ${m.w}x${m.h}  |  Lights: ${m.lights}\n` +
     `Visible (O/T): ${m.visOpaque}/${m.visTransp}\n` +
     `Draws (O/T): ${m.drawsOpaque}/${m.drawsTransp}\n` +

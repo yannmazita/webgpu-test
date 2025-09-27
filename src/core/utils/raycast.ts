@@ -92,7 +92,7 @@ export function getPickRay(
   const invWN = worldNear4[3] !== 0 ? 1.0 / worldNear4[3] : 1.0;
   const invWF = worldFar4[3] !== 0 ? 1.0 / worldFar4[3] : 1.0;
 
-  const worldNear = vec3.fromValues(
+  vec3.fromValues(
     worldNear4[0] * invWN,
     worldNear4[1] * invWN,
     worldNear4[2] * invWN,

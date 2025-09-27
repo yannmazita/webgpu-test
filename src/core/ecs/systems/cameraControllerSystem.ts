@@ -79,7 +79,8 @@ export class CameraControllerSystem {
     if (query.length === 0) return;
 
     const mainCameraEntity = query[0];
-    const transform = world.getComponent(mainCameraEntity, TransformComponent)!;
+    const transform = world.getComponent(mainCameraEntity, TransformComponent);
+    if (!transform) return;
 
     // Mouse look
     if (this.actions.isPointerLocked()) {

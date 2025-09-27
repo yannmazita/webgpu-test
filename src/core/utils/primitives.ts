@@ -232,7 +232,10 @@ export function createIcosphereMeshData(
   const midpointCache = new Map<string, number>();
   function getMidpoint(a: number, b: number): number {
     const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-    if (midpointCache.has(key)) return midpointCache.get(key)!;
+    const cached = midpointCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
 
     const va = vertices[a];
     const vb = vertices[b];

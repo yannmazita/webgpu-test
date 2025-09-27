@@ -343,7 +343,7 @@ export class Renderer {
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
-          if (entry.target === (this.canvas as any)) {
+          if (entry.target === this.canvas) {
             const cr = entry.contentRect;
             this.cssWidth = Math.max(0, Math.floor(cr.width));
             this.cssHeight = Math.max(0, Math.floor(cr.height));
@@ -352,7 +352,7 @@ export class Renderer {
         }
       });
       // Only observe if DOM canvas
-      if (typeof (this.canvas as any).getBoundingClientRect === "function") {
+      if (typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function") {
         this.resizeObserver.observe(this.canvas as HTMLCanvasElement);
       }
     }
@@ -361,7 +361,7 @@ export class Renderer {
       window.addEventListener("resize", () => {
         this.currentDPR = window.devicePixelRatio || 1;
         const rect =
-          typeof (this.canvas as any).getBoundingClientRect === "function"
+          typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function"
             ? (this.canvas as HTMLCanvasElement).getBoundingClientRect()
             : { width: this.cssWidth, height: this.cssHeight };
         this.cssWidth = Math.max(0, Math.floor(rect.width));
@@ -390,11 +390,11 @@ export class Renderer {
     const physW = Math.max(1, Math.round(this.cssWidth * this.currentDPR));
     const physH = Math.max(1, Math.round(this.cssHeight * this.currentDPR));
     if (
-      (this.canvas as any).width !== physW ||
-      (this.canvas as any).height !== physH
+      this.canvas.width !== physW ||
+      this.canvas.height !== physH
     ) {
-      (this.canvas as any).width = physW;
-      (this.canvas as any).height = physH;
+      this.canvas.width = physW;
+      this.canvas.height = physH;
       this.createDepthTexture();
       camera.setPerspective(
         camera.fovYRadians,
@@ -432,9 +432,9 @@ export class Renderer {
 
     // Diagnostics: detect software fallback
     // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
-    const anyAdapter = this.adapter as any;
-    if (typeof anyAdapter.isFallbackAdapter === "boolean") {
-      console.warn("WebGPU Adapter fallback:", anyAdapter.isFallbackAdapter);
+    const adapterWithFallback = this.adapter as GPUAdapter & { isFallbackAdapter?: boolean };
+    if (typeof adapterWithFallback.isFallbackAdapter === "boolean") {
+      console.warn("WebGPU Adapter fallback:", adapterWithFallback.isFallbackAdapter);
     } else {
       console.warn("WebGPU Adapter fallback: unknown (property not available)");
     }
@@ -467,8 +467,11 @@ export class Renderer {
    */
   private setupContext(): void {
     // OffscreenCanvas also supports 'webgpu' context in workers; use a safe cast.
-    const canvasAny = this.canvas as any;
-    this.context = canvasAny.getContext("webgpu") as GPUCanvasContext;
+    const context = (this.canvas as HTMLCanvasElement).getContext("webgpu");
+    if (!context) {
+      throw new Error("Failed to get WebGPU context");
+    }
+    this.context = context;
 
     // Default to the browser's preferred SDR format
     this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();

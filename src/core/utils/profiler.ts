@@ -7,7 +7,9 @@ export interface ProfileTiming {
 }
 
 const DEFAULT_PROFILER_ENABLED =
-  (globalThis as any).ENABLE_PROFILER === true ? true : false;
+  (globalThis as { ENABLE_PROFILER?: boolean }).ENABLE_PROFILER === true
+    ? true
+    : false;
 
 /**
  * Simple performance profiler to identify bottlenecks
@@ -16,6 +18,9 @@ export class Profiler {
   private static timings = new Map<string, ProfileTiming>();
   private static startTimes = new Map<string, number>();
   private static enabled = DEFAULT_PROFILER_ENABLED;
+
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  private constructor() {}
 
   /**
    * Enables or disables the profiler.

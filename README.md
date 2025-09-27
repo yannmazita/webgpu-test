@@ -1,46 +1,73 @@
-# webgpu-test
+# WebGPU Rendering Engine
 
-Learning graphics programming with WebGPU.
+A modern 3D rendering engine (and game engine) built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts.
 
 [engine_demo-19-09-2025.webm](https://github.com/user-attachments/assets/14a29c5e-5732-437c-8f24-e62af67baa42)
 
-
-Press `C` to enable free camera look :)
-
-# Features
-
-This project is a modern (read bleeding-edge) WebGPU rendering engine built from scratch in TypeScript.
+## Features (As of 25/09/2025)
 
 ### Architecture
 
-- **Multi-threaded:** Uses a Web Worker and `OffscreenCanvas` to run the entire rendering pipeline off the main thread, ensuring a smooth UI.
-- **Shared Memory Communication:** Employs `SharedArrayBuffer` for high-performance, lock-free communication of input and metrics between the main thread and the renderer.
-- **Entity-Component-System (ECS):** A data-oriented design (`src/core/ecs`) for flexible and efficient scene management.
-- **Resource Management:** Centralized loading and caching of assets like meshes, materials, and textures.
+- **Three-Threaded Architecture:** The engine is designed to maximize performance by splitting work across three threads:
+  - **Main Thread:** Handles user input and UI.
+  - **Render Thread:** Manages the scene, runs the ECS, and submits all rendering commands.
+  - **Physics Thread:** Runs the physics simulation at a fixed timestep, independent of the render framerate.
+- **Hybrid Thread Communication:** The engine uses a combination of communication methods, choosing the best tool for each task:
+  - **`SharedArrayBuffer`:** Used for high-frequency, low-latency state synchronization, such as real-time user input, physics state, and editor tweaks. This allows for zero-copy data exchange.
+  - **`postMessage`:** Used for initialization, infrequent events (like resizing the canvas), and synchronizing the frame loop between the main and render threads.
+- **Entity-Component-System (ECS):** Data-oriented design (`src/core/ecs`) for flexibility.
 
 ### Rendering & Graphics
 
 - **Physically-Based Rendering (PBR):** Implements a metallic/roughness PBR workflow for realistic materials.
-- **Image-Based Lighting (IBL):** Features a complete IBL pipeline for realistic ambient lighting, including:
-  - Diffuse irradiance mapping.
-  - Pre-filtered specular environment maps for reflections.
-  - A pre-computed BRDF lookup table.
-- **Clustered Forward Lighting:** Can handle a large number of dynamic lights (I will explore deferred rendering).
-- **Dynamic Shadows:** Real-time shadow mapping from a primary light source (sun).
-- **Skybox / Environment Mapping:** Renders HDR environment maps as backgrounds and for IBL.
+- **Image-Based Lighting (IBL):** Features a complete IBL pipeline for realistic ambient lighting, including diffuse irradiance mapping, pre-filtered specular environment maps, and a pre-computed BRDF lookup table.
+- **Clustered Forward Lighting:** Can handle a large number of dynamic lights efficiently.
+- **Dynamic Shadows:** Real-time cascaded shadow mapping (CSM) from a primary directional light source.
 - **glTF 2.0 Loading:** Supports loading complex scenes, including animated models, from the glTF format.
+- **Skybox / Environment Mapping:** Renders HDR environment maps as backgrounds and for image-based lighting.
 
-# Setup
+## Getting Started
 
-Simply install dependencies then run vite server:
+### Prerequisites (dev)
 
-```bash
-npm install
-```
+- Node.js and npm
+- A modern web browser with WebGPU support (see compatibility guide below)
 
-```bash
-npm run dev
-```
+### Installation & Running
+
+1.  **Clone the repository:**
+
+    ```bash
+    git clone <repository-url>
+    cd webgpu-test
+    ```
+
+2.  **Install dependencies:**
+
+    ```bash
+    npm install
+    ```
+
+3.  **Run the development server:**
+    ```bash
+    npm run dev
+    ```
+
+### Controls
+
+- Press `C` to toggle free camera mode.
+- WASD/ZQSD for movement. `Space` for up, `Shift` for down.
+
+### Other Commands
+
+- **Build for production:** `npm run build`
+- **Run linter:** `npm run lint`
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
 
 # WebGPU Engine - Compatibility Guide
 
@@ -51,27 +78,27 @@ npm run dev
 
 ### ✅ Shipped (Stable)
 
-| Platform            | Browser     | Since Version | Status                                                           |
-| ------------------- | ----------- | ------------- | ---------------------------------------------------------------- |
-| **Windows x86/x64** | Chrome/Edge | 113           | ✅ Fully shipped                                                 |
-| **Windows ARM64**   | Chrome/Edge | -             | 🚧 Behind flag¹                                                  |
-| **macOS**           | Chrome/Edge | 113           | ✅ Fully shipped                                                 |
-| **macOS**           | Safari      | Tech Preview  | ✅ Enabled by default                                            |
-| **Chrome OS**       | Chrome      | 113           | ✅ Fully shipped                                                 |
-| **Android**         | Chrome      | 121           | ✅ Fully shipped                                                 |
-| **iOS 18+**         | Safari      | 18            | ⚙️ Settings → Safari → Advanced → Experimental Features → WebGPU |
-| **Windows**         | Firefox     | 141           | ✅ Shipped (2024-07-22)                                          |
+| Platform            | Browser     | Since Version | Status                  |
+| ------------------- | ----------- | ------------- | ----------------------- |
+| **Windows x86/x64** | Chrome/Edge | 113           | ✅ Fully shipped        |
+| **Windows ARM64**   | Chrome/Edge | -             | 🚧 Behind flag¹         |
+| **macOS**           | Chrome/Edge | 113           | ✅ Fully shipped        |
+| **macOS**           | Safari      | Tahoe 26      | ✅ Fully shipped        |
+| **Chrome OS**       | Chrome      | 113           | ✅ Fully shipped        |
+| **Android**         | Chrome      | 121           | ✅ Fully shipped        |
+| **iOS+**            | Safari      | 26            | ✅ Fully shipped        |
+| **Windows**         | Firefox     | 141           | ✅ Shipped (2024-07-22) |
 
 ### 🚧 Experimental Support
 
-| Platform      | Browser         | Status                | Notes                         |
-| ------------- | --------------- | --------------------- | ----------------------------- |
-| **GNU/Linux** | Chrome/Edge     | 🚧 Behind flag¹ ²     | Requires special launch flags |
-| **GNU/Linux** | Firefox Nightly | ✅ Enabled by default | **Recommended for GNU/Linux** |
-| **macOS**     | Firefox Nightly | ✅ Enabled by default | Coming to stable soon         |
-| **Android**   | Firefox         | 🚧 In development     | Not in Nightly yet            |
+| Platform      | Browser         | Status                | Notes                                  |
+| ------------- | --------------- | --------------------- | -------------------------------------- |
+| **GNU/Linux** | Chrome/Edge     | 🚧 Behind flag¹ ²     | Requires special launch flags          |
+| **GNU/Linux** | Firefox Nightly | ✅ Enabled by default | **Recommended for GNU/Linux + NVIDIA** |
+| **macOS**     | Firefox Nightly | ✅ Enabled by default | Coming to stable soon                  |
+| **Android**   | Firefox         | 🚧 In development     | Not in Nightly yet                     |
 
-¹ Requires `chrome://flags/#enable-unsafe-webgpu` flag  
+¹ Requires `chrome://flags/#enable-unsafe-webgpu` flag
 ² GNU/Linux also requires command-line flags (see below)
 
 ## GNU/Linux Setup Instructions
@@ -139,6 +166,7 @@ google-chrome --ozone-platform-hint=x11 \
 
 ## Development Recommendations
 
-1. **GNU/Linux Primary Development**: Use **Firefox Nightly** - no configuration needed
-2. **Cross-browser Testing**: Keep Chrome/Chromium
-3. **CI/CD**: Use Chrome with software rendering for tests
+1.  **GNU/Linux + NVIDIA Development**: Use **Firefox Nightly** - no configuration needed
+2.  **Cross-browser Testing**: Keep Chrome/Chromium
+3.  **CI/CD**: Use Chrome with software rendering for tests
+

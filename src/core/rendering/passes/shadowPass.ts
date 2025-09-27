@@ -79,7 +79,7 @@ export class ShadowPass {
       return;
     }
 
-    const floatsPerInstance = (Renderer as any).INSTANCE_STRIDE_IN_FLOATS;
+    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
     const u32 = new Uint32Array(frameInstanceData.buffer);
     for (let i = 0; i < shadowCasterCount; i++) {
       const floatOffset = i * floatsPerInstance;
@@ -94,7 +94,7 @@ export class ShadowPass {
       0,
       frameInstanceData.buffer,
       0,
-      shadowCasterCount * (Renderer as any).INSTANCE_BYTE_STRIDE,
+      shadowCasterCount * Renderer.INSTANCE_BYTE_STRIDE,
     );
 
     this.shadowSubsystem.recordShadowPass(

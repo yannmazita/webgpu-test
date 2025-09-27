@@ -195,7 +195,7 @@ function applyChannel(
         component.setPosition(tmpValue[0], tmpValue[1], tmpValue[2]);
         break;
       case "rotation":
-        component.setRotation(tmpValue as unknown as quat);
+        component.setRotation(tmpValue as unknown as Quat);
         break;
       case "scale":
         component.setScale(tmpValue[0], tmpValue[1], tmpValue[2]);
@@ -227,7 +227,8 @@ export function animationSystem(world: World, deltaTime: number): void {
   const tmpValue = new Float32Array(4); // Max stride is 4 (quat/vec4)
 
   for (const e of entities) {
-    const anim = world.getComponent(e, AnimationComponent)!;
+    const anim = world.getComponent(e, AnimationComponent);
+    if (!anim) continue;
     const clip = anim.getActiveClip();
     if (!clip || !anim.playing) continue;
 

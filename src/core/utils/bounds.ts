@@ -17,7 +17,7 @@ import { AABB } from "../types/gpu";
  * @returns The transformed AABB in world space.
  */
 export function transformAABB(aabb: AABB, matrix: Mat4, outAABB?: AABB): AABB {
-  const result = outAABB || { min: vec3.create(), max: vec3.create() };
+  const result = outAABB ?? { min: vec3.create(), max: vec3.create() };
 
   // Start with the translation component (matrix column 3)
   result.min[0] = result.max[0] = matrix[12];

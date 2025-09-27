@@ -13,11 +13,11 @@ import {
   updatePointerLock,
 } from "@/core/input/manager";
 
-import * as fogWidget from "./editor-widgets/fogWidget";
-import * as sunWidget from "./editor-widgets/sunWidget";
-import * as shadowWidget from "./editor-widgets/shadowWidget";
-import * as renderingWidget from "./editor-widgets/renderingWidget";
-import * as iblWidget from "./editor-widgets/iblWidget";
+import { FogWidget } from "./editor-widgets/fogWidget";
+import { SunWidget } from "./editor-widgets/sunWidget";
+import { ShadowWidget } from "./editor-widgets/shadowWidget";
+import { RenderingWidget } from "./editor-widgets/renderingWidget";
+import { IblWidget } from "./editor-widgets/iblWidget";
 
 let uiDevice: GPUDevice;
 let uiContext: GPUCanvasContext;
@@ -27,33 +27,16 @@ let inputContext: InputContext;
 let engineStateCtx: EngineStateContext;
 let worker: Worker;
 
+// Widget instances
+let fogWidget: FogWidget;
+let sunWidget: SunWidget;
+let shadowWidget: ShadowWidget;
+let renderingWidget: RenderingWidget;
+let iblWidget: IblWidget;
+
 let isPointerLockedState = false;
 let mouseX = 0;
 let mouseY = 0;
-
-const uiState = {
-  fogEnabledUI: true,
-  fogColorUI: [0.5, 0.6, 0.7] as [number, number, number],
-  fogDensityUI: 0.02,
-  fogHeightUI: 0.0,
-  fogFalloffUI: 0.1,
-  fogInscatterUI: 0.8,
-  sunEnabledUI: true,
-  sunColorUI: [1, 1, 1] as [number, number, number],
-  sunIntensityUI: 1.0,
-  sunYawDegUI: -26,
-  sunPitchDegUI: -50,
-  sunCastsShadowsUI: true,
-  shadowMapSizeUI: 2048,
-  shadowSlopeScaleBiasUI: 3.0,
-  shadowConstantBiasUI: 1.0,
-  shadowDepthBiasUI: 0.0015,
-  shadowPcfRadiusUI: 1.0,
-  shadowOrthoExtentUI: 20.0,
-  toneMappingEnabledUI: true,
-  iblSelectedIndexUI: 0,
-  iblSizeUI: 2048,
-};
 
 let engineReady = false;
 
@@ -70,51 +53,35 @@ export function init(
   engineStateCtx = engStateCtx;
   worker = w;
 
+  // Instantiate widgets
+  fogWidget = new FogWidget(engineStateCtx);
+  sunWidget = new SunWidget(engineStateCtx);
+  shadowWidget = new ShadowWidget(engineStateCtx);
+  renderingWidget = new RenderingWidget(worker);
+  iblWidget = new IblWidget(worker);
+
   worker.addEventListener("message", (ev) => {
     const msg = ev.data;
     if (msg?.type === "READY") {
-      const snap = readEngineSnapshot(engineStateCtx);
-      uiState.fogEnabledUI = snap.fog.enabled;
-      uiState.fogColorUI = [
-        snap.fog.color[0],
-        snap.fog.color[1],
-        snap.fog.color[2],
-      ];
-      uiState.fogDensityUI = snap.fog.density;
-      uiState.fogHeightUI = snap.fog.height;
-      uiState.fogFalloffUI = snap.fog.heightFalloff;
-      uiState.fogInscatterUI = snap.fog.inscatteringIntensity;
-      uiState.sunEnabledUI = snap.sun.enabled;
-      uiState.sunColorUI = [
-        snap.sun.color[0],
-        snap.sun.color[1],
-        snap.sun.color[2],
-      ];
-      uiState.sunIntensityUI = snap.sun.intensity;
-      const { yaw, pitch } = dirToYawPitchDeg(
-        snap.sun.direction[0],
-        snap.sun.direction[1],
-        snap.sun.direction[2],
-      );
-      uiState.sunCastsShadowsUI = snap.sun.castsShadows ?? true;
-      uiState.sunYawDegUI = yaw;
-      uiState.sunPitchDegUI = pitch;
-      uiState.shadowMapSizeUI = snap.shadow.mapSize;
-      uiState.shadowSlopeScaleBiasUI = snap.shadow.slopeScaleBias;
-      uiState.shadowConstantBiasUI = snap.shadow.constantBias;
-      uiState.shadowDepthBiasUI = snap.shadow.depthBias;
-      uiState.shadowPcfRadiusUI = snap.shadow.pcfRadius;
-      uiState.shadowOrthoExtentUI = snap.shadow.orthoHalfExtent;
+      const snapshot = readEngineSnapshot(engineStateCtx);
+
+      // Update all widgets from the initial engine state
+      fogWidget.updateFromEngineSnapshot(snapshot);
+      sunWidget.updateFromEngineSnapshot(snapshot);
+      shadowWidget.updateFromEngineSnapshot(snapshot);
+      renderingWidget.updateFromEngineSnapshot(snapshot);
+      iblWidget.updateFromEngineSnapshot(snapshot);
+
       engineReady = true;
     }
   });
 
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
+  document.addEventListener("mousemove", handleMouseMove);
   document.addEventListener("pointerlockchange", handlePointerLockChange);
   canvas.addEventListener("click", handleCanvasClick);
   uiCanvas.addEventListener("click", handleUICanvasClick);
-  document.addEventListener("mousemove", handleMouseMove);
 }
 
 export async function initGPU() {
@@ -122,9 +89,6 @@ export async function initGPU() {
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error("No adapter found");
   uiDevice = await adapter.requestDevice();
-
-  uiCanvas.width = canvas.clientWidth;
-  uiCanvas.height = canvas.clientHeight;
 
   uiContext = uiCanvas.getContext("webgpu") as GPUCanvasContext;
   if (!uiContext) throw new Error("Failed to get WebGPU context");
@@ -226,16 +190,6 @@ function handleMouseMove(e: MouseEvent): void {
   updateMousePosition(inputContext, mouseX, mouseY);
 }
 
-function dirToYawPitchDeg(
-  x: number,
-  y: number,
-  z: number,
-): { yaw: number; pitch: number } {
-  const pitch = Math.asin(Math.max(-1, Math.min(1, y)));
-  const yaw = Math.atan2(z, x);
-  return { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI };
-}
-
 export function update(): void {
   if (!uiDevice || !uiContext) return;
 
@@ -251,11 +205,12 @@ export function update(): void {
   ImGui.Text(`ImGui WantCaptureKeyboard: ${io.WantCaptureKeyboard}`);
   ImGui.Separator();
 
-  fogWidget.render(engineStateCtx, uiState, engineReady);
-  sunWidget.render(engineStateCtx, uiState, engineReady);
-  shadowWidget.render(engineStateCtx, uiState, engineReady);
-  renderingWidget.render(worker, uiState);
-  iblWidget.render(worker, uiState);
+  // Render all widgets
+  fogWidget.render(engineReady);
+  sunWidget.render(engineReady);
+  shadowWidget.render(engineReady);
+  renderingWidget.render();
+  iblWidget.render();
 
   ImGui.End();
   updateUICanvasInteractivity();
