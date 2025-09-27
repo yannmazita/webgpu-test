@@ -33,7 +33,7 @@ import {
   wasActionPressed,
 } from "@/core/input/action";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
-import { createDefaultScene } from "./scene2";
+import { createDefaultScene } from "./scene";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import {
   InitMsg,
@@ -90,8 +90,8 @@ import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
  *
  * Key flows:
  * - INIT: Set up renderer, ECS world, scene, input/metrics, physics (Stage 2).
- * - FRAME: Process input, run systems (physics commands, animation, transform,
- *   camera, render), publish metrics.
+ * - FRAME: Process input, run systems (animation, transform,
+ *   physics commands, camera, render), publish metrics.
  * - RESIZE: Update canvas/viewport and camera aspect.
  * - Shared state: SABs for input (real-time), metrics (UI), engine (editor tweaks),
  *   physics (commands/states).
@@ -438,11 +438,6 @@ function frame(now: number): void {
   }
   */
 
-  // Physics commands
-  if (physicsCommandSystem) {
-    physicsCommandSystem.update(world);
-  }
-
   // Physics snapshot -> ECS transforms
   if (physicsCtx) {
     applyPhysicsSnapshot(world, physicsCtx);
@@ -451,6 +446,12 @@ function frame(now: number): void {
   // Drive animations (then recompute transforms)
   animationSystem(world, dt);
   transformSystem(world);
+
+  // Physics commands
+  if (physicsCommandSystem) {
+    physicsCommandSystem.update(world);
+  }
+
   cameraSystem(world);
 
   renderSystem(world, renderer, sceneRenderData);
