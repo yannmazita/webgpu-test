@@ -60,34 +60,90 @@ worker.postMessage(
   [offscreen],
 );
 
-// Frame-driven resize polling
+// event-driven resize handling with RAF throttling
 let lastCssW = 0;
 let lastCssH = 0;
 let dpr = window.devicePixelRatio || 1;
 
-const sendResize = () => {
+// Track latest pending size; only send once per animation frame.
+let pendingResizeRaf: number | null = null;
+let pendingW = 0;
+let pendingH = 0;
+let pendingDpr = dpr;
+
+const sendResize = (w: number, h: number, currDpr: number) => {
+  if (w <= 0 || h <= 0) return;
+  if (w === lastCssW && h === lastCssH && currDpr === dpr) return;
+
+  lastCssW = w;
+  lastCssH = h;
+  dpr = currDpr;
+
+  worker.postMessage({
+    type: "RESIZE",
+    cssWidth: w,
+    cssHeight: h,
+    devicePixelRatio: dpr,
+  });
+};
+
+// Batch multiple size changes into one post per animation frame.
+const scheduleResize = (w: number, h: number, currDpr: number) => {
+  pendingW = w;
+  pendingH = h;
+  pendingDpr = currDpr;
+  if (pendingResizeRaf != null) return;
+  pendingResizeRaf = requestAnimationFrame(() => {
+    pendingResizeRaf = null;
+    sendResize(pendingW, pendingH, pendingDpr);
+  });
+};
+
+// Observe CSS size changes of the DOM canvas.
+const resizeObserver = new ResizeObserver(() => {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   const currDpr = window.devicePixelRatio || 1;
+  scheduleResize(w, h, currDpr);
+});
+resizeObserver.observe(canvas);
 
-  // Don't send a resize message if the canvas isn't laid out yet
-  if (w === 0 || h === 0) {
-    return;
-  }
+// Ensure we send a correct first RESIZE after layout has occurred.
+requestAnimationFrame(() => {
+  // Double RAF to ensure layout is complete
+  requestAnimationFrame(() => {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const currDpr = window.devicePixelRatio || 1;
 
-  if (w !== lastCssW || h !== lastCssH || currDpr !== dpr) {
-    lastCssW = w;
-    lastCssH = h;
-    dpr = currDpr;
-    worker.postMessage({
-      type: "RESIZE",
-      cssWidth: w,
-      cssHeight: h,
-      devicePixelRatio: dpr,
-    });
+    // Send initial resize immediately if we have valid dimensions
+    if (w > 0 && h > 0) {
+      console.log(`[Main] Sending initial resize: ${w}x${h} @ ${currDpr}x`);
+      sendResize(w, h, currDpr);
+    } else {
+      console.warn(
+        "[Main] Canvas has invalid initial dimensions, waiting for resize",
+      );
+    }
+  });
+});
+
+// Also catch DPR/visibility changes that might not trigger ResizeObserver immediately.
+window.addEventListener("resize", () => {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  const currDpr = window.devicePixelRatio || 1;
+  scheduleResize(w, h, currDpr);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const currDpr = window.devicePixelRatio || 1;
+    scheduleResize(w, h, currDpr);
   }
-};
-sendResize();
+});
 
 interface WorkerMessage {
   type: string;
@@ -100,7 +156,9 @@ worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
   if (!msg?.type) return;
 
   if (msg.type === "READY") {
+    isWorkerReady = true;
     canSendFrame = true;
+    console.log("[Main] Worker ready, starting render loop");
     return;
   }
 
@@ -110,12 +168,9 @@ worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
   }
 });
 
+let isWorkerReady = false;
 const tick = (now: number) => {
-  // Always check for resize at the start of a frame.
-  // todo: refactor resizing (dumpster fire performance)
-  sendResize();
-
-  if (canSendFrame) {
+  if (isWorkerReady && canSendFrame) {
     canSendFrame = false;
     // The FRAME message is just a timing signal.
     // All input data is read directly by the worker from shared memory.

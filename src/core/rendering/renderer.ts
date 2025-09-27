@@ -77,6 +77,14 @@ export class Renderer {
   private transparentRenderables: Renderable[] = [];
   private opaqueBatches: DrawBatch[] = [];
 
+  // Frame synchronization
+  private frameInProgress = false;
+  private pendingResize: {
+    width: number;
+    height: number;
+    camera: CameraComponent;
+  } | null = null;
+
   private stats: RendererStats = {
     canvasWidth: 0,
     canvasHeight: 0,
@@ -95,12 +103,6 @@ export class Renderer {
 
   // UI-driven rendering flag
   private toneMappingEnabled = true;
-
-  private resizeObserver?: ResizeObserver;
-  private resizePending = true;
-  private cssWidth = 0;
-  private cssHeight = 0;
-  private currentDPR = 1;
 
   // The number of f32 values for a single instance.
   // mat4(16) + flag(1) + 3 bytes of padding
@@ -190,27 +192,8 @@ export class Renderer {
       );
     }
 
-    // Determine environment (DOM canvas vs OffscreenCanvas)
-    const isHTMLCanvas =
-      typeof (this.canvas as any).getBoundingClientRect === "function";
-
-    if (isHTMLCanvas) {
-      // Main thread: safe to access window and observe DOM canvas
-      this.currentDPR =
-        typeof window !== "undefined" && (window as any)
-          ? window.devicePixelRatio || 1
-          : 1;
-      this._setupResizeObserver();
-      const rect = (this.canvas as HTMLCanvasElement).getBoundingClientRect();
-      this.cssWidth = Math.max(0, Math.floor(rect.width));
-      this.cssHeight = Math.max(0, Math.floor(rect.height));
-      this.resizePending = true;
-    } else {
-      // Worker with OffscreenCanvas: main thread will send RESIZE messages
-      this.currentDPR = 1;
-      this.resizePending = false;
-    }
-
+    // The worker has an OffscreenCanvas, so its initial size is what's passed in.
+    // The main thread will send a RESIZE message to correct it.
     this.depthFormat = "depth24plus";
     this.createDepthTexture();
 
@@ -339,38 +322,6 @@ export class Renderer {
     this.toneMappingEnabled = !!enabled;
   }
 
-  private _setupResizeObserver(): void {
-    if (typeof ResizeObserver !== "undefined") {
-      this.resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.target === this.canvas) {
-            const cr = entry.contentRect;
-            this.cssWidth = Math.max(0, Math.floor(cr.width));
-            this.cssHeight = Math.max(0, Math.floor(cr.height));
-            this.resizePending = true;
-          }
-        }
-      });
-      // Only observe if DOM canvas
-      if (typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function") {
-        this.resizeObserver.observe(this.canvas as HTMLCanvasElement);
-      }
-    }
-    // Only attach window listener in main thread
-    if (typeof window !== "undefined" && window && window.addEventListener) {
-      window.addEventListener("resize", () => {
-        this.currentDPR = window.devicePixelRatio || 1;
-        const rect =
-          typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function"
-            ? (this.canvas as HTMLCanvasElement).getBoundingClientRect()
-            : { width: this.cssWidth, height: this.cssHeight };
-        this.cssWidth = Math.max(0, Math.floor(rect.width));
-        this.cssHeight = Math.max(0, Math.floor(rect.height));
-        this.resizePending = true;
-      });
-    }
-  }
-
   /**
    * External resize hook for worker-driven sizing.
    *
@@ -383,27 +334,56 @@ export class Renderer {
     devicePixelRatio: number,
     camera: CameraComponent,
   ): void {
-    // Apply render scale to DPR
-    this.currentDPR = (devicePixelRatio || 1) * Renderer.RENDER_SCALE;
-    this.cssWidth = Math.max(0, Math.floor(cssWidth));
-    this.cssHeight = Math.max(0, Math.floor(cssHeight));
-    const physW = Math.max(1, Math.round(this.cssWidth * this.currentDPR));
-    const physH = Math.max(1, Math.round(this.cssHeight * this.currentDPR));
-    if (
-      this.canvas.width !== physW ||
-      this.canvas.height !== physH
-    ) {
-      this.canvas.width = physW;
-      this.canvas.height = physH;
-      this.createDepthTexture();
-      camera.setPerspective(
-        camera.fovYRadians,
-        physW / physH,
-        camera.near,
-        camera.far,
-      );
+    const dpr = (devicePixelRatio || 1) * Renderer.RENDER_SCALE;
+    const physW = Math.max(1, Math.round(cssWidth * dpr));
+    const physH = Math.max(1, Math.round(cssHeight * dpr));
+
+    // Skip if size hasn't changed
+    if (this.canvas.width === physW && this.canvas.height === physH) {
+      return;
     }
-    this.resizePending = false;
+
+    // Queue resize if frame is in progress
+    if (this.frameInProgress) {
+      this.pendingResize = {
+        width: physW,
+        height: physH,
+        camera,
+      };
+      console.log(
+        `[Renderer] Resize queued (frame in progress): ${physW}x${physH}`,
+      );
+      return;
+    }
+
+    // Apply resize immediately if no frame is active
+    this._applyResize(physW, physH, camera);
+  }
+
+  private _applyResize(
+    width: number,
+    height: number,
+    camera: CameraComponent,
+  ): void {
+    console.log(`[Renderer] Applying resize: ${width}x${height}`);
+
+    // Update canvas size
+    this.canvas.width = width;
+    this.canvas.height = height;
+
+    // Recreate depth texture
+    this.createDepthTexture();
+
+    // Update camera aspect ratio
+    camera.setPerspective(
+      camera.fovYRadians,
+      width / height,
+      camera.near,
+      camera.far,
+    );
+
+    // Clear pending resize
+    this.pendingResize = null;
   }
 
   private async setupDevice(): Promise<void> {
@@ -432,9 +412,14 @@ export class Renderer {
 
     // Diagnostics: detect software fallback
     // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
-    const adapterWithFallback = this.adapter as GPUAdapter & { isFallbackAdapter?: boolean };
+    const adapterWithFallback = this.adapter as GPUAdapter & {
+      isFallbackAdapter?: boolean;
+    };
     if (typeof adapterWithFallback.isFallbackAdapter === "boolean") {
-      console.warn("WebGPU Adapter fallback:", adapterWithFallback.isFallbackAdapter);
+      console.warn(
+        "WebGPU Adapter fallback:",
+        adapterWithFallback.isFallbackAdapter,
+      );
     } else {
       console.warn("WebGPU Adapter fallback: unknown (property not available)");
     }
@@ -520,32 +505,6 @@ export class Renderer {
       format: this.depthFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
-  }
-
-  private _handleResize(camera: CameraComponent): boolean {
-    if (!this.resizePending) return false;
-
-    // Apply dynamic resolution scaling consistently on the DOM canvas path
-    const effectiveDpr = (this.currentDPR || 1) * Renderer.RENDER_SCALE;
-    const physW = Math.max(1, Math.round(this.cssWidth * effectiveDpr));
-    const physH = Math.max(1, Math.round(this.cssHeight * effectiveDpr));
-
-    if (this.canvas.width !== physW || this.canvas.height !== physH) {
-      this.canvas.width = physW;
-      this.canvas.height = physH;
-      // Recreate depth texture for new size
-      this.createDepthTexture();
-      // Update camera aspect immediately
-      camera.setPerspective(
-        camera.fovYRadians,
-        physW / physH,
-        camera.near,
-        camera.far,
-      );
-    }
-
-    this.resizePending = false;
-    return true;
   }
 
   private _updateFrameUniforms(
@@ -719,6 +678,13 @@ export class Renderer {
   }
 
   /**
+   * Returns whether the renderer has been initialized.
+   */
+  public isInitialized(): boolean {
+    return !!this.device && !!this.context && !!this.frameBindGroupLayout;
+  }
+
+  /**
    * Renders a single frame.
    *
    * This method performs frustum culling, batching, and sorting of renderable
@@ -736,11 +702,14 @@ export class Renderer {
     sun?: SceneSunComponent,
     shadowSettings?: ShadowSettingsComponent,
   ): void {
+    if (!this.isInitialized()) {
+      console.warn("[Renderer] Render called before initialization complete");
+      return;
+    }
     const tStart = performance.now();
 
     Profiler.begin("Render.Total");
     Profiler.begin("Render.HandleResize");
-    this._handleResize(camera);
     Profiler.end("Render.HandleResize");
 
     if (this.canvas.width === 0 || this.canvas.height === 0) {

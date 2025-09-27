@@ -140,6 +140,10 @@ let animationStartTime = 0;
 const orbitRadius = 15.0;
 const orbitHeight = 2.0;
 
+let isRendererInitialized = false;
+let pendingFrames: FrameMsg[] = [];
+let initializationPromise: Promise<void> | null = null;
+
 function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
   // Check if new snapshot published
   const gen = Atomics.load(physCtx.statesI32, STATES_GEN_OFFSET >> 2);
@@ -204,19 +208,18 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
  * @param sharedInputBuffer SharedArrayBuffer for input state (keyboard/mouse).
  * @param sharedMetricsBuffer SharedArrayBuffer for performance metrics.
  * @param sharedEngineStateBuffer SharedArrayBuffer for editor state sync.
- * @returns Promise that resolves when initialization completes.
  */
-async function initWorker(
+
+function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
-): Promise<void> {
+): void {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
-  console.log("[Worker] Awaiting renderer init...");
-  await renderer.init();
-  console.log("[Worker] Renderer initialized.");
+  // REMOVED: await renderer.init() - now deferred until first resize
+  console.log("[Worker] Renderer created, awaiting first resize...");
 
   // Metrics setup
   metricsContext = createMetricsContext(sharedMetricsBuffer);
@@ -281,20 +284,10 @@ async function initWorker(
 
   cameraControllerSystem = new CameraControllerSystem(actionController);
 
-  resourceManager = new ResourceManager(renderer);
+  // Note: ResourceManager and World creation moved here (before renderer.init)
+  // so they're available when scene is created after renderer initialization
   world = new World();
   sceneRenderData = new SceneRenderData();
-
-  // --- Scene Setup ---
-  try {
-    console.log("[Worker] Creating default scene...");
-    const sceneEntities = await createDefaultScene(world, resourceManager);
-    cameraEntity = sceneEntities.cameraEntity;
-    console.log("[Worker] Scene created successfully");
-  } catch (error) {
-    console.error("[Worker] Failed to create scene:", error);
-    throw error;
-  }
 
   // --- Physics Setup (Stage 2) ---
   console.log("[Worker] Setting up physics...");
@@ -336,19 +329,77 @@ async function initWorker(
   // Create command system
   physicsCommandSystem = new PhysicsCommandSystem(physicsCtx);
 
-  if (engineStateCtx) {
-    // Only publish if the buffer looks large enough to hold header+flags
-    if ((engineStateCtx.i32.length | 0) >= 4) {
-      publishSnapshotFromWorld(world, engineStateCtx);
-    } else {
-      console.warn(
-        "[Worker] EngineState SAB too small; skipping snapshot. i32.len=",
-        engineStateCtx.i32.length,
-      );
-    }
+  // Scene creation is deferred until after renderer.init() completes
+  // Engine state snapshot publishing is deferred until after scene creation
+  // READY message is deferred until after renderer initialization
+}
+
+async function initializeRenderer(
+  cssWidth: number,
+  cssHeight: number,
+  devicePixelRatio: number,
+): Promise<void> {
+  if (!renderer || isRendererInitialized || initializationPromise) {
+    return;
   }
 
-  (self as Worker).postMessage({ type: "READY" });
+  console.log(
+    `[Worker] Initializing renderer with size ${cssWidth}x${cssHeight} @ ${devicePixelRatio}x`,
+  );
+
+  initializationPromise = renderer
+    .init()
+    .then(async () => {
+      isRendererInitialized = true;
+      console.log("[Worker] Renderer initialized successfully");
+
+      // ResourceManager needs the initialized renderer
+      resourceManager = new ResourceManager(renderer);
+
+      // Now create the scene
+      if (world && resourceManager) {
+        try {
+          console.log("[Worker] Creating default scene...");
+          const sceneEntities = await createDefaultScene(
+            world,
+            resourceManager,
+          );
+          cameraEntity = sceneEntities.cameraEntity;
+          console.log("[Worker] Scene created successfully");
+        } catch (error) {
+          console.error("[Worker] Failed to create scene:", error);
+        }
+      }
+
+      // Publish initial engine state
+      if (engineStateCtx && world) {
+        if ((engineStateCtx.i32.length | 0) >= 4) {
+          publishSnapshotFromWorld(world, engineStateCtx);
+        } else {
+          console.warn(
+            "[Worker] EngineState SAB too small; skipping snapshot. i32.len=",
+            engineStateCtx.i32.length,
+          );
+        }
+      }
+
+      // Signal ready
+      (self as Worker).postMessage({ type: "READY" });
+
+      // Process any queued frames
+      const queuedFrames = pendingFrames;
+      pendingFrames = [];
+      for (const frameMsg of queuedFrames) {
+        frame(frameMsg.now);
+      }
+    })
+    .catch((error) => {
+      console.error("[Worker] Failed to initialize renderer:", error);
+      initializationPromise = null;
+      throw error;
+    });
+
+  await initializationPromise;
 }
 
 /**
@@ -494,6 +545,7 @@ function frame(now: number): void {
  * - FRAME: Trigger one frame of update/render.
  * - SET_TONE_MAPPING: Toggle post-processing tone mapping.
  * - SET_ENVIRONMENT: Load new HDR environment map and update IBL/skybox.
+ * - RAYCAST_REQUEST: Raycast request.
  *
  * Physics messages are handled via SABs (no direct dispatch here).
  *
@@ -512,7 +564,7 @@ self.onmessage = async (
   const msg = ev.data;
 
   if (msg.type === MSG_INIT) {
-    await initWorker(
+    initWorker(
       msg.canvas,
       msg.sharedInputBuffer,
       msg.sharedMetricsBuffer,
@@ -521,40 +573,52 @@ self.onmessage = async (
     return;
   }
 
-  if (!renderer || !world) {
-    if (msg.type === MSG_FRAME) {
-      (self as Worker).postMessage({ type: "FRAME_DONE" });
+  // Handle RESIZE before renderer is initialized
+  if (msg.type === MSG_RESIZE) {
+    const { cssWidth, cssHeight, devicePixelRatio } = msg;
+
+    // Initialize renderer on first valid resize
+    if (!isRendererInitialized && cssWidth > 0 && cssHeight > 0) {
+      await initializeRenderer(cssWidth, cssHeight, devicePixelRatio);
     }
-    return;
-  }
 
-  switch (msg.type) {
-    case MSG_RESIZE: {
-      // Store the viewport dimensions for later use by raycasting.
-      lastViewportWidth = msg.cssWidth;
-      lastViewportHeight = msg.cssHeight;
+    // Store viewport dimensions for raycasting
+    lastViewportWidth = cssWidth;
+    lastViewportHeight = cssHeight;
 
-      // camera may not be ready if scene creation failed/hasn't finished
+    // Apply resize if renderer is ready
+    if (renderer && isRendererInitialized && world) {
       const cam =
         cameraEntity !== -1
           ? world.getComponent(cameraEntity, CameraComponent)
           : undefined;
       if (cam) {
-        renderer.requestResize(
-          msg.cssWidth,
-          msg.cssHeight,
-          msg.devicePixelRatio,
-          cam,
-        );
+        renderer.requestResize(cssWidth, cssHeight, devicePixelRatio, cam);
       } else {
         console.warn("[Worker] Resize skipped: camera not ready yet");
       }
-      break;
     }
-    case MSG_FRAME: {
-      frame(msg.now);
-      break;
+    return;
+  }
+
+  // Queue frames if renderer not ready
+  if (msg.type === MSG_FRAME) {
+    if (!isRendererInitialized) {
+      pendingFrames.push(msg);
+      (self as Worker).postMessage({ type: "FRAME_DONE" });
+      return;
     }
+    frame(msg.now);
+    return;
+  }
+
+  // Guard other operations until renderer is ready
+  if (!renderer || !world || !isRendererInitialized) {
+    console.warn(`[Worker] Ignoring ${msg.type} - renderer not ready`);
+    return;
+  }
+
+  switch (msg.type) {
     case MSG_SET_TONE_MAPPING: {
       if (renderer) {
         renderer.setToneMappingEnabled(!!msg.enabled);
