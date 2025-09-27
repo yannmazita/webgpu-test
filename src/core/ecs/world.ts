@@ -252,4 +252,15 @@ export class World {
   public getEntityUuid(entity: Entity): string | undefined {
     return this.entityToUuid.get(entity);
   }
+
+  /**
+   * Gets a display name for an entity, defaulting to its UUID.
+   * In a more complex engine, this might check for a NameComponent first.
+   * @param entity The entity to get the name for.
+   * @returns A string name for the entity.
+   */
+  public getEntityName(entity: Entity): string {
+    // For now, we just use the UUID. A future NameComponent could override this.
+    return this.getEntityUuid(entity) ?? `Entity ${entity}`;
+  }
 }

@@ -2,6 +2,21 @@
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3, vec4, Vec3, mat4 } from "wgpu-matrix";
+import { World } from "@/core/ecs/world";
+import { Entity } from "@/core/ecs/entity";
+import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
+import { intersectRayWithAABB, transformAABB } from "@/core/utils/bounds";
+import { AABB } from "@/core/types/gpu";
+
+/**
+ * Represents the result of a successful raycast, containing information
+ * about the hit entity and intersection point.
+ */
+export interface RaycastHit {
+  entity: Entity;
+  distance: number;
+  point: Vec3;
+}
 
 /**
  * Calculates the 3D world position corresponding to a 2D mouse coordinate.
@@ -71,46 +86,38 @@ export function getPickRay(
     };
   }
 
-  // 1) NDC
+  // 1) Normalized Device Coordinates (NDC)
   const ndcX = (mouseCoords.x / viewportWidth) * 2 - 1;
   const ndcY = 1 - (mouseCoords.y / viewportHeight) * 2;
 
-  // 2) Clip-space points at near and far
-  const nearClip = vec4.fromValues(ndcX, ndcY, -1.0, 1.0);
-  const farClip = vec4.fromValues(ndcX, ndcY, 1.0, 1.0);
+  // 2) Clip-space points at near (z=0) and far (z=1) for WebGPU
+  const nearClip = vec4.fromValues(ndcX, ndcY, 0.0, 1.0);
 
-  // 3) Inverse View-Projection = inverseView * inverseProjection
+  // 3) Inverse View-Projection matrix
   const invVP = mat4.multiply(
     cameraComp.inverseViewMatrix,
     cameraComp.inverseProjectionMatrix,
   );
 
-  // 4) Unproject and perspective divide
+  // 4) Unproject near point and perform perspective divide
   const worldNear4 = vec4.transformMat4(nearClip, invVP);
-  const worldFar4 = vec4.transformMat4(farClip, invVP);
-
   const invWN = worldNear4[3] !== 0 ? 1.0 / worldNear4[3] : 1.0;
-  const invWF = worldFar4[3] !== 0 ? 1.0 / worldFar4[3] : 1.0;
 
-  vec3.fromValues(
+  const worldNear = vec3.fromValues(
     worldNear4[0] * invWN,
     worldNear4[1] * invWN,
     worldNear4[2] * invWN,
   );
-  const worldFar = vec3.fromValues(
-    worldFar4[0] * invWF,
-    worldFar4[1] * invWF,
-    worldFar4[2] * invWF,
-  );
 
-  // 5) Origin at camera position; direction toward far point
+  // 5) Ray origin is camera's world position.
+  //    Direction is from the camera towards the unprojected near plane point.
   const origin = vec3.fromValues(
     cameraComp.inverseViewMatrix[12],
     cameraComp.inverseViewMatrix[13],
     cameraComp.inverseViewMatrix[14],
   );
 
-  const dir = vec3.normalize(vec3.subtract(worldFar, origin));
+  const dir = vec3.normalize(vec3.subtract(worldNear, origin));
 
   return { origin, direction: dir };
 }
@@ -179,4 +186,56 @@ export function getMouseWorldPositionWithViewport(
     cameraComp,
   );
   return intersectRayWithPlane(origin, direction, planePoint, planeNormal);
+}
+
+/**
+ * Performs a raycast against all renderable entities in the world.
+ *
+ * This function iterates through all entities with a `MeshRendererComponent`
+ * and `TransformComponent`, transforms their local-space AABB into world space,
+ * and performs a ray-AABB intersection test. It returns the closest hit.
+ *
+ * @param world The ECS world to cast against.
+ * @param origin The origin of the ray in world space.
+ * @param direction The normalized direction of the ray in world space.
+ * @returns A `RaycastHit` object for the closest intersection, or `null` if no
+ *     entity was hit.
+ */
+export function raycast(
+  world: World,
+  origin: Vec3,
+  direction: Vec3,
+): RaycastHit | null {
+  console.log("[Raycast] Starting raycast against all renderables.");
+  const query = world.query([MeshRendererComponent, TransformComponent]);
+  let closestHit: RaycastHit | null = null;
+  const tempAABB: AABB = { min: vec3.create(), max: vec3.create() };
+
+  for (const entity of query) {
+    const meshRenderer = world.getComponent(entity, MeshRendererComponent);
+    const transform = world.getComponent(entity, TransformComponent);
+
+    if (!meshRenderer || !transform) continue;
+
+    const worldAABB = transformAABB(
+      meshRenderer.mesh.aabb,
+      transform.worldMatrix,
+      tempAABB,
+    );
+
+    const distance = intersectRayWithAABB(origin, direction, worldAABB);
+
+    if (distance !== null) {
+      console.log(
+        `[Raycast] ---> HIT entity ${entity} at distance ${distance.toFixed(2)}. World AABB Min: [${worldAABB.min[0].toFixed(2)}, ${worldAABB.min[1].toFixed(2)}, ${worldAABB.min[2].toFixed(2)}], Max: [${worldAABB.max[0].toFixed(2)}, ${worldAABB.max[1].toFixed(2)}, ${worldAABB.max[2].toFixed(2)}]`,
+      );
+      if (closestHit === null || distance < closestHit.distance) {
+        const point = vec3.add(origin, vec3.scale(direction, distance));
+        closestHit = { entity, distance, point };
+      }
+    }
+  }
+
+  console.log("[Raycast] Finished. Closest hit:", closestHit);
+  return closestHit;
 }

@@ -1,5 +1,5 @@
 // src/core/utils/bounds.ts
-import { vec3, Mat4, Vec4 } from "wgpu-matrix";
+import { vec3, Mat4, Vec4, Vec3 } from "wgpu-matrix";
 import { AABB } from "../types/gpu";
 
 /**
@@ -75,4 +75,61 @@ export function testAABBFrustum(aabb: AABB, frustumPlanes: Vec4[]): boolean {
   }
 
   return true; // AABB is inside or intersecting the frustum
+}
+
+/**
+ * Intersects a ray with an axis-aligned bounding box (AABB).
+ *
+ * This function implements the slab test, which is an efficient method for
+ * determining if a ray intersects an AABB and finding the intersection distance.
+ *
+ * @param origin The origin of the ray.
+ * @param direction The direction of the ray (must be normalized).
+ * @param aabb The AABB to test against.
+ * @returns The distance from the ray's origin to the intersection point,
+ *     or `null` if there is no intersection.
+ */
+export function intersectRayWithAABB(
+  origin: Vec3,
+  direction: Vec3,
+  aabb: AABB,
+): number | null {
+  let tmin = -Infinity;
+  let tmax = Infinity;
+
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(direction[i]) < 1e-6) {
+      // Ray is parallel to the slab. If origin is not inside, no intersection.
+      if (origin[i] < aabb.min[i] || origin[i] > aabb.max[i]) {
+        return null;
+      }
+    } else {
+      const invD = 1.0 / direction[i];
+      let t1 = (aabb.min[i] - origin[i]) * invD;
+      let t2 = (aabb.max[i] - origin[i]) * invD;
+
+      if (t1 > t2) {
+        [t1, t2] = [t2, t1]; // swap
+      }
+
+      tmin = Math.max(tmin, t1);
+      tmax = Math.min(tmax, t2);
+
+      if (tmin > tmax) {
+        return null; // Box is missed
+      }
+    }
+  }
+
+  // If tmax is negative, ray is intersecting AABB behind its origin
+  if (tmax < 0) {
+    return null;
+  }
+
+  // If tmin is negative, ray's origin is inside the AABB
+  if (tmin < 0) {
+    return tmax;
+  }
+
+  return tmin;
 }

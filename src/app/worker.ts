@@ -46,6 +46,10 @@ import {
   MSG_SET_TONE_MAPPING,
   MSG_SET_ENVIRONMENT,
   SetEnvironmentMsg,
+  RaycastRequestMsg,
+  MSG_RAYCAST_REQUEST,
+  RaycastResponseMsg,
+  MSG_RAYCAST_RESPONSE,
 } from "@/core/types/worker";
 import {
   createEngineStateContext as createEngineStateCtx,
@@ -78,6 +82,7 @@ import {
   STATES_WRITE_INDEX_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
+import { getPickRay, raycast } from "@/core/utils/raycast";
 
 /**
  * Main render worker script.
@@ -124,6 +129,10 @@ let physicsCtx: PhysicsContext | null = null;
 let physicsCommandSystem: PhysicsCommandSystem | null = null;
 let physicsWorker: Worker | null = null;
 let lastSnapshotGen = 0; // track last applied physics snapshot generation
+
+// State for raycast
+let lastViewportWidth = 0;
+let lastViewportHeight = 0;
 
 // State for dt and camera orbit
 let lastFrameTime = 0;
@@ -492,7 +501,12 @@ function frame(now: number): void {
  */
 self.onmessage = async (
   ev: MessageEvent<
-    InitMsg | ResizeMsg | FrameMsg | ToneMapMsg | SetEnvironmentMsg
+    | InitMsg
+    | ResizeMsg
+    | FrameMsg
+    | ToneMapMsg
+    | SetEnvironmentMsg
+    | RaycastRequestMsg
   >,
 ) => {
   const msg = ev.data;
@@ -516,6 +530,10 @@ self.onmessage = async (
 
   switch (msg.type) {
     case MSG_RESIZE: {
+      // Store the viewport dimensions for later use by raycasting.
+      lastViewportWidth = msg.cssWidth;
+      lastViewportHeight = msg.cssHeight;
+
       // camera may not be ready if scene creation failed/hasn't finished
       const cam =
         cameraEntity !== -1
@@ -560,6 +578,52 @@ self.onmessage = async (
         console.log("[Worker] Environment updated:", m.url, "size=", m.size);
       } catch (e) {
         console.error("[Worker] Failed to update environment:", e);
+      }
+      break;
+    }
+    case MSG_RAYCAST_REQUEST: {
+      console.log("[Worker] Received raycast request:", msg);
+      const m = msg as RaycastRequestMsg;
+      const cam =
+        cameraEntity !== -1
+          ? world.getComponent(cameraEntity, CameraComponent)
+          : undefined;
+      if (cam) {
+        const camPos = vec3.fromValues(
+          cam.inverseViewMatrix[12],
+          cam.inverseViewMatrix[13],
+          cam.inverseViewMatrix[14],
+        );
+        console.log(
+          `[Worker] Camera position: ${camPos[0].toFixed(2)}, ${camPos[1].toFixed(2)}, ${camPos[2].toFixed(2)}`,
+        );
+
+        const { origin, direction } = getPickRay(
+          { x: m.x, y: m.y },
+          lastViewportWidth,
+          lastViewportHeight,
+          cam,
+        );
+        console.log(
+          `[Worker] Generated Ray -> Origin: [${origin[0].toFixed(2)}, ${origin[1].toFixed(2)}, ${origin[2].toFixed(2)}], Direction: [${direction[0].toFixed(2)}, ${direction[1].toFixed(2)}, ${direction[2].toFixed(2)}]`,
+        );
+
+        const hit = raycast(world, origin, direction);
+        console.log("[Worker] Raycast hit:", hit);
+
+        let responseHit = null;
+        if (hit) {
+          responseHit = {
+            ...hit,
+            entityName: world.getEntityName(hit.entity),
+          };
+        }
+
+        const response: RaycastResponseMsg = {
+          type: MSG_RAYCAST_RESPONSE,
+          hit: responseHit,
+        };
+        (self as Worker).postMessage(response);
       }
       break;
     }
