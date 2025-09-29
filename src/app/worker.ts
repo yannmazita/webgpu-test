@@ -30,6 +30,8 @@ import {
   getAxisValue,
   IActionController,
   isActionPressed,
+  updateActionStates,
+  updatePreviousActionState,
   wasActionPressed,
 } from "@/core/input/action";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
@@ -58,7 +60,7 @@ import {
   publishSnapshotFromWorld,
 } from "@/core/engineState";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
-import { mat4, quat, vec3 } from "wgpu-matrix";
+import { vec3 } from "wgpu-matrix";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 
@@ -80,9 +82,12 @@ import {
   STATES_SLOT_SIZE,
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   STATES_WRITE_INDEX_OFFSET,
+  STATES_BODY_STRIDE_BYTES,
 } from "@/core/sharedPhysicsLayout";
 import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 import { getPickRay, raycast } from "@/core/utils/raycast";
+import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
+import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
 
 /**
  * Main render worker script.
@@ -116,9 +121,12 @@ let sceneRenderData: SceneRenderData | null = null;
 let cameraEntity = -1;
 
 let inputContext: InputContext | null = null;
+let inputReader: IInputSource | null = null;
 let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
+let playerControllerSystem: PlayerControllerSystem | null = null;
 let isFreeCameraActive = false;
+let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
 
 let metricsContext: MetricsContext | null = null;
@@ -134,11 +142,8 @@ let lastSnapshotGen = 0; // track last applied physics snapshot generation
 let lastViewportWidth = 0;
 let lastViewportHeight = 0;
 
-// State for dt and camera orbit
+// State for dt
 let lastFrameTime = 0;
-let animationStartTime = 0;
-const orbitRadius = 15.0;
-const orbitHeight = 2.0;
 
 function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
   // Check if new snapshot published
@@ -167,27 +172,37 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
   }
 
   for (let i = 0; i < count && i < STATES_MAX_BODIES; i++) {
-    // Per-body record layout: [u32 physId][f32 pos3][f32 rot4] stride 32 bytes
-    const idOffsetI32 = slotBaseI32 + 1 + i * 8; // 8 i32 per body
-    const physId = Atomics.load(physCtx.statesI32, idOffsetI32);
+    // Per-body record layout: [u32 physId][f32 pos3][f32 rot4][f32 onGround] stride 36 bytes
+    // Stride is 36 bytes = 9 elements of 32-bits
+    const recordBaseI32 = slotBaseI32 + 1 + i * 9;
+    const physId = Atomics.load(physCtx.statesI32, recordBaseI32);
     const entity = physToEntity.get(physId);
     if (!entity) continue;
 
-    const bodyPayloadF32 =
-      (STATES_SLOT_OFFSET + writeIdx * STATES_SLOT_SIZE + 8 + i * 32) >> 2;
-    const px = physCtx.statesF32[bodyPayloadF32 + 0];
-    const py = physCtx.statesF32[bodyPayloadF32 + 1];
-    const pz = physCtx.statesF32[bodyPayloadF32 + 2];
-    const rx = physCtx.statesF32[bodyPayloadF32 + 3];
-    const ry = physCtx.statesF32[bodyPayloadF32 + 4];
-    const rz = physCtx.statesF32[bodyPayloadF32 + 5];
-    const rw = physCtx.statesF32[bodyPayloadF32 + 6];
+    const payloadF32 = recordBaseI32 + 1;
+    const px = physCtx.statesF32[payloadF32 + 0];
+    const py = physCtx.statesF32[payloadF32 + 1];
+    const pz = physCtx.statesF32[payloadF32 + 2];
+    const rx = physCtx.statesF32[payloadF32 + 3];
+    const ry = physCtx.statesF32[payloadF32 + 4];
+    const rz = physCtx.statesF32[payloadF32 + 5];
+    const rw = physCtx.statesF32[payloadF32 + 6];
+    const onGround = physCtx.statesF32[payloadF32 + 7];
 
     const t = world.getComponent(entity, TransformComponent);
     if (t) {
       t.setPosition(px, py, pz);
       t.setRotation([rx, ry, rz, rw] as unknown as Float32Array);
       t.isDirty = true;
+    }
+
+    // Apply onGround status to player controller
+    const playerController = world.getComponent(
+      entity,
+      PlayerControllerComponent,
+    );
+    if (playerController) {
+      playerController.onGround = onGround > 0.5;
     }
   }
 }
@@ -224,7 +239,7 @@ async function initWorker(
 
   // Input setup
   inputContext = createInputContext(sharedInputBuffer, false);
-  const inputReader: IInputSource = {
+  inputReader = {
     isKeyDown: (code: string) => isKeyDown(inputContext!, code),
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
     getMousePosition: () => getMousePosition(inputContext!),
@@ -234,7 +249,7 @@ async function initWorker(
     },
   };
 
-  const actionMap: ActionMapConfig = {
+  actionMap = {
     move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
     move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
     move_y_axis: {
@@ -243,6 +258,7 @@ async function initWorker(
       negativeKey: "ShiftLeft",
     },
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
+    jump: { type: "button", keys: ["Space"] },
   };
 
   actionController = {
@@ -258,8 +274,7 @@ async function initWorker(
   try {
     if (
       sharedEngineStateBuffer &&
-      (sharedEngineStateBuffer as SharedArrayBuffer) instanceof
-        SharedArrayBuffer
+      sharedEngineStateBuffer instanceof SharedArrayBuffer
     ) {
       engineStateCtx = createEngineStateCtx(sharedEngineStateBuffer);
       console.log(
@@ -280,6 +295,10 @@ async function initWorker(
   }
 
   cameraControllerSystem = new CameraControllerSystem(actionController);
+  playerControllerSystem = new PlayerControllerSystem(
+    actionController,
+    physicsCtx!, // physicsCtx is initialized right after this
+  );
 
   resourceManager = new ResourceManager(renderer);
   world = new World();
@@ -352,37 +371,59 @@ async function initWorker(
 }
 
 /**
- * Main frame update loop.
+ * Main frame update loop for the render worker.
  *
- * Processes input, applies editor state, updates camera (free/orbit mode),
- * runs ECS systems in order (physics commands, animation, transform, camera, render),
- * publishes metrics, and signals FRAME_DONE. Ensures frame-rate independent
- * movement via delta time clamping.
+ * This function orchestrates all per-frame activity. It processes user input,
+ * applies state changes from the editor and physics worker, runs all ECS
+ * systems in a specific order, renders the scene, and publishes performance
+ * metrics. The execution order is critical for data consistency: input is
+ * processed, simulations are run, transforms are finalized, and then rendering
+ * occurs.
  *
- * @param now Current timestamp (from requestAnimationFrame, in ms).
+ * @param {number} now The current high-resolution timestamp from
+ *     `requestAnimationFrame`, in milliseconds.
  */
 function frame(now: number): void {
+  // --- Guard Clause ---
+  // Ensure all required modules and contexts are initialized before proceeding.
   if (
     !renderer ||
     !world ||
     !sceneRenderData ||
     !cameraControllerSystem ||
-    !actionController
-  )
+    !actionController ||
+    !playerControllerSystem ||
+    !actionMap
+  ) {
+    // If not ready, immediately signal completion to avoid stalling the main thread.
+    (self as Worker).postMessage({ type: "FRAME_DONE" });
     return;
+  }
 
-  // Apply editor state before systems
+  // --- State Synchronization (Editor -> Worker) ---
+  // Apply any pending state changes from the main thread's editor UI (e.g.,
+  // fog, sun, shadow settings) by reading from the shared engine state buffer.
   if (engineStateCtx) {
     syncEngineState(world, engineStateCtx);
   }
 
-  const MAX_PAUSE = 0.5;
+  // --- Delta Time Calculation ---
+  // Calculate frame-rate independent delta time. Clamp the value to prevent
+  // large simulation jumps after a pause (e.g., tab-out, breakpoint).
+  const MAX_PAUSE_SECONDS = 0.5;
   let dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0;
   lastFrameTime = now;
-  if (dt > MAX_PAUSE) dt = MAX_PAUSE;
+  if (dt > MAX_PAUSE_SECONDS) {
+    dt = MAX_PAUSE_SECONDS;
+  }
 
+  // --- Input Processing & Camera Mode ---
+  // Check for actions that toggle state, like switching camera modes.
+  // This uses `wasPressed` which requires the previous frame's input state.
   if (actionController.wasPressed("toggle_camera_mode")) {
     isFreeCameraActive = !isFreeCameraActive;
+    // If switching to free-camera, synchronize its orientation with the
+    // current player camera to prevent a jarring snap.
     if (isFreeCameraActive) {
       const cameraTransform = world.getComponent(
         cameraEntity,
@@ -394,81 +435,55 @@ function frame(now: number): void {
     }
   }
 
-  const cameraTransform = world.getComponent(cameraEntity, TransformComponent);
-
+  // --- Controller Updates ---
+  // Run the appropriate controller system based on the current camera mode.
   if (isFreeCameraActive) {
-    // Free camera mode
+    // Free-fly camera for debugging and scene exploration.
     cameraControllerSystem.update(world, dt);
-  } else if (cameraTransform) {
-    // Orbital camera animation around the model
-    if (animationStartTime === 0) animationStartTime = now;
-
-    const ORBIT_DURATION_MS = 20000; // 20 seconds for full orbit
-    const elapsed = (now - animationStartTime) % ORBIT_DURATION_MS;
-    const t = elapsed / ORBIT_DURATION_MS; // normalized [0,1)
-
-    const angle = t * Math.PI * 2; // full 360 orbit
-    const x = Math.cos(angle) * orbitRadius;
-    const z = Math.sin(angle) * orbitRadius;
-    const y = orbitHeight;
-
-    // Camera position
-    const eye = vec3.fromValues(x, y, z);
-    const target = vec3.fromValues(0, 0, 0);
-    const up = vec3.fromValues(0, 1, 0);
-
-    // Build a lookAt *view* matrix
-    const view = mat4.lookAt(eye, target, up);
-
-    // Convert to world transform by inverting the view matrix
-    const worldFromView = mat4.invert(view);
-
-    // Extract orientation (upper 3×3) and convert to quaternion
-    const rotation = quat.fromMat(worldFromView);
-
-    // Apply position + rotation to the camera
-    cameraTransform.setPosition(x, y, z);
-    cameraTransform.setRotation(rotation);
+  } else {
+    // Player controller, which manages both player body movement and the
+    // first-person camera attached to it.
+    playerControllerSystem.update(world, dt);
   }
 
-  /*
-  // Rotate the model slowly
-  if (demoModelEntity !== -1) {
-    const demoModelTransform = world.getComponent(
-      demoModelEntity,
-      TransformComponent,
-    );
-    if (demoModelTransform) {
-      const HELMET_ROTATION_SPEED = 0.3; // radians per second
-      const rotationY = (now / 1000) * HELMET_ROTATION_SPEED;
-      const rotation = quat.fromEuler(0, rotationY, 0, "xyz");
-      demoModelTransform.setRotation(rotation);
-    }
-  }
-  */
-
-  // Physics snapshot -> ECS transforms
+  // --- State Synchronization (Physics -> Worker) ---
+  // Apply the latest physics simulation results (positions, rotations) from
+  // the physics worker's snapshot buffer to the corresponding ECS transforms.
   if (physicsCtx) {
     applyPhysicsSnapshot(world, physicsCtx);
   }
 
-  // Drive animations (then recompute transforms)
+  // --- Core ECS System Execution Order ---
+  // The order of system execution is critical for correctness.
+  // 1. Animation: Updates bone matrices and local transforms.
+  // 2. Transform: Propagates transform changes through the hierarchy,
+  //    calculating final world matrices. This consumes updates from physics,
+  //    controllers, and animations.
+  // 3. Physics Commands: Enqueues commands for the *next* physics step based
+  //    on the current frame's state (e.g., creating new bodies).
+  // 4. Camera: Computes the final view/projection matrices using the now-final
+  //    camera transform for this frame.
+  // 5. Render: Draws the scene using the final state of all components.
   animationSystem(world, dt);
   transformSystem(world);
-
-  // Physics commands
   if (physicsCommandSystem) {
     physicsCommandSystem.update(world);
   }
-
   cameraSystem(world);
-
   renderSystem(world, renderer, sceneRenderData);
 
+  // --- Input State Update (for next frame's input) ---
+  // Record the current input state so that `wasPressed` actions can be
+  // correctly detected on the next frame. This must be done at the end.
+  updatePreviousActionState(actionController, previousActionState, actionMap);
+
+  // --- Performance Metrics ---
+  // Collect and publish performance data (e.g., render times, physics step
+  // duration) to the main thread for display in the UI.
   if (metricsContext && renderer) {
     let physicsTimeUs = 0;
     if (physicsCtx) {
-      // Read the metric non-atomically. It's just for display. it's ok, don't worry reader
+      // Non-atomically read the metric. Minor tearing is acceptable for display.
       const physicsTimeMs =
         physicsCtx.statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2];
       physicsTimeUs = Math.round(physicsTimeMs * 1000);
@@ -478,10 +493,13 @@ function frame(now: number): void {
       renderer.getStats(),
       dt,
       ++metricsFrameId,
-      physicsTimeUs, // Pass new metric here
+      physicsTimeUs,
     );
   }
 
+  // --- Signal to Main Thread ---
+  // Notify the main thread that this frame is complete, allowing it to
+  // schedule the next frame update.
   (self as Worker).postMessage({ type: "FRAME_DONE" });
 }
 

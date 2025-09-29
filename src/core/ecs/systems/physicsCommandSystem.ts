@@ -5,6 +5,7 @@ import { PhysicsColliderComponent } from "../components/physicsComponents";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import { CMD_CREATE_BODY, CMD_DESTROY_BODY } from "@/core/sharedPhysicsLayout";
 import { TransformComponent } from "../components/transformComponent";
+import { PlayerControllerComponent } from "../components/playerControllerComponent";
 
 /**
  * System that detects physics entity lifecycle changes and enqueues commands
@@ -57,6 +58,7 @@ export class PhysicsCommandSystem {
     const bodyComp = world.getComponent(entity, PhysicsBodyComponent);
     const colliderComp = world.getComponent(entity, PhysicsColliderComponent);
     const transformComp = world.getComponent(entity, TransformComponent);
+    const playerComp = world.getComponent(entity, PlayerControllerComponent);
 
     if (!bodyComp || !colliderComp) {
       console.warn(
@@ -65,12 +67,25 @@ export class PhysicsCommandSystem {
       return;
     }
 
-    // Default mass: 1 for static, 0 for dynamic (Rapier convention)
-    const mass = bodyComp.isDynamic ? 1.0 : 0.0;
+    // Map bodyType to int: 0=dynamic, 1=fixed, 2=kinematicPosition, 3=kinematicVelocity
+    const bodyTypeInt = (() => {
+      switch (bodyComp.bodyType) {
+        case "dynamic":
+          return 0;
+        case "fixed":
+          return 1;
+        case "kinematicPosition":
+          return 2;
+        case "kinematicVelocity":
+          return 3;
+        default:
+          return 0;
+      }
+    })();
 
-    // Pack params (12 floats)
+    // Pack params (16 floats)
     const params: number[] = [
-      colliderComp.type, // 0=sphere,1=box,2=capsule
+      colliderComp.type,
       colliderComp.params[0],
       colliderComp.params[1],
       colliderComp.params[2],
@@ -81,16 +96,32 @@ export class PhysicsCommandSystem {
       transformComp ? transformComp.rotation[1] : 0,
       transformComp ? transformComp.rotation[2] : 0,
       transformComp ? transformComp.rotation[3] : 1,
-      mass,
+      bodyTypeInt, // bodyType (0-3)
+      bodyComp.isPlayer ? 1.0 : 0.0,
     ];
 
-    const physId = entity; // Mirror entity ID as PHYS_ID
+    // If player, set [13-16]: controller params (pad rest if not)
+    if (bodyComp.isPlayer && playerComp) {
+      params[13] = playerComp.slopeAngle;
+      params[14] = playerComp.maxStepHeight;
+      params[15] = playerComp.slideEnabled ? 1.0 : 0.0;
+      params[16] = playerComp.maxSlopeForGround;
+    } else {
+      // Pad [13-16]=0 for non-player
+      params[13] = 0;
+      params[14] = 0;
+      params[15] = 0;
+      params[16] = 0;
+    }
+
+    const physId = entity;
     bodyComp.physId = physId;
 
     if (tryEnqueueCommand(this.physCtx, CMD_CREATE_BODY, physId, params)) {
-      console.log(
-        `[PhysicsCommandSystem] Queued CREATE_BODY for entity ${entity} (ID=${physId}, type=${colliderComp.type}, dynamic=${bodyComp.isDynamic}).`,
-      );
+      const msg = bodyComp.isPlayer
+        ? `[PhysicsCommandSystem] Queued CREATE_PLAYER for entity ${entity} (ID=${physId}, kinematic, capsule).`
+        : `[PhysicsCommandSystem] Queued CREATE_BODY for entity ${entity} (ID=${physId}, type=${bodyComp.bodyType}).`;
+      console.log(msg);
     } else {
       console.warn(
         `[PhysicsCommandSystem] Dropped CREATE for ${entity}: ring full.`,

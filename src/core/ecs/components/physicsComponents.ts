@@ -2,6 +2,12 @@
 import { IComponent } from "../component";
 import { Vec3, vec3 } from "wgpu-matrix";
 
+export type PhysicsBodyType =
+  | "dynamic"
+  | "fixed"
+  | "kinematicPosition"
+  | "kinematicVelocity";
+
 /**
  * Component marking an entity with a physics body in Rapier.
  *
@@ -25,20 +31,28 @@ export class PhysicsBodyComponent implements IComponent {
   public physId = 0;
 
   /**
-   * True for dynamic bodies (affected by forces/gravity).
+   * Type of rigid body: 'dynamic' (simulated), 'fixed' (static), 'kinematicPosition' (position-controlled, for characters),
+   * or 'kinematicVelocity' (velocity-controlled).
    *
-   * Dynamic bodies simulate physics (like falling, collisions).
-   * False for static/kinematic (fixed or controlled by transform).
+   * Defaults to 'dynamic'. For FPS player, use 'kinematicPosition'.
    */
-  public isDynamic = true;
+  public bodyType: PhysicsBodyType = "dynamic";
+
+  /**
+   * True if this is the player entity (for special handling like character controller).
+   * Single-player only; set during entity creation.
+   */
+  public isPlayer = false;
 
   /**
    * Constructs a PhysicsBodyComponent.
    *
-   * @param isDynamic Whether the body is dynamic (default: true).
+   * @param bodyType The body type (default: 'dynamic').
+   * @param isPlayer True if player (default: false).
    */
-  constructor(isDynamic = true) {
-    this.isDynamic = isDynamic;
+  constructor(bodyType: PhysicsBodyType = "dynamic", isPlayer = false) {
+    this.bodyType = bodyType;
+    this.isPlayer = isPlayer;
   }
 }
 
@@ -141,8 +155,8 @@ export class PhysicsColliderComponent implements IComponent {
    */
   public setCapsule(radius: number, halfHeight: number): void {
     this.type = 2;
-    this.params[0] = Math.max(0.001, radius);
-    this.params[1] = Math.max(0.001, halfHeight);
+    this.params[0] = Math.max(0.001, radius); // [0]: radius (for worker swap to Rapier capsule(halfHeight, radius))
+    this.params[1] = Math.max(0.001, halfHeight); // [1]: halfHeight
     this.params[2] = 0;
   }
 }

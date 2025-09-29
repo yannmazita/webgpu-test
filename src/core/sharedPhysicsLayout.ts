@@ -55,13 +55,16 @@ export const COMMANDS_TAIL_OFFSET = 12; // Atomic u32: read tail (physics advanc
 export const COMMANDS_GEN_OFFSET = 16; // u32: increments on buffer changes
 
 /** Commands ring header size (bytes). */
-export const COMMANDS_HEADER_BYTES = 20;
+export const COMMANDS_HEADER_BYTES = 24;
 
 /** Commands ring capacity (number of slots). */
 export const COMMANDS_RING_CAPACITY = 64;
 
-/** Bytes per command slot (padded to 64 for alignment). */
-export const COMMANDS_SLOT_SIZE = 64;
+/** Bytes per command slot (padded to 80 for alignment and larger commands). */
+export const COMMANDS_SLOT_SIZE = 80;
+
+/** Max f32 parameters per command slot. (80 - 8 byte header) / 4 bytes per float */
+export const COMMANDS_MAX_PARAMS_F32 = 18;
 
 /** First slot byte offset (bytes). */
 export const COMMANDS_SLOT_OFFSET = COMMANDS_HEADER_BYTES;
@@ -88,7 +91,8 @@ export const COMMANDS_BUFFER_SIZE =
  *   [0]   PHYS_ID (u32)                   - engine-side physics ID
  *   [4]   POSITION.xyz (f32x3)            - world-space position
  *   [16]  ROTATION.xyzw (f32x4)           - world-space orientation (unit quaternion)
- *   Stride = 32 bytes per body
+ *   [32]  ON_GROUND (f32)                 - 1.0 if on ground (for player), 0.0 otherwise
+ *   Stride = 36 bytes per body
  * ======================================================================================== */
 
 /** States: magic/version offsets (bytes). */
@@ -111,8 +115,8 @@ export const STATES_SLOT_COUNT = 3;
 /** Max bodies per snapshot slot. Increase for larger scenes. */
 export const STATES_MAX_BODIES = 4096;
 
-/** Bytes per body record (u32 id + f32[3] pos + f32[4] rot). */
-export const STATES_BODY_STRIDE_BYTES = 32;
+/** Bytes per body record (u32 id + f32[3] pos + f32[4] rot + i32 flag). */
+export const STATES_BODY_STRIDE_BYTES = 36;
 
 /** Bytes per slot: COUNT(u32) + BODY records. */
 export const STATES_SLOT_SIZE =
@@ -137,6 +141,8 @@ export const CMD_DESTROY_BODY = 2;
 export const CMD_SET_TRANSFORM = 3;
 /** Command type: Set global gravity. */
 export const CMD_SET_GRAVITY = 4;
+/** Command type: Move a player. */
+export const CMD_MOVE_PLAYER = 5;
 
 /* ==========================================================================================
  * Usage Notes:

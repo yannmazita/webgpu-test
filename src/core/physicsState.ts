@@ -24,6 +24,7 @@ import {
   COMMANDS_SLOT_SIZE,
   COMMANDS_RING_CAPACITY,
   COMMANDS_BUFFER_SIZE,
+  COMMANDS_MAX_PARAMS_F32,
   // States layout
   STATES_MAGIC_OFFSET,
   STATES_VERSION_OFFSET,
@@ -136,13 +137,13 @@ export function resetCommands(ctx: PhysicsContext): void {
  * - Publishes by advancing HEAD (Atomics.store) and bumps GEN
  *
  * PARAMS handling:
- * - Up to 12 floats; extra values are ignored, missing values are zero-padded.
+ * - Up to COMMANDS_MAX_PARAMS_F32 floats; extra values are ignored, missing values are zero-padded.
  * - Leave unspecified PARAMS as 0 for unused commands (e.g., DESTROY_BODY).
  *
  * @param ctx PhysicsContext (commands views required).
  * @param type Command type (CMD_*).
  * @param physId Physics body ID (u32).
- * @param params Optional parameter block (up to 12 numbers).
+ * @param params Optional parameter block (up to COMMANDS_MAX_PARAMS_F32 numbers).
  * @returns True if enqueued, false if the ring is full (command dropped).
  */
 export function tryEnqueueCommand(
@@ -167,14 +168,14 @@ export function tryEnqueueCommand(
   Atomics.store(ctx.commandsI32, slotI32 + 0, type | 0);
   Atomics.store(ctx.commandsI32, slotI32 + 1, physId | 0);
 
-  // Write PARAMS (up to 12 floats)
+  // Write PARAMS
   const p = params ?? [];
-  const count = Math.min(12, p.length);
+  const count = Math.min(COMMANDS_MAX_PARAMS_F32, p.length);
   for (let i = 0; i < count; i++) {
     ctx.commandsF32[slotF32 + i] = p[i];
   }
   // Zero-pad remaining
-  for (let i = count; i < 12; i++) {
+  for (let i = count; i < COMMANDS_MAX_PARAMS_F32; i++) {
     ctx.commandsF32[slotF32 + i] = 0.0;
   }
 

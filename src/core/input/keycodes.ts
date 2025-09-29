@@ -8,5 +8,4 @@ export const KEY_MAP = new Map<string, number>([
   ["Space", 4],
   ["ShiftLeft", 5],
   ["KeyC", 6],
-  // Add other keys as needed
 ]);
