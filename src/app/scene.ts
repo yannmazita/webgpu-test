@@ -76,14 +76,14 @@ export async function createDefaultScene(
   {
     const ground = world.createEntity("ground");
     const gt = new TransformComponent();
-    gt.setPosition(0, -0.1, 0); // Position ground slightly lower
-    gt.setScale(140, 1, 140);
+    gt.setPosition(0, 0, 0);
+    gt.setScale(140, 0.1, 140);
     world.addComponent(ground, gt);
 
     // physics: A fixed body does not move.
     world.addComponent(ground, new PhysicsBodyComponent("fixed"));
     // Use a thin but non-zero box for the ground collider for stability.
-    world.addComponent(ground, new PhysicsColliderComponent(1, [70, 0.1, 70]));
+    world.addComponent(ground, new PhysicsColliderComponent(1, [70, 0.05, 70]));
 
     // visual
     const groundMat = await resourceManager.createUnlitGroundMaterial({
@@ -107,7 +107,7 @@ export async function createDefaultScene(
   const playerEntity = world.createEntity("player");
   {
     const t = new TransformComponent();
-    t.setPosition(0, 1, 5); // Start on ground, away from pyramid
+    t.setPosition(0, 1, 20); // Start on ground, away from pyramid
     world.addComponent(playerEntity, t);
 
     // Physics: kinematic capsule, marked as player

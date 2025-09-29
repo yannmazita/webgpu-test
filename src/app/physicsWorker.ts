@@ -461,8 +461,8 @@ function stopPhysicsLoop(): void {
   if (world) {
     entityToBody.forEach((body, physId) => {
       const controller = entityToController.get(physId);
-      if (controller) world.removeCharacterController(controller);
-      world.removeRigidBody(body);
+      if (controller) world?.removeCharacterController(controller);
+      world?.removeRigidBody(body);
     });
     world.free();
     world = null;
