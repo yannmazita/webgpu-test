@@ -37,7 +37,7 @@ export async function createDefaultScene(
 }> {
   // Environment
   const envMap = await resourceManager.createEnvironmentMap(
-    "/assets/hdris/kloppenheim_02_puresky_4k.hdr",
+    "/assets/hdris/lonely_road_afternoon_puresky_4k.hdr",
     1024,
   );
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
