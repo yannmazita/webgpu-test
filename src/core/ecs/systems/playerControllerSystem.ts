@@ -9,14 +9,17 @@ import { MainCameraTagComponent } from "../components/tagComponents";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import { CMD_MOVE_PLAYER } from "@/core/sharedPhysicsLayout";
 
+// A reasonable gravity value for a game-like feel.
+const GRAVITY = -18.0;
+
 export class PlayerControllerSystem {
   // Reusable temporaries to avoid per-frame allocations
-  private tmpDesiredMovement = vec3.create();
-  private tmpRightScaled = vec3.create();
-  private tmpCameraOffset = vec3.fromValues(0, 1.6, 0);
-  private tmpCameraPos = vec3.create();
   private tmpForward = vec3.create();
   private tmpRight = vec3.create();
+  private tmpHorizontalMovement = vec3.create();
+  private tmpDesiredDisplacement = vec3.create();
+  private tmpCameraOffset = vec3.fromValues(0, 1.6, 0); // Head height
+  private tmpCameraPos = vec3.create();
 
   constructor(
     private actions: IActionController,
@@ -41,7 +44,7 @@ export class PlayerControllerSystem {
 
     if (!controller || !body || !transform) return;
 
-    // Mouse look
+    // --- Mouse Look ---
     if (this.actions.isPointerLocked()) {
       const mouseDelta = this.actions.getMouseDelta();
       controller.yaw -= mouseDelta.x * controller.sensitivity;
@@ -53,17 +56,29 @@ export class PlayerControllerSystem {
         Math.min(pitchLimit, controller.pitch),
       );
 
-      // Body rotates on Y axis (yaw)
       const bodyRotation = quat.fromEuler(0, controller.yaw, 0, "yxz");
       transform.setRotation(bodyRotation);
     }
 
-    // Movement input
+    // --- Player Velocity and Displacement Calculation ---
+
+    // 1. Update vertical velocity based on ground state and gravity.
+    if (controller.onGround) {
+      // When on the ground, reset vertical velocity.
+      controller.velocity[1] = 0;
+      // If jump is pressed, impart an initial upward velocity.
+      if (this.actions.wasPressed("jump")) {
+        controller.velocity[1] = controller.jumpForce;
+      }
+    } else {
+      // When in the air, apply gravity over time.
+      controller.velocity[1] += GRAVITY * deltaTime;
+    }
+
+    // 2. Calculate the desired horizontal movement direction from input.
     const moveVertical = this.actions.getAxis("move_vertical");
     const moveHorizontal = this.actions.getAxis("move_horizontal");
-    const jumpJustPressed = this.actions.wasPressed("jump");
 
-    // Get forward/right vectors from body's transform
     vec3.transformQuat(
       vec3.fromValues(0, 0, -1),
       transform.rotation,
@@ -75,46 +90,43 @@ export class PlayerControllerSystem {
       this.tmpRight,
     );
 
-    // Reset desired movement
-    vec3.zero(this.tmpDesiredMovement);
-
-    // Calculate horizontal movement
-    vec3.scale(this.tmpForward, moveVertical, this.tmpDesiredMovement);
-    vec3.scale(this.tmpRight, moveHorizontal, this.tmpRightScaled);
+    vec3.zero(this.tmpHorizontalMovement);
+    const forwardScaled = vec3.scale(this.tmpForward, moveVertical);
+    const rightScaled = vec3.scale(this.tmpRight, moveHorizontal);
     vec3.add(
-      this.tmpDesiredMovement,
-      this.tmpRightScaled,
-      this.tmpDesiredMovement,
+      this.tmpHorizontalMovement,
+      forwardScaled,
+      this.tmpHorizontalMovement,
+    );
+    vec3.add(
+      this.tmpHorizontalMovement,
+      rightScaled,
+      this.tmpHorizontalMovement,
     );
 
-    // We are sending a displacement vector, so it must be scaled by speed and dt
-    const lenSq = vec3.lengthSq(this.tmpDesiredMovement);
-    if (lenSq > 0.001) {
-      vec3.normalize(this.tmpDesiredMovement, this.tmpDesiredMovement);
-      vec3.scale(
-        this.tmpDesiredMovement,
-        controller.moveSpeed * deltaTime,
-        this.tmpDesiredMovement,
-      );
+    if (vec3.lengthSq(this.tmpHorizontalMovement) > 0.001) {
+      vec3.normalize(this.tmpHorizontalMovement, this.tmpHorizontalMovement);
     }
 
-    // Handle jump: add an upward displacement. The physics worker will add gravity.
-    if (jumpJustPressed && controller.onGround) {
-      // This is a simple impulse.
-      // todo: manage a velocity vector.
-      this.tmpDesiredMovement[1] += controller.jumpForce * deltaTime;
-    }
+    // 3. Combine horizontal and vertical motion into a final displacement vector for the frame.
+    // Displacement = direction * speed * time
+    this.tmpDesiredDisplacement[0] =
+      this.tmpHorizontalMovement[0] * controller.moveSpeed * deltaTime;
+    this.tmpDesiredDisplacement[2] =
+      this.tmpHorizontalMovement[2] * controller.moveSpeed * deltaTime;
+    // Vertical displacement = velocity * time
+    this.tmpDesiredDisplacement[1] = controller.velocity[1] * deltaTime;
 
-    // Enqueue command to physics worker
+    // 4. Enqueue the final displacement vector to the physics worker.
     if (this.physCtx && body.physId !== 0) {
       tryEnqueueCommand(this.physCtx, CMD_MOVE_PLAYER, body.physId, [
-        this.tmpDesiredMovement[0],
-        this.tmpDesiredMovement[1],
-        this.tmpDesiredMovement[2],
+        this.tmpDesiredDisplacement[0],
+        this.tmpDesiredDisplacement[1],
+        this.tmpDesiredDisplacement[2],
       ]);
     }
 
-    // Camera follow logic
+    // --- Camera follow logic ---
     const cameraQuery = world.query([
       MainCameraTagComponent,
       TransformComponent,
@@ -126,11 +138,9 @@ export class PlayerControllerSystem {
         TransformComponent,
       );
       if (cameraTransform) {
-        // Position camera at player's head
         vec3.add(transform.position, this.tmpCameraOffset, this.tmpCameraPos);
         cameraTransform.setPosition(this.tmpCameraPos);
 
-        // Camera rotates with both yaw and pitch for FPS view
         const cameraRotation = quat.fromEuler(
           controller.pitch,
           controller.yaw,

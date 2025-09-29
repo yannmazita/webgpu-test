@@ -38,6 +38,7 @@ import {
   CMD_DESTROY_BODY,
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   CMD_MOVE_PLAYER,
+  COMMANDS_MAX_PARAMS_F32,
 } from "@/core/sharedPhysicsLayout";
 
 // Type imports from Rapier
@@ -147,31 +148,69 @@ async function initRapier(): Promise<void> {
    Commands: drain ring buffer
 ----------------------------------------------*/
 
+/**
+ * Drains and processes all pending commands from the shared command ring buffer.
+ *
+ * This function implements the consumer side of a single-producer/single-consumer
+ * (SPSC) queue. It reads commands sent from the render worker (like to create
+ * bodies, destroy bodies, or move the player) and executes the corresponding
+ * physics operations using the Rapier world.
+ *
+ * The process for each command is:
+ * 1. Read the command `type` and `physId` from the current `tail` slot.
+ * 2. Read the associated floating-point `params` payload.
+ * 3. Execute a `switch` on the command type to perform the correct action:
+ *    - `CMD_CREATE_BODY`: Constructs a Rapier `RigidBody` and `Collider` based
+ *      on the parameters. If it's a player, it also creates and configures a
+ *      `KinematicCharacterController`.
+ *    - `CMD_DESTROY_BODY`: Removes the specified body and its associated
+ *      controller from the physics world.
+ *    - `CMD_MOVE_PLAYER`: Takes a desired displacement vector, uses the
+ *      character controller to compute a collision-safe movement, and applies
+ *      the result to the player's kinematic body.
+ * 4. Atomically advance the `tail` index to mark the slot as consumed.
+ *
+ * This function is called within the fixed-step physics loop (`stepWorld`) to
+ * ensure commands are processed in sync with the simulation.
+ */
 function processCommands(): void {
-  if (!commandsView || !world || !RAPIER) return;
+  // --- Guard Clause ---
+  if (!commandsView || !world || !RAPIER) {
+    return;
+  }
 
+  // --- SPSC Ring Buffer Drain Loop ---
+  // Atomically load the current head (where the producer writes) and tail
+  // (where this consumer reads).
   let tail = Atomics.load(commandsView, COMMANDS_TAIL_OFFSET >> 2);
   const head = Atomics.load(commandsView, COMMANDS_HEAD_OFFSET >> 2);
 
   const slotBaseI32 = COMMANDS_SLOT_OFFSET >> 2;
   let processedAny = false;
 
+  // Process commands as long as the tail has not caught up to the head.
   while (tail !== head) {
+    // Calculate memory offsets for the current command slot.
     const slotIndex = tail % COMMANDS_RING_CAPACITY;
     const slotIndexI32 = slotIndex * (COMMANDS_SLOT_SIZE >> 2);
     const slotByteOffset =
       COMMANDS_SLOT_OFFSET + slotIndex * COMMANDS_SLOT_SIZE;
 
+    // Read command metadata (type and ID).
     const type = Atomics.load(commandsView, slotBaseI32 + slotIndexI32 + 0);
     const physId = Atomics.load(commandsView, slotBaseI32 + slotIndexI32 + 1);
 
+    // Get a view into the floating-point parameter block for this command.
     const paramsView = new Float32Array(
       commandsView.buffer,
-      slotByteOffset + 8,
-      17,
+      slotByteOffset + 8, // Parameters start after the 8-byte header (type + id).
+      COMMANDS_MAX_PARAMS_F32, // The number of float params for the largest command.
     );
 
+    // --- Command Dispatch ---
     if (type === CMD_CREATE_BODY) {
+      // --- Create Body Logic ---
+      // Unpack parameters for body and collider creation.
       const colliderType = Math.floor(paramsView[0]);
       const p0 = paramsView[1],
         p1 = paramsView[2],
@@ -188,6 +227,7 @@ function processCommands(): void {
       const slopeAngle = paramsView[13];
       const maxStepHeight = paramsView[14];
 
+      // Select the appropriate Rapier RigidBodyDesc based on the type.
       let bodyDesc: RigidBodyDesc;
       switch (bodyTypeInt) {
         case 0:
@@ -203,18 +243,22 @@ function processCommands(): void {
           bodyDesc = RAPIER.RigidBodyDesc.kinematicVelocityBased();
           break;
         default:
+          console.warn(
+            `[PhysicsWorker] Unknown body type ${bodyTypeInt}, defaulting to dynamic.`,
+          );
           bodyDesc = RAPIER.RigidBodyDesc.dynamic();
       }
       bodyDesc.setTranslation(pos.x, pos.y, pos.z).setRotation(rot);
 
       const body: RigidBody = world.createRigidBody(bodyDesc);
 
+      // Create the collider shape.
       let colliderDesc: ColliderDesc | null = null;
       switch (colliderType) {
         case 0: // Sphere
           colliderDesc = RAPIER.ColliderDesc.ball(Math.max(0.001, p0));
           break;
-        case 1: // Box (half-extents)
+        case 1: // Box (cuboid)
           colliderDesc = RAPIER.ColliderDesc.cuboid(
             Math.max(0.001, p0),
             Math.max(0.001, p1),
@@ -236,24 +280,29 @@ function processCommands(): void {
 
       if (colliderDesc) {
         world.createCollider(colliderDesc, body);
+        // If this is the player, create and configure a character controller.
         if (isPlayer) {
-          const controller = world.createCharacterController(0.1); // Use a small offset
-          controller.setUp({ x: 0.0, y: 1.0, z: 0.0 });
+          const controller = world.createCharacterController(0.1); // Small collision offset.
+          controller.setUp({ x: 0.0, y: 1.0, z: 0.0 }); // Define "up".
           controller.setMaxSlopeClimbAngle(slopeAngle);
-          controller.enableAutostep(maxStepHeight, 0.2, true); // Autostep with min width
-          controller.enableSnapToGround(0.5); // Snap to ground for stairs/slopes
+          controller.enableAutostep(maxStepHeight, 0.2, true); // Allow climbing small steps.
+          controller.enableSnapToGround(0.5); // Help stick to ground on slopes.
           entityToController.set(physId, controller);
-          playerOnGround.set(physId, 0.0);
+          playerOnGround.set(physId, 0.0); // Initialize ground state.
         }
+        // Map the physics body back to the ECS entity ID.
         entityToBody.set(physId, body);
         bodyToEntity.set(body, physId);
       } else {
+        // If collider creation failed, remove the orphaned rigid body.
         world.removeRigidBody(body);
       }
       processedAny = true;
     } else if (type === CMD_DESTROY_BODY) {
+      // --- Destroy Body Logic ---
       const body = entityToBody.get(physId);
       if (body) {
+        // If a character controller is associated, remove it first.
         const controller = entityToController.get(physId);
         if (controller) {
           world.removeCharacterController(controller);
@@ -262,22 +311,23 @@ function processCommands(): void {
         playerOnGround.delete(physId);
         world.removeRigidBody(body);
         entityToBody.delete(physId);
-        bodyToEntity.delete(body);
+        bodyToEntity.delete(body); // WeakMap entry will be garbage collected.
       }
       processedAny = true;
     } else if (type === CMD_MOVE_PLAYER) {
+      // --- Move Player Logic ---
       const body = entityToBody.get(physId);
       const controller = entityToController.get(physId);
-      const collider = body?.collider(0);
+      const collider = body?.collider(0); // Assumes first collider is the character shape.
 
       if (body && controller && collider) {
+        // The displacement vector is complete, with gravity already applied by the PlayerControllerSystem.
         const disp = { x: paramsView[0], y: paramsView[1], z: paramsView[2] };
 
-        // Manually apply gravity to the desired displacement
-        disp.y += GRAVITY.y * FIXED_DT;
-
+        // Use the controller to compute a collision-aware movement.
         controller.computeColliderMovement(collider, disp);
 
+        // Apply the corrected movement to the kinematic body.
         const correctedMovement = controller.computedMovement();
         const currentPos = body.translation();
         const nextPos = {
@@ -287,16 +337,21 @@ function processCommands(): void {
         };
         body.setNextKinematicTranslation(nextPos);
 
+        // Update the ground state for the next snapshot.
         const isOnGround = controller.computedGrounded();
         playerOnGround.set(physId, isOnGround ? 1.0 : 0.0);
       }
       processedAny = true;
     }
 
+    // --- Advance Tail ---
+    // Mark the command as processed by advancing the tail index.
     tail = (tail + 1) % COMMANDS_RING_CAPACITY;
     Atomics.store(commandsView, COMMANDS_TAIL_OFFSET >> 2, tail);
   }
 
+  // --- Update Generation Counter ---
+  // If any commands were processed, bump the generation counter for observability.
   if (processedAny) {
     Atomics.add(commandsView, COMMANDS_GEN_OFFSET >> 2, 1);
   }

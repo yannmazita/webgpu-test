@@ -295,10 +295,6 @@ async function initWorker(
   }
 
   cameraControllerSystem = new CameraControllerSystem(actionController);
-  playerControllerSystem = new PlayerControllerSystem(
-    actionController,
-    physicsCtx!, // physicsCtx is initialized right after this
-  );
 
   resourceManager = new ResourceManager(renderer);
   world = new World();
@@ -354,6 +350,12 @@ async function initWorker(
 
   // Create command system
   physicsCommandSystem = new PhysicsCommandSystem(physicsCtx);
+
+  // Player controller system must be created AFTER physics context
+  playerControllerSystem = new PlayerControllerSystem(
+    actionController,
+    physicsCtx,
+  );
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
