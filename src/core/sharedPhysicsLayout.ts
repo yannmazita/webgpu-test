@@ -58,7 +58,7 @@ export const COMMANDS_GEN_OFFSET = 16; // u32: increments on buffer changes
 export const COMMANDS_HEADER_BYTES = 24;
 
 /** Commands ring capacity (number of slots). */
-export const COMMANDS_RING_CAPACITY = 64;
+export const COMMANDS_RING_CAPACITY = 256;
 
 /** Bytes per command slot (padded to 80 for alignment and larger commands). */
 export const COMMANDS_SLOT_SIZE = 80;
