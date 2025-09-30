@@ -33,12 +33,11 @@ export class PlayerControllerSystem {
    * orchestrates several key behaviors:
    * 1.  **Mouse Look**: Rotates the player's body (yaw) and camera (pitch)
    *     based on mouse movement.
-   * 2.  **Input Buffering**: Captures the player's intent to jump and stores
-   *     it, resolving a race condition between single-frame input events and
-   *     the asynchronous physics state (`onGround`).
+   * 2.  **Jumping**: Processes jump input, allowing the player to jump only
+   *     when they are on the ground.
    * 3.  **Velocity Calculation**: Manages vertical velocity by applying gravity
    *     continuously. When the player is grounded, it clamps downward
-   *     velocity to ensure stability and processes buffered jump requests.
+   *     velocity to ensure stability.
    * 4.  **Movement Calculation**: Determines the desired horizontal movement
    *     direction from keyboard input (WASD) relative to the player's
    *     current orientation.
@@ -93,17 +92,10 @@ export class PlayerControllerSystem {
 
     // --- Player Velocity and Displacement Calculation ---
 
-    // 1. Buffer jump input. This captures the player's intent to jump even
-    // if they are momentarily airborne when the key is pressed. The request
-    // is stored until it can be processed while the character is grounded.
-    if (this.actions.wasPressed("jump")) {
-      controller.jumpRequested = true;
-    }
-
-    // 2. Apply gravity every frame to the vertical velocity.
+    // 1. Apply gravity every frame to the vertical velocity.
     controller.velocity[1] += GRAVITY * deltaTime;
 
-    // 3. Handle ground-specific logic like jumping and velocity clamping.
+    // 2. Handle ground-specific logic like jumping and velocity clamping.
     if (controller.onGround) {
       // When on the ground, prevent downward velocity from accumulating.
       // A small negative velocity helps keep the character controller "stuck"
@@ -112,14 +104,13 @@ export class PlayerControllerSystem {
         controller.velocity[1] = -1.0;
       }
 
-      // If a jump has been requested and we are on the ground, execute it.
-      if (controller.jumpRequested) {
+      // If a jump is requested and we are on the ground, execute it.
+      if (this.actions.wasPressed("jump")) {
         controller.velocity[1] = controller.jumpForce;
-        controller.jumpRequested = false; // Consume the jump request.
       }
     }
 
-    // 4. Calculate the desired horizontal movement direction from input.
+    // 3. Calculate the desired horizontal movement direction from input.
     const moveVertical = this.actions.getAxis("move_vertical");
     const moveHorizontal = this.actions.getAxis("move_horizontal");
 
@@ -154,7 +145,7 @@ export class PlayerControllerSystem {
       vec3.normalize(this.tmpHorizontalMovement, this.tmpHorizontalMovement);
     }
 
-    // 5. Combine horizontal and vertical motion into a final displacement
+    // 4. Combine horizontal and vertical motion into a final displacement
     // vector for the frame.
     this.tmpDesiredDisplacement[0] =
       this.tmpHorizontalMovement[0] * controller.moveSpeed * deltaTime;
@@ -162,7 +153,7 @@ export class PlayerControllerSystem {
       this.tmpHorizontalMovement[2] * controller.moveSpeed * deltaTime;
     this.tmpDesiredDisplacement[1] = controller.velocity[1] * deltaTime;
 
-    // 6. Enqueue the final displacement vector to the physics worker. The
+    // 5. Enqueue the final displacement vector to the physics worker. The
     // physics worker will use its character controller to compute the actual
     // movement, handling collisions and sliding.
     if (this.physCtx && body.physId !== 0) {
