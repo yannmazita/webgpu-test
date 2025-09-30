@@ -17,6 +17,12 @@ export class PlayerControllerComponent implements IComponent {
   public onGround = false;
 
   /**
+   * Stores the player's intent to jump, decoupling the single-frame input
+   * from the physics state.
+   */
+  public jumpRequested = false;
+
+  /**
    * Controller parameters (passed to Rapier on create).
    * slopeAngle: Max climbable slope (radians, default PI/4 = 45°).
    * maxStepHeight: Max step to auto-climb (meters, default 0.5).
