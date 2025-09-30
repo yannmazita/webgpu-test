@@ -110,7 +110,7 @@ interface NodeInstantiationContext {
   animatedMaterialIndices: Set<number>;
   nodeToEntityMap: Map<number, Entity>;
   materialToEntitiesMap: Map<number, Entity[]>;
-  staticMaterialInstanceCache: Map<number, MaterialInstance>;
+  staticMaterialInstanceCache: Map<string, MaterialInstance>;
 }
 
 /**
@@ -180,6 +180,7 @@ export class ResourceManager {
   private meshes = new Map<string, Mesh>();
   private dummyTexture!: GPUTexture;
   private defaultSampler!: GPUSampler;
+  private samplerCache = new Map<string, GPUSampler>();
   private preprocessor: ShaderPreprocessor;
   private brdfLut: GPUTexture | null = null;
   private pbrMaterialInitialized = false;
@@ -205,9 +206,100 @@ export class ResourceManager {
       [1, 1],
     );
     this.defaultSampler = this.renderer.device.createSampler({
+      label: "DEFAULT_SAMPLER_(GLTF_COMPLIANT)",
       magFilter: "linear",
       minFilter: "linear",
+      mipmapFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "repeat",
     });
+  }
+
+  /**
+   * Retrieves or creates a cached GPUSampler based on a glTF sampler definition.
+   * This ensures that samplers with identical properties are not duplicated.
+   * @param gltf The parsed glTF asset.
+   * @param samplerIndex The index of the sampler in the glTF's `samplers` array.
+   * @returns A GPUSampler matching the glTF definition, or the default sampler.
+   */
+  private getGLTFSampler(gltf: ParsedGLTF, samplerIndex?: number): GPUSampler {
+    if (samplerIndex === undefined) {
+      return this.defaultSampler;
+    }
+
+    const gltfSampler = gltf.json.samplers?.[samplerIndex];
+    if (!gltfSampler) {
+      console.warn(
+        `[ResourceManager] glTF sampler index ${samplerIndex} not found. Using default.`,
+      );
+      return this.defaultSampler;
+    }
+
+    // Create a cache key from the sampler properties
+    const key =
+      `${gltfSampler.magFilter ?? "L"}|${gltfSampler.minFilter ?? "L"}|` +
+      `${gltfSampler.wrapS ?? "R"}|${gltfSampler.wrapT ?? "R"}`;
+
+    const cached = this.samplerCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    // Helper to map glTF wrap modes to WebGPU
+    const getAddressMode = (mode?: number): GPUAddressMode => {
+      switch (mode) {
+        case 10497: // REPEAT
+          return "repeat";
+        case 33071: // CLAMP_TO_EDGE
+          return "clamp-to-edge";
+        case 33648: // MIRRORED_REPEAT
+          return "mirror-repeat";
+        default:
+          return "repeat"; // glTF default
+      }
+    };
+
+    // Helper to map glTF filter modes to WebGPU
+    const getFilterMode = (mode?: number): GPUFilterMode => {
+      switch (mode) {
+        case 9728: // NEAREST
+        case 9984: // NEAREST_MIPMAP_NEAREST
+        case 9986: // NEAREST_MIPMAP_LINEAR
+          return "nearest";
+        case 9729: // LINEAR
+        case 9985: // LINEAR_MIPMAP_NEAREST
+        case 9987: // LINEAR_MIPMAP_LINEAR
+          return "linear";
+        default:
+          return "linear"; // glTF default
+      }
+    };
+
+    // Helper to map glTF min filter to WebGPU mipmap filter
+    const getMipmapFilterMode = (mode?: number): GPUMipmapFilterMode => {
+      switch (mode) {
+        case 9984: // NEAREST_MIPMAP_NEAREST
+        case 9985: // LINEAR_MIPMAP_NEAREST
+          return "nearest";
+        case 9986: // NEAREST_MIPMAP_LINEAR
+        case 9987: // LINEAR_MIPMAP_LINEAR
+          return "linear";
+        default:
+          return "linear"; // Default for quality
+      }
+    };
+
+    const newSampler = this.renderer.device.createSampler({
+      label: `GLTF_SAMPLER_${key}`,
+      addressModeU: getAddressMode(gltfSampler.wrapS),
+      addressModeV: getAddressMode(gltfSampler.wrapT),
+      magFilter: getFilterMode(gltfSampler.magFilter),
+      minFilter: getFilterMode(gltfSampler.minFilter),
+      mipmapFilter: getMipmapFilterMode(gltfSampler.minFilter),
+    });
+
+    this.samplerCache.set(key, newSampler);
+    return newSampler;
   }
 
   public getHandleForMesh(mesh: Mesh): string | undefined {
@@ -279,13 +371,19 @@ export class ResourceManager {
    *     shader and pipeline layout for this instance.
    * @param options An object containing material properties (like albedo color,
    *     metallic factor) and URLs for the various texture maps.
+   * @param sampler An optional GPUSampler to use for the material's textures.
+   *     If not provided, the resource manager's default sampler will be used.
    * @returns A promise that resolves to a new MaterialInstance, complete with
    *     its own uniform buffer and bind group.
    */
   public async createPBRMaterialInstance(
     materialTemplate: PBRMaterial,
     options: PBRMaterialOptions = {},
+    sampler?: GPUSampler,
   ): Promise<MaterialInstance> {
+    // If no specific sampler is provided, fall back to the default.
+    const finalSampler = sampler ?? this.defaultSampler;
+
     const albedoTexture = options.albedoMap
       ? await createTextureFromImage(
           this.renderer.device,
@@ -344,7 +442,7 @@ export class ResourceManager {
       occlusionTexture,
       specularFactorTexture,
       specularColorTexture,
-      this.defaultSampler,
+      finalSampler,
     );
   }
 
@@ -524,7 +622,11 @@ export class ResourceManager {
     }
     // This creates a new, unique instance from the spec.
     const template = await this.createPBRMaterialTemplate(spec.options);
-    return this.createPBRMaterialInstance(template, spec.options);
+    return this.createPBRMaterialInstance(
+      template,
+      spec.options,
+      this.defaultSampler,
+    );
   }
 
   // ---------- Mesh resolution by handle ----------
@@ -713,7 +815,7 @@ export class ResourceManager {
 
     const nodeToEntityMap = new Map<number, Entity>();
     const materialToEntitiesMap = new Map<number, Entity[]>();
-    const staticMaterialInstanceCache = new Map<number, MaterialInstance>();
+    const staticMaterialInstanceCache = new Map<string, MaterialInstance>();
 
     const context: NodeInstantiationContext = {
       gltf,
@@ -1034,6 +1136,7 @@ export class ResourceManager {
 
         const matIndex = primitive.material;
         let materialInstance: MaterialInstance | undefined;
+        let sampler: GPUSampler = this.defaultSampler;
 
         if (matIndex !== undefined) {
           if (!ctx.materialToEntitiesMap.has(matIndex)) {
@@ -1046,6 +1149,16 @@ export class ResourceManager {
           if (!gltfMat) {
             throw new Error(`Material ${matIndex} not found in glTF file.`);
           }
+
+          // Determine which sampler to use for this material.
+          // We'll use the sampler from the baseColorTexture if available, as it's a common case.
+          const baseColorTextureIndex =
+            gltfMat.pbrMetallicRoughness?.baseColorTexture?.index;
+          if (baseColorTextureIndex !== undefined) {
+            const textureDef = gltf.json.textures?.[baseColorTextureIndex];
+            sampler = this.getGLTFSampler(gltf, textureDef?.sampler);
+          }
+
           const options = this._getGLTFMaterialOptions(
             gltfMat,
             gltf,
@@ -1056,28 +1169,41 @@ export class ResourceManager {
             materialInstance = await this.createPBRMaterialInstance(
               ctx.materialTemplates[matIndex],
               options,
+              sampler,
             );
           } else {
-            materialInstance = ctx.staticMaterialInstanceCache.get(matIndex);
+            const staticCacheKey = `${matIndex}-${sampler.label ?? "default"}`;
+            materialInstance =
+              ctx.staticMaterialInstanceCache.get(staticCacheKey);
             if (!materialInstance) {
               materialInstance = await this.createPBRMaterialInstance(
                 ctx.materialTemplates[matIndex],
                 options,
+                sampler,
               );
-              ctx.staticMaterialInstanceCache.set(matIndex, materialInstance);
+              ctx.staticMaterialInstanceCache.set(
+                staticCacheKey,
+                materialInstance,
+              );
             }
           }
         }
 
         if (!materialInstance) {
-          materialInstance = ctx.staticMaterialInstanceCache.get(-1);
+          const staticCacheKey = `-1-${this.defaultSampler.label}`;
+          materialInstance =
+            ctx.staticMaterialInstanceCache.get(staticCacheKey);
           if (!materialInstance) {
             const defaultTemplate = await this.createPBRMaterialTemplate({});
             materialInstance = await this.createPBRMaterialInstance(
               defaultTemplate,
               {},
+              this.defaultSampler,
             );
-            ctx.staticMaterialInstanceCache.set(-1, materialInstance);
+            ctx.staticMaterialInstanceCache.set(
+              staticCacheKey,
+              materialInstance,
+            );
           }
         }
         world.addComponent(
