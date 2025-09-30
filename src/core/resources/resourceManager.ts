@@ -21,6 +21,7 @@ import {
 } from "@/core/utils/primitives";
 import { UnlitGroundMaterial } from "@/core/materials/unlitGroundMaterial";
 import { loadHDR } from "@/loaders/hdrLoader";
+import { loadEXR } from "@/loaders/exrLoader";
 import {
   equirectangularToCubemap,
   generateBrdfLut,
@@ -90,6 +91,65 @@ async function initMikkTSpace(): Promise<void> {
       });
   });
   return mikktspacePromise;
+}
+
+// This is a self-contained, minimized version of the half-float conversion
+// logic from the EXR parser.
+const _hf_utils = (() => {
+  const buffer = new ArrayBuffer(4);
+  const floatView = new Float32Array(buffer);
+  const uint32View = new Uint32Array(buffer);
+  const baseTable = new Uint32Array(512);
+  const shiftTable = new Uint32Array(512);
+
+  for (let i = 0; i < 256; ++i) {
+    const e = i - 127;
+    if (e < -27) {
+      baseTable[i] = 0x0000;
+      baseTable[i | 0x100] = 0x8000;
+      shiftTable[i] = 24;
+      shiftTable[i | 0x100] = 24;
+    } else if (e < -14) {
+      baseTable[i] = 0x0400 >> (-e - 14);
+      baseTable[i | 0x100] = (0x0400 >> (-e - 14)) | 0x8000;
+      shiftTable[i] = -e - 1;
+      shiftTable[i | 0x100] = -e - 1;
+    } else if (e <= 15) {
+      baseTable[i] = (e + 15) << 10;
+      baseTable[i | 0x100] = ((e + 15) << 10) | 0x8000;
+      shiftTable[i] = 13;
+      shiftTable[i | 0x100] = 13;
+    } else if (e < 128) {
+      baseTable[i] = 0x7c00;
+      baseTable[i | 0x100] = 0xfc00;
+      shiftTable[i] = 24;
+      shiftTable[i | 0x100] = 24;
+    } else {
+      baseTable[i] = 0x7c00;
+      baseTable[i | 0x100] = 0xfc00;
+      shiftTable[i] = 13;
+      shiftTable[i | 0x100] = 13;
+    }
+  }
+
+  return {
+    toHalf: (val: number): number => {
+      // Clamp value to representable range
+      const clamped = Math.max(-65504, Math.min(val, 65504));
+      floatView[0] = clamped;
+      const f = uint32View[0];
+      const e = (f >> 23) & 0x1ff;
+      return baseTable[e] + ((f & 0x007fffff) >> shiftTable[e]);
+    },
+  };
+})();
+
+function convertFloat32ToFloat16(data: Float32Array): Uint16Array {
+  const halfs = new Uint16Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    halfs[i] = _hf_utils.toHalf(data[i]);
+  }
+  return halfs;
 }
 
 export interface PBRMaterialSpec {
@@ -560,46 +620,75 @@ export class ResourceManager {
     }
 
     // --- 1. Load and prepare equirectangular source texture ---
-    const hdrData = await loadHDR(url);
-    console.log(
-      `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
-    );
+    let imageData: { width: number; height: number; data: Uint16Array };
 
-    const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
-    for (let i = 0; i < hdrData.width * hdrData.height; i++) {
-      rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
-      rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1];
-      rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
-      rgbaData[i * 4 + 3] = 1.0;
+    if (url.endsWith(".hdr")) {
+      const hdrData = await loadHDR(url);
+      console.log(
+        `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
+      );
+      // Convert RGB float32 to RGBA float32
+      const rgba32 = new Float32Array(hdrData.width * hdrData.height * 4);
+      for (let i = 0; i < hdrData.width * hdrData.height; i++) {
+        rgba32[i * 4 + 0] = hdrData.data[i * 3 + 0];
+        rgba32[i * 4 + 1] = hdrData.data[i * 3 + 1];
+        rgba32[i * 4 + 2] = hdrData.data[i * 3 + 2];
+        rgba32[i * 4 + 3] = 1.0;
+      }
+      // Convert RGBA float32 to RGBA half-float (uint16)
+      const rgba16 = convertFloat32ToFloat16(rgba32);
+      imageData = {
+        width: hdrData.width,
+        height: hdrData.height,
+        data: rgba16,
+      };
+    } else if (url.endsWith(".exr")) {
+      const exrData = await loadEXR(url);
+      console.log(
+        `[ResourceManager] EXR loaded: ${exrData.width}x${exrData.height}`,
+      );
+      // EXR loader already provides Uint16Array (half-float) data
+      imageData = {
+        width: exrData.width,
+        height: exrData.height,
+        data: exrData.data,
+      };
+    } else {
+      throw new Error(
+        `Unsupported environment map format: ${url}. Please use .hdr or .exr`,
+      );
     }
 
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
-      size: [hdrData.width, hdrData.height],
-      format: "rgba32float",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      size: [imageData.width, imageData.height],
+      format: "rgba16float", // Use half-float format
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT, // RENDER_ATTACHMENT for potential mipmap generation
     });
 
     // Ensure bytesPerRow meets WebGPU 256-byte alignment
-    const rowBytes = hdrData.width * 4 /*channels*/ * 4; /*bytes/chan*/
+    const rowBytes = imageData.width * 4 /*channels*/ * 2; /*bytes/chan (half)*/
     const isAligned = (rowBytes & 0xff) === 0; // rowBytes % 256 === 0
 
     if (isAligned) {
       // Fast path: upload directly
       this.renderer.device.queue.writeTexture(
         { texture: equirectTexture },
-        rgbaData.buffer,
+        imageData.data.buffer,
         { bytesPerRow: rowBytes },
-        { width: hdrData.width, height: hdrData.height },
+        { width: imageData.width, height: imageData.height },
       );
     } else {
       // Padded upload: copy rows into a buffer with 256-byte stride
       const alignedRowBytes = (rowBytes + 255) & ~255; // round up to 256
-      const padded = new ArrayBuffer(alignedRowBytes * hdrData.height);
+      const padded = new ArrayBuffer(alignedRowBytes * imageData.height);
       const paddedView = new Uint8Array(padded);
-      const srcView = new Uint8Array(rgbaData.buffer);
+      const srcView = new Uint8Array(imageData.data.buffer);
 
-      for (let y = 0; y < hdrData.height; y++) {
+      for (let y = 0; y < imageData.height; y++) {
         const srcOff = y * rowBytes;
         const dstOff = y * alignedRowBytes;
         // copy rowBytes bytes for this row
@@ -610,7 +699,7 @@ export class ResourceManager {
         { texture: equirectTexture },
         padded,
         { bytesPerRow: alignedRowBytes },
-        { width: hdrData.width, height: hdrData.height },
+        { width: imageData.width, height: imageData.height },
       );
     }
 

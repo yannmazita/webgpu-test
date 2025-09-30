@@ -9,6 +9,7 @@ const HDR_LABELS = [
   "qwantani_night_puresky_4k.hdr",
   "small_empty_room_1_4k.hdr",
   "studio_small_09_4k.hdr",
+  "german_town_street_4k.exr",
 ] as const;
 
 const HDR_PREFIX = "/assets/hdris/";

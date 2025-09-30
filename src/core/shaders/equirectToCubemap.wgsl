@@ -2,7 +2,8 @@
 const PI: f32 = 3.141592653589793;
 
 @group(0) @binding(0) var equirectangularTexture: texture_2d<f32>;
-@group(0) @binding(1) var cubemapTexture: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(1) var equirectSampler: sampler;
+@group(0) @binding(2) var cubemapTexture: texture_storage_2d_array<rgba16float, write>;
 
 // Converts a 3D direction vector to a 2D UV coordinate on an equirectangular map.
 fn directionToUV(dir: vec3<f32>) -> vec2<f32> {
@@ -11,7 +12,7 @@ fn directionToUV(dir: vec3<f32>) -> vec2<f32> {
     // asin(y) gives the angle from the XZ plane (latitude)
     return vec2<f32>(
         0.5 + atan2(d.z, d.x) / (2.0 * PI),
-        0.5 - asin(d.y) / PI
+        0.5 + asin(d.y) / PI
     );
 }
 
@@ -60,13 +61,8 @@ fn main(
     // Convert the direction vector to a UV on the equirectangular map
     let equirectUV = directionToUV(dir);
 
-    // Sample the equirectangular texture
-    let dims_f = vec2<f32>(textureDimensions(equirectangularTexture));
-    let color = textureLoad(
-        equirectangularTexture, 
-        vec2<i32>(floor(equirectUV * dims_f)),
-        0
-    );
+    // Sample the equirectangular texture at mip level 0
+    let color = textureSampleLevel(equirectangularTexture, equirectSampler, equirectUV, 0.0);
 
     // Write the color to the corresponding face of the cubemap
     textureStore(cubemapTexture, global_id.xy, faceIndex, color);
