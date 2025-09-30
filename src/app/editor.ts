@@ -18,6 +18,13 @@ import { SunWidget } from "./editor-widgets/sunWidget";
 import { ShadowWidget } from "./editor-widgets/shadowWidget";
 import { RenderingWidget } from "./editor-widgets/renderingWidget";
 import { IblWidget } from "./editor-widgets/iblWidget";
+import { SelectionWidget } from "./editor-widgets/selectionWidget";
+import {
+  MSG_RAYCAST_REQUEST,
+  MSG_RAYCAST_RESPONSE,
+  RaycastRequestMsg,
+  RaycastResponseMsg,
+} from "@/core/types/worker";
 
 let uiDevice: GPUDevice;
 let uiContext: GPUCanvasContext;
@@ -33,6 +40,7 @@ let sunWidget: SunWidget;
 let shadowWidget: ShadowWidget;
 let renderingWidget: RenderingWidget;
 let iblWidget: IblWidget;
+let selectionWidget: SelectionWidget;
 
 let isPointerLockedState = false;
 let mouseX = 0;
@@ -59,6 +67,7 @@ export function init(
   shadowWidget = new ShadowWidget(engineStateCtx);
   renderingWidget = new RenderingWidget(worker);
   iblWidget = new IblWidget(worker);
+  selectionWidget = new SelectionWidget();
 
   worker.addEventListener("message", (ev) => {
     const msg = ev.data;
@@ -73,11 +82,14 @@ export function init(
       iblWidget.updateFromEngineSnapshot(snapshot);
 
       engineReady = true;
+    } else if (msg?.type === MSG_RAYCAST_RESPONSE) {
+      selectionWidget.onRaycastResponse(msg as RaycastResponseMsg);
     }
   });
 
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
+  document.addEventListener("mousedown", handleMouseDown);
   document.addEventListener("mousemove", handleMouseMove);
   document.addEventListener("pointerlockchange", handlePointerLockChange);
   canvas.addEventListener("click", handleCanvasClick);
@@ -137,6 +149,8 @@ function handleKeyUp(e: KeyboardEvent): void {
 async function handleCanvasClick(e: MouseEvent): Promise<void> {
   const io = ImGui.GetIO();
   if (io.WantCaptureMouse) return;
+
+  // The mousedown handler takes care of the raycast
   if (e.target === canvas && !isPointerLockedState) {
     await canvas.requestPointerLock();
   }
@@ -190,6 +204,47 @@ function handleMouseMove(e: MouseEvent): void {
   updateMousePosition(inputContext, mouseX, mouseY);
 }
 
+function handleMouseDown(e: MouseEvent): void {
+  const io = ImGui.GetIO();
+  // Don't raycast if clicking on UI or if it's not the left mouse button (0)
+  if (io.WantCaptureMouse || e.button !== 0) {
+    return;
+  }
+
+  // Prevent raycasting if the target is the UI canvas
+  if (e.target === uiCanvas) {
+    return;
+  }
+
+  if (!engineReady) return;
+
+  let x: number, y: number;
+
+  if (isPointerLockedState) {
+    // When locked, raycast from the center of the screen
+    x = canvas.clientWidth / 2;
+    y = canvas.clientHeight / 2;
+    console.log(
+      `[Editor] Mousedown while locked. Raycasting from center (${x}, ${y}).`,
+    );
+  } else {
+    // When not locked, raycast from the mouse position
+    const rect = canvas.getBoundingClientRect();
+    x = e.clientX - rect.left;
+    y = e.clientY - rect.top;
+    console.log(
+      `[Editor] Mousedown while unlocked. Raycasting from cursor (${x}, ${y}).`,
+    );
+  }
+
+  const request: RaycastRequestMsg = {
+    type: MSG_RAYCAST_REQUEST,
+    x,
+    y,
+  };
+  worker.postMessage(request);
+}
+
 export function update(): void {
   if (!uiDevice || !uiContext) return;
 
@@ -206,6 +261,7 @@ export function update(): void {
   ImGui.Separator();
 
   // Render all widgets
+  selectionWidget.render();
   fogWidget.render(engineReady);
   sunWidget.render(engineReady);
   shadowWidget.render(engineReady);

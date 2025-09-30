@@ -87,6 +87,7 @@ const sendResize = () => {
     });
   }
 };
+sendResize();
 
 interface WorkerMessage {
   type: string;

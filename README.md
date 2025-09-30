@@ -2,7 +2,8 @@
 
 A modern 3D rendering engine (and game engine) built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts.
 
-[engine_demo-19-09-2025.webm](https://github.com/user-attachments/assets/14a29c5e-5732-437c-8f24-e62af67baa42)
+[engine_demo_30-09-2025.webm](https://github.com/user-attachments/assets/f4ae8923-2c84-4abb-b5e9-d7e1fd0db251)
+
 
 ## Features (As of 25/09/2025)
 

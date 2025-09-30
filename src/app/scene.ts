@@ -22,20 +22,22 @@ import {
   PhysicsBodyComponent,
   PhysicsColliderComponent,
 } from "@/core/ecs/components/physicsComponents";
+import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 
-export async function createDefaultScene(
+export async function createScene(
   world: World,
   resourceManager: ResourceManager,
 ): Promise<{
   cameraEntity: number;
   demoModelEntity: number;
+  playerEntity: number;
   keyLightEntity: number;
   fillLightEntity: number;
   rimLightEntity: number;
 }> {
   // Environment
   const envMap = await resourceManager.createEnvironmentMap(
-    "/assets/hdris/kloppenheim_02_puresky_4k.hdr",
+    "/assets/hdris/lonely_road_afternoon_puresky_4k.hdr",
     1024,
   );
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
@@ -75,12 +77,13 @@ export async function createDefaultScene(
     const ground = world.createEntity("ground");
     const gt = new TransformComponent();
     gt.setPosition(0, 0, 0);
-    gt.setScale(140, 1, 140);
+    gt.setScale(140, 0.1, 140);
     world.addComponent(ground, gt);
 
-    // physics
-    world.addComponent(ground, new PhysicsBodyComponent(false));
-    world.addComponent(ground, new PhysicsColliderComponent(1, [70, 0, 70]));
+    // physics: A fixed body does not move.
+    world.addComponent(ground, new PhysicsBodyComponent("fixed"));
+    // Use a thin but non-zero box for the ground collider for stability.
+    world.addComponent(ground, new PhysicsColliderComponent(1, [70, 0.05, 70]));
 
     // visual
     const groundMat = await resourceManager.createUnlitGroundMaterial({
@@ -97,6 +100,31 @@ export async function createDefaultScene(
     world.addComponent(
       ground,
       new MeshRendererComponent(groundMesh, groundMat),
+    );
+  }
+
+  // Player entity (invisible capsule)
+  const playerEntity = world.createEntity("player");
+  {
+    const t = new TransformComponent();
+    t.setPosition(0, 1, 20); // Start on ground, away from pyramid
+    world.addComponent(playerEntity, t);
+
+    // Physics: kinematic capsule, marked as player
+    const bodyComp = new PhysicsBodyComponent("kinematicPosition", true);
+    world.addComponent(playerEntity, bodyComp);
+    const colliderComp = new PhysicsColliderComponent();
+    colliderComp.setCapsule(0.4, 0.9); // Slim FPS capsule
+    world.addComponent(playerEntity, colliderComp);
+
+    // Controller
+    const playerComp = new PlayerControllerComponent();
+    playerComp.jumpForce = 7.5;
+    world.addComponent(playerEntity, playerComp);
+
+    // No visual mesh (invisible player)
+    console.log(
+      "[Scene] Player entity created at (0,1,5) with kinematic capsule.",
     );
   }
 
@@ -131,7 +159,7 @@ export async function createDefaultScene(
   // 3D cube pyramid (N=5 layers: 25 + 16 + 9 + 4 + 1 = 55 dynamic cubes)
   {
     const LAYERS = 5;
-    const GROUND_Y_TOP = 5;
+    const GROUND_Y_TOP = 0.5;
     const HALF = 0.5; // half extents of unit cube
     const START_Y = GROUND_Y_TOP + HALF; // Place bottom of cube on ground
     for (let layer = 0; layer < LAYERS; layer++) {
@@ -153,7 +181,7 @@ export async function createDefaultScene(
           world.addComponent(e, new MeshRendererComponent(cubeMesh, inst));
 
           // physics: dynamic box
-          world.addComponent(e, new PhysicsBodyComponent(true));
+          world.addComponent(e, new PhysicsBodyComponent("dynamic"));
           world.addComponent(
             e,
             new PhysicsColliderComponent(1, [HALF, HALF, HALF]),
@@ -167,10 +195,9 @@ export async function createDefaultScene(
   const demoModelEntity = world.createEntity("shooter_ball");
   {
     const t = new TransformComponent();
-    // position near the pyramid, resting on ground
-    const GROUND_Y_TOP = 0;
+    const GROUND_Y_TOP = 0.0;
     const BALL_RADIUS = 1.0;
-    t.setPosition(-8, GROUND_Y_TOP + BALL_RADIUS, 0);
+    t.setPosition(-8, GROUND_Y_TOP + BALL_RADIUS, 0); // position near the pyramid, resting on ground
     t.setScale(1, 1, 1);
     world.addComponent(demoModelEntity, t);
 
@@ -194,7 +221,7 @@ export async function createDefaultScene(
     );
 
     // physics: dynamic sphere r=1
-    world.addComponent(demoModelEntity, new PhysicsBodyComponent(true));
+    world.addComponent(demoModelEntity, new PhysicsBodyComponent("dynamic"));
     world.addComponent(
       demoModelEntity,
       new PhysicsColliderComponent(0, [1, 0, 0]),
@@ -253,8 +280,7 @@ export async function createDefaultScene(
     },
   );
 
-  // Lights: key, fill, rim (visual spheres optional omitted for simplicity)
-  // You can add MeshRenderer spheres if you want indicators later
+  // Lights: key, fill, rim
   const keyLightEntity = world.createEntity("key_light");
   {
     const t = new TransformComponent();
@@ -307,6 +333,7 @@ export async function createDefaultScene(
   return {
     cameraEntity,
     demoModelEntity,
+    playerEntity,
     keyLightEntity,
     fillLightEntity,
     rimLightEntity,

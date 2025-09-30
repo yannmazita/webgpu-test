@@ -25,6 +25,9 @@ export const MSG_SET_TONE_MAPPING = "SET_TONE_MAPPING";
  */
 export const MSG_SET_ENVIRONMENT = "SET_ENVIRONMENT";
 
+export const MSG_RAYCAST_REQUEST = "RAYCAST_REQUEST";
+export const MSG_RAYCAST_RESPONSE = "RAYCAST_RESPONSE";
+
 /**
  * Defines the message structure for initializing the render worker.
  */
@@ -80,4 +83,20 @@ export interface SetEnvironmentMsg {
   type: typeof MSG_SET_ENVIRONMENT;
   url: string;
   size: number;
+}
+
+export interface RaycastRequestMsg {
+  type: typeof MSG_RAYCAST_REQUEST;
+  x: number;
+  y: number;
+}
+
+export interface RaycastResponseMsg {
+  type: typeof MSG_RAYCAST_RESPONSE;
+  hit: {
+    entity: Entity;
+    entityName: string;
+    distance: number;
+    point: Vec3;
+  } | null;
 }

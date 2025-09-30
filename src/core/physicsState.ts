@@ -24,6 +24,7 @@ import {
   COMMANDS_SLOT_SIZE,
   COMMANDS_RING_CAPACITY,
   COMMANDS_BUFFER_SIZE,
+  COMMANDS_MAX_PARAMS_F32,
   // States layout
   STATES_MAGIC_OFFSET,
   STATES_VERSION_OFFSET,
@@ -127,23 +128,32 @@ export function resetCommands(ctx: PhysicsContext): void {
 }
 
 /**
- * Attempts to enqueue a command into the ring buffer (single producer).
+ * Attempts to enqueue a command into the shared physics command ring buffer.
  *
- * Lock-free SPSC pattern:
- * - Reads HEAD/TAIL (u32)
- * - Checks full condition: next(HEAD) == TAIL
- * - Writes TYPE/PHYS_ID (Atomics.store) and PARAMS (Float32 set)
- * - Publishes by advancing HEAD (Atomics.store) and bumps GEN
+ * This function implements the producer side of a single-producer/single-consumer
+ * (SPSC) queue. It is designed to be called from the render worker to send
+ * commands to the physics worker in a lock-free manner.
  *
- * PARAMS handling:
- * - Up to 12 floats; extra values are ignored, missing values are zero-padded.
- * - Leave unspecified PARAMS as 0 for unused commands (e.g., DESTROY_BODY).
+ * The enqueue process is:
+ * 1. Atomically load the current `head` (producer) and `tail` (consumer) indices.
+ * 2. Check if the buffer is full. The buffer is full if the next write position
+ *    (`head + 1`) would collide with the current read position (`tail`). If so,
+ *    the command is dropped and the function returns `false`.
+ * 3. If space is available, the command `type`, `physId`, and `params` are
+ *    written to the slot indicated by the `head` index.
+ * 4. The `head` index is atomically advanced, making the command visible to the
+ *    consumer (the physics worker).
+ * 5. A generation counter is incremented for observability.
  *
- * @param ctx PhysicsContext (commands views required).
- * @param type Command type (CMD_*).
- * @param physId Physics body ID (u32).
- * @param params Optional parameter block (up to 12 numbers).
- * @returns True if enqueued, false if the ring is full (command dropped).
+ * @param ctx The physics context containing the shared
+ *     command buffer views.
+ * @param type The integer type of the command (e.g., `CMD_CREATE_BODY`).
+ * @param physId The unique physics ID of the target entity.
+ * @param params An optional array of floating-point
+ *     parameters for the command. The array will be truncated or zero-padded to
+ *     fit the command slot's parameter block size.
+ * @return `true` if the command was successfully enqueued, `false` if
+ *     the command ring was full and the command was dropped.
  */
 export function tryEnqueueCommand(
   ctx: PhysicsContext,
@@ -151,35 +161,53 @@ export function tryEnqueueCommand(
   physId: number,
   params?: readonly number[],
 ): boolean {
+  // --- SPSC Ring Buffer Full Check ---
+  // Atomically load the current head and tail indices to check for space.
   const head = Atomics.load(ctx.commandsI32, idx(COMMANDS_HEAD_OFFSET));
   const tail = Atomics.load(ctx.commandsI32, idx(COMMANDS_TAIL_OFFSET));
+
+  // Calculate the next head position, wrapping around the buffer capacity.
   const next = (head + 1) % COMMANDS_RING_CAPACITY;
+
+  // If the next write position is the same as the current read position, the
+  // buffer is full. Drop the command to prevent overwriting unread data.
   if (next === tail) {
-    // Ring full; drop command
+    console.warn(
+      "[tryEnqueueCommand] Command ring buffer is full. Command dropped.",
+    );
     return false;
   }
 
+  // --- Write Command to Slot ---
+  // Calculate the memory offset for the slot at the current head index.
   const slotByteOffset = COMMANDS_SLOT_OFFSET + head * COMMANDS_SLOT_SIZE;
   const slotI32 = idx(slotByteOffset);
-  const slotF32 = idx(slotByteOffset + 8); // After TYPE(u32) + PHYS_ID(u32) = 8 bytes
+  // The float parameters start 8 bytes after the slot's beginning (after type and id).
+  const slotF32 = idx(slotByteOffset + 8);
 
-  // Write header (TYPE, PHYS_ID)
+  // Write the command header (type and ID) using atomic stores.
   Atomics.store(ctx.commandsI32, slotI32 + 0, type | 0);
   Atomics.store(ctx.commandsI32, slotI32 + 1, physId | 0);
 
-  // Write PARAMS (up to 12 floats)
+  // Write the floating-point parameter block.
   const p = params ?? [];
-  const count = Math.min(12, p.length);
+  const count = Math.min(COMMANDS_MAX_PARAMS_F32, p.length);
   for (let i = 0; i < count; i++) {
     ctx.commandsF32[slotF32 + i] = p[i];
   }
-  // Zero-pad remaining
-  for (let i = count; i < 12; i++) {
+  // Zero-pad any remaining space in the parameter block for data consistency.
+  for (let i = count; i < COMMANDS_MAX_PARAMS_F32; i++) {
     ctx.commandsF32[slotF32 + i] = 0.0;
   }
 
-  // Publish: advance HEAD and bump GEN
+  // --- Publish Command ---
+  // The following atomic operations make the command visible to the consumer.
+  // 1. Atomically advance the head index to the next available slot. This is
+  //    the "commit" that publishes the command.
   Atomics.store(ctx.commandsI32, idx(COMMANDS_HEAD_OFFSET), next);
+
+  // 2. Increment the generation counter for observability and debugging.
   Atomics.add(ctx.commandsI32, idx(COMMANDS_GEN_OFFSET), 1);
+
   return true;
 }
