@@ -44,7 +44,7 @@ export interface GLTFMesh {
 }
 
 export interface GLTFPrimitive {
-  attributes: { [name: string]: number }; // like { "POSITION": 1, "NORMAL": 2 }
+  attributes: Record<string, number>; // like { "POSITION": 1, "NORMAL": 2 }
   indices?: number;
   material?: number;
   mode?: number; // 4 = TRIANGLES
@@ -54,6 +54,13 @@ export interface GLTFMaterialExtensions {
   // optional scalar emissive strength
   KHR_materials_emissive_strength?: {
     emissiveStrength?: number; // default 1.0
+  };
+  // KHR_materials_specular
+  KHR_materials_specular?: {
+    specularFactor?: number; // default 1.0
+    specularTexture?: { index: number; texCoord?: number };
+    specularColorFactor?: [number, number, number]; // default [1,1,1]
+    specularColorTexture?: { index: number; texCoord?: number };
   };
   // marker extension (no params)
   KHR_materials_unlit?: Record<string, never>;

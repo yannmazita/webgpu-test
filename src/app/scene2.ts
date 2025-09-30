@@ -146,32 +146,27 @@ export async function createScene(
 
   // --- Ground Plane ---
   {
-    const ground = world.createEntity("ground");
-    const t = new TransformComponent();
+    const groundEntity = await resourceManager.loadSceneFromGLTF(
+      world,
+      "/assets/textures/snow_02_4k/snow_02_4k.gltf",
+    );
+    const groundTransform = world.getComponent(
+      groundEntity,
+      TransformComponent,
+    );
     // A thin box with its top surface at y=0.
-    t.setPosition(0, -0.5, 0);
-    t.setScale(200, 1, 200);
-    world.addComponent(ground, t);
+    if (groundTransform) {
+      groundTransform.setPosition(0, -0.5, 0);
+      groundTransform.setScale(1, 1, 1);
+      world.addComponent(groundEntity, groundTransform);
 
-    // Physics: A fixed body that cannot move.
-    world.addComponent(ground, new PhysicsBodyComponent("fixed"));
-    world.addComponent(
-      ground,
-      new PhysicsColliderComponent(1, [100, 0.5, 100]),
-    ); // Half-extents.
-
-    // Visual: A simple unlit material.
-    const groundMat = await resourceManager.createUnlitGroundMaterial({
-      color: [0.2, 0.22, 0.25, 1],
-    });
-    const groundMesh = await resourceManager.createMesh(
-      "ground_plane_mesh",
-      createCubeMeshData(1),
-    );
-    world.addComponent(
-      ground,
-      new MeshRendererComponent(groundMesh, groundMat),
-    );
+      // Physics: A fixed body that cannot move.
+      world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
+      world.addComponent(
+        groundEntity,
+        new PhysicsColliderComponent(1, [100, 0.5, 100]),
+      ); // Half-extents.
+    }
   }
 
   // --- Pillar Forest ---

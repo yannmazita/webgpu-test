@@ -81,6 +81,11 @@ export interface InstanceData {
   receiveShadows: boolean;
 }
 
+/**
+ * Defines the configurable properties for creating a Physically-Based Rendering
+ * (PBR) material instance. This interface aligns closely with the glTF 2.0
+ * metallic-roughness workflow and supports common extensions.
+ */
 export interface PBRMaterialOptions {
   /**
    * Base color (albedo) in linear space [R, G, B, A].
@@ -133,7 +138,7 @@ export interface PBRMaterialOptions {
 
   /**
    * Metallic-Roughness texture map URL.
-   * R channel: unused
+   * R channel: unused (or Occlusion if packed)
    * G channel: roughness
    * B channel: metallic
    * Standard glTF 2.0 format
@@ -152,6 +157,7 @@ export interface PBRMaterialOptions {
 
   /**
    * Ambient occlusion texture map URL.
+   * Note: If a packed metallicRoughnessMap is used (ORM/ARM), this may be ignored.
    */
   occlusionMap?: string;
 
@@ -172,6 +178,36 @@ export interface PBRMaterialOptions {
    * Default: 1.0
    */
   emissiveStrength?: number;
+
+  /**
+   * A flag indicating that the metallicRoughnessMap contains occlusion in its R channel.
+   * This is a heuristic and not part of the glTF spec.
+   */
+  usePackedOcclusion?: boolean;
+
+  // --- KHR_materials_specular ---
+  /**
+   * The strength of the specular reflection.
+   * Default: 1.0
+   */
+  specularFactor?: number;
+  /**
+   * The color of the specular reflection.
+   * Default: [1, 1, 1]
+   */
+  specularColorFactor?: [number, number, number];
+  /**
+   * Texture defining specular factor in its alpha channel.
+   */
+  specularFactorMap?: string;
+  /**
+   * Texture defining specular color in its RGB channels.
+   */
+  specularColorMap?: string;
+  /** UV set index for the specular factor map. Defaults to 0. */
+  specularFactorUV?: number;
+  /** UV set index for the specular color map. Defaults to 0. */
+  specularColorUV?: number;
 }
 
 /**

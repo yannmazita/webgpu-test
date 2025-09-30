@@ -223,6 +223,25 @@ export class ResourceManager {
     return opts ? { type: "PBR", options: opts } : undefined;
   }
 
+  /**
+   * Creates or retrieves a cached PBR material template.
+   *
+   * This method provides a shared `PBRMaterial` object that acts as a template
+   * for creating material instances. Templates are cached based on their
+   * transparency state to avoid redundant shader compilation and pipeline
+   * layout creation, which are expensive operations. The transparency is
+   * determined from the alpha channel of the `albedo` color in the options.
+   *
+   * Before creating the first template, this method ensures the static PBR
+   * shader and its resources are initialized by calling `PBRMaterial.initialize()`.
+   *
+   * @param options An object containing material properties. Only the `albedo`
+   *     property's alpha channel is used to determine if a transparent or
+   *     opaque template is required. Defaults to an opaque template if no
+   *     options are provided.
+   * @returns A promise that resolves to a cached or newly created `PBRMaterial`
+   *     template.
+   */
   public async createPBRMaterialTemplate(
     options: PBRMaterialOptions = {},
   ): Promise<PBRMaterial> {
@@ -245,6 +264,24 @@ export class ResourceManager {
     return materialTemplate;
   }
 
+  /**
+   * Creates a unique PBR material instance from a template and a set of
+   * options.
+   *
+   * This method takes a shared PBRMaterial template and a specific set of
+   * PBRMaterialOptions to create a fully configured MaterialInstance. It
+   * handles the asynchronous loading and creation of all required GPU textures
+   * (albedo, normal, metallic-roughness, specular, etc.) based on the URLs
+   * provided in the options. If a texture URL is not provided for a given map,
+   * a default 1x1 dummy texture is used as a fallback.
+   *
+   * @param materialTemplate The shared PBRMaterial template that defines the
+   *     shader and pipeline layout for this instance.
+   * @param options An object containing material properties (like albedo color,
+   *     metallic factor) and URLs for the various texture maps.
+   * @returns A promise that resolves to a new MaterialInstance, complete with
+   *     its own uniform buffer and bind group.
+   */
   public async createPBRMaterialInstance(
     materialTemplate: PBRMaterial,
     options: PBRMaterialOptions = {},
@@ -284,6 +321,20 @@ export class ResourceManager {
           "rgba8unorm",
         )
       : this.dummyTexture;
+    const specularFactorTexture = options.specularFactorMap
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.specularFactorMap,
+          "rgba8unorm",
+        )
+      : this.dummyTexture;
+    const specularColorTexture = options.specularColorMap
+      ? await createTextureFromImage(
+          this.renderer.device,
+          options.specularColorMap,
+          "rgba8unorm-srgb",
+        )
+      : this.dummyTexture;
     return materialTemplate.createInstance(
       options,
       albedoTexture,
@@ -291,6 +342,8 @@ export class ResourceManager {
       normalTexture,
       emissiveTexture,
       occlusionTexture,
+      specularFactorTexture,
+      specularColorTexture,
       this.defaultSampler,
     );
   }
@@ -477,22 +530,35 @@ export class ResourceManager {
   // ---------- Mesh resolution by handle ----------
 
   /**
-   * Resolves a mesh from a string identifier, referred to as a "handle".
+   * Loads a single mesh resource from a string identifier, known as a "handle".
    *
-   * This method loads or creates a mesh based on the handle's format. The
-   * handle also serves as a cache key, ensuring that the same resource is not
-   * loaded multiple times.
+   * This method acts as a unified asset loader for mesh data. It parses the
+   * handle to determine the asset type (ie procedural primitive, model
+   * file) and its parameters. The handle also serves as a cache key, ensuring
+   * that the same mesh resource is not processed or uploaded to the GPU
+   * multiple times.
+   *
+   * Unlike `loadSceneFromGLTF`, this function only extracts the raw mesh
+   * geometry and does not process materials, transforms, or scene graph
+   * information.
    *
    * Supported handle formats:
    * - **Primitives:**
-   *   - "PRIM:cube" (default size 1.0)
-   *   - "PRIM:cube:size=2.5"
-   *   - "PRIM:icosphere" (default radius 0.5, subdivisions 2)
-   *   - "PRIM:icosphere:r=1.0,sub=3"
+   *   - `"PRIM:cube"` (default size 1.0)
+   *   - `"PRIM:cube:size=2.5"`
+   *   - `"PRIM:icosphere"` (default radius 0.5, subdivisions 2)
+   *   - `"PRIM:icosphere:r=1.0,sub=3"`
    * - **Model Files:**
-   *   - "OBJ:path/to/model.obj"
-   *   - "STL:path/to/model.stl"
-   *   -  "GLTF:url#meshName"
+   *   - `"OBJ:path/to/model.obj"`
+   *   - `"STL:path/to/model.stl"`
+   *   - `"GLTF:path/to/model.gltf#meshName"` (loads the first primitive of the
+   *     named mesh)
+   *
+   * @param handle The string identifier for the mesh resource.
+   * @return A promise that resolves to the requested `Mesh` object, which
+   *     contains the GPU buffers and layout information.
+   * @throws If the handle format is unsupported or the specified asset cannot
+   *     be found.
    */
   public async resolveMeshByHandle(handle: string): Promise<Mesh> {
     // Alias: if we already resolved this handle, return it
@@ -555,21 +621,24 @@ export class ResourceManager {
       // This loads the first primitive of the named mesh.
       // For full scene loading, use loadSceneFromGLTF.
       const { parsedGltf } = await loadGLTF(url);
-      const meshIndex = parsedGltf.json.meshes?.findIndex(
-        (m) => m.name === meshName,
-      );
-      if (meshIndex === undefined || meshIndex === -1) {
-        throw new Error(`Mesh "${meshName}" not found in ${url}`);
+      const gltfMesh = parsedGltf.json.meshes?.find((m) => m.name === meshName);
+      if (!gltfMesh || gltfMesh.primitives.length === 0) {
+        throw new Error(
+          `Mesh "${meshName}" not found or has no primitives in ${url}`,
+        );
       }
-    const mesh = await this.createMeshFromPrimitive(
-      handle,
-      gltf,
-      primitive,
-    );
-    _setHandle(mesh, handle);
-    this.meshes.set(handle, mesh);
-    return mesh;
-  }
+
+      // Using the first primitive for this simple asset-loading function.
+      const primitive = gltfMesh.primitives[0];
+      const mesh = await this.createMeshFromPrimitive(
+        handle,
+        parsedGltf,
+        primitive,
+      );
+      _setHandle(mesh, handle);
+      this.meshes.set(handle, mesh);
+      return mesh;
+    }
 
     throw new Error(`Unsupported mesh handle: ${handle}`);
   }
@@ -577,22 +646,31 @@ export class ResourceManager {
   // ---------- Scene Loading ----------
 
   /**
-   * Resolves a mesh from a string identifier, referred to as a "handle".
+   * Loads a glTF file and instantiates its scene graph into the ECS world.
    *
-   * This method loads or creates a mesh based on the handle's format. The
-   * handle also serves as a cache key, ensuring that the same resource is not
-   * loaded multiple times.
+   * This function orchestrates the full loading process for a glTF scene, which
+   * can range from a single object to a complex hierarchy. It performs the
+   * following steps:
+   * 1.  Parses the `.gltf` or `.glb` file.
+   * 2.  Creates an entity for each node in the glTF scene graph, establishing
+   *     the correct parent-child relationships.
+   * 3.  Applies the transform (translation, rotation, scale) from each node to
+   *     its corresponding entity's `TransformComponent`.
+   * 4.  For each mesh primitive, it resolves the `Mesh` resource and its
+   *     `MaterialInstance`, creating them if they don't already exist.
+   * 5.  Adds a `MeshRendererComponent` to entities that have a mesh.
+   * 6.  Parses animations and attaches an `AnimationComponent` to the root
+   *     entity of the scene.
    *
-   * Supported handle formats:
-   * - **Primitives:**
-   *   - "PRIM:cube" (default size 1.0)
-   *   - "PRIM:cube:size=2.5"
-   *   - "PRIM:icosphere" (default radius 0.5, subdivisions 2)
-   *   - "PRIM:icosphere:r=1.0,sub=3"
-   * - **Model Files:**
-   *   - "OBJ:path/to/model.obj"
-   *   - "STL:path/to/model.stl"
-   *   -  "GLTF:url#meshName"
+   * This method is the primary entry point for adding pre-authored 3D assets
+   * into the game world.
+   *
+   * @param world The `World` instance where the scene entities will be created.
+   * @param url The URL of the `.gltf` or `.glb` file to load.
+   * @return A promise that resolves to the root `Entity` of the newly created
+   *     scene hierarchy.
+   * @throws If the glTF file cannot be fetched, parsed, or if it references
+   *     assets that cannot be found.
    */
   public async loadSceneFromGLTF(world: World, url: string): Promise<Entity> {
     const { parsedGltf: gltf, baseUri } = await loadGLTF(url);
@@ -758,6 +836,10 @@ export class ResourceManager {
    * - Supports KHR_materials_emissive_strength: stores its scalar into
    *   options.emissiveStrength (default 1.0). If KHR_materials_unlit is present,
    *   emissiveStrength is ignored (reset to 1.0) per the spec exclusion.
+   * - Supports KHR_materials_specular: reads specular factor/color and associated textures.
+   * - Implements a heuristic for packed ARM/ORM textures: if a metallic-roughness
+   *   texture is present but an occlusion texture is not, it assumes occlusion is
+   *   packed into the R channel of the metallic-roughness map.
    *
    * @param gltfMat The parsed glTF material object.
    * @param gltf The parsed glTF asset (JSON + buffers), used to resolve image URIs.
@@ -770,6 +852,7 @@ export class ResourceManager {
     baseUri: string,
   ): PBRMaterialOptions {
     const pbr = gltfMat.pbrMetallicRoughness ?? {};
+    const matExt = gltfMat.extensions;
 
     const options: PBRMaterialOptions = {
       // Core factors
@@ -838,8 +921,13 @@ export class ResourceManager {
       );
     }
 
+    // Heuristic for packed Ambient Occlusion (in Metallic-Roughness texture)
+    // If MR map exists but a separate AO map does not, assume AO is in R channel of MR map.
+    if (options.metallicRoughnessMap && !options.occlusionMap) {
+      options.usePackedOcclusion = true;
+    }
+
     // KHR_materials_emissive_strength
-    const matExt = gltfMat.extensions;
     const strength = matExt?.KHR_materials_emissive_strength?.emissiveStrength;
     if (typeof strength === "number" && strength >= 0.0) {
       options.emissiveStrength = strength;
@@ -856,6 +944,30 @@ export class ResourceManager {
         );
       }
       options.emissiveStrength = 1.0;
+    }
+
+    // KHR_materials_specular
+    const specExt = matExt?.KHR_materials_specular;
+    if (specExt) {
+      options.specularFactor = specExt.specularFactor;
+      options.specularColorFactor = specExt.specularColorFactor;
+      options.specularFactorUV = specExt.specularTexture?.texCoord ?? 0;
+      options.specularColorUV = specExt.specularColorTexture?.texCoord ?? 0;
+
+      if (specExt.specularTexture) {
+        options.specularFactorMap = this.getImageUri(
+          gltf,
+          specExt.specularTexture.index,
+          baseUri,
+        );
+      }
+      if (specExt.specularColorTexture) {
+        options.specularColorMap = this.getImageUri(
+          gltf,
+          specExt.specularColorTexture.index,
+          baseUri,
+        );
+      }
     }
 
     return options;
@@ -1000,7 +1112,9 @@ export class ResourceManager {
     if (image.bufferView !== undefined && image.mimeType) {
       const bufferView = gltf.json.bufferViews?.[image.bufferView];
       if (!bufferView) {
-        throw new Error(`BufferView ${image.bufferView} not found in glTF file.`);
+        throw new Error(
+          `BufferView ${image.bufferView} not found in glTF file.`,
+        );
       }
       const buffer = buffers[bufferView.buffer];
       const imageData = new Uint8Array(
