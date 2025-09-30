@@ -1524,12 +1524,6 @@ export class ResourceManager {
       }
     }
 
-    // --- Buffer 4: Texture Coordinates 1 (shaderLocation: 9) ---
-    let texCoords1 = finalTexCoords1;
-    if (!texCoords1 || texCoords1.length === 0) {
-      texCoords1 = new Float32Array(finalVertexCount * 2);
-    }
-
     if (!finalTangents) {
       console.warn(
         `[ResourceManager] Mesh "${key}" has no tangents. Creating default [1,0,0,1].`,
@@ -1549,7 +1543,7 @@ export class ResourceManager {
         positions: finalPositions,
         normals: finalNormals,
         texCoords: finalTexCoords,
-        texCoords1: texCoords1,
+        texCoords1: finalTexCoords1,
         tangents: finalTangents,
         indices: finalIndices,
       },
@@ -1657,6 +1651,10 @@ export class ResourceManager {
     };
 
     // --- Buffer 4: Texture Coordinates 1 (shaderLocation: 9) ---
+    let texCoords1 = finalTexCoords1;
+    if (!texCoords1 || texCoords1.length === 0) {
+      texCoords1 = new Float32Array(finalVertexCount * 2);
+    }
     buffers[4] = createGPUBuffer(
       this.renderer.device,
       texCoords1,
