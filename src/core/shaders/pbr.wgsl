@@ -67,12 +67,15 @@ struct LightsBuffer {
 
 // PBR Material uniforms
 struct PBRMaterialUniforms {
-    albedo: vec4<f32>,
-    metallicRoughnessNormalOcclusion: vec4<f32>, // metallic, roughness, normalIntensity, occlusionStrength
-    emissive: vec4<f32>, // xyz: emissiveFactor, w: emissiveStrength (KHR_materials_emissive_strength)
-    textureFlags: vec4<f32>, // hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive
-    textureUVs: vec4<f32>, // albedoUV, mrUV, normalUV, emissiveUV
-    textureFlags2: vec4<f32>, // hasOcclusion, occlusionUV, pad, pad
+  albedo_factor: vec4<f32>,
+  params0: vec4<f32>, // .x=metallic, .y=roughness, .z=normalIntensity, .w=occlusionStrength
+  emissive: vec4<f32>, // .rgb=emissive_factor, .w=emissive_strength
+  specular: vec4<f32>, // .rgb=specular_color_factor, .w=specular_factor
+  texture_flags0: vec4<f32>, // .x=hasAlbedo, .y=hasMR, .z=hasNormal, .w=hasEmissive
+  texture_flags1: vec4<f32>, // .x=hasOcclusion, .y=hasSpecFactor, .z=hasSpecColor, .w=usesPackedOcclusion
+  uv_indices0: vec4<f32>, // .x=albedo, .y=mr, .z=normal, .w=emissive
+  uv_indices1: vec4<f32>, // .x=occlusion, .y=specFactor, .z=specColor, .w=pad
+  uv_scale: vec2<f32>, // Tiling factor
 }
 
 struct Cascade {
@@ -103,13 +106,16 @@ struct ShadowUniforms {
 @group(0) @binding(12) var<uniform> shadow: ShadowUniforms;
 
 // @group(1) - Per-material data
-@group(1) @binding(0) var albedoTexture: texture_2d<f32>;
-@group(1) @binding(1) var metallicRoughnessTexture: texture_2d<f32>;
-@group(1) @binding(2) var normalTexture: texture_2d<f32>;
-@group(1) @binding(3) var emissiveTexture: texture_2d<f32>;
-@group(1) @binding(4) var occlusionTexture: texture_2d<f32>;
-@group(1) @binding(5) var materialSampler: sampler;
-@group(1) @binding(6) var<uniform> material: PBRMaterialUniforms;
+@group(1) @binding(0) var albedo_texture: texture_2d<f32>;
+@group(1) @binding(1) var metallic_roughness_texture: texture_2d<f32>;
+@group(1) @binding(2) var normal_texture: texture_2d<f32>;
+@group(1) @binding(3) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(4) var occlusion_texture: texture_2d<f32>;
+@group(1) @binding(5) var specular_factor_texture: texture_2d<f32>;
+@group(1) @binding(6) var specular_color_texture: texture_2d<f32>;
+@group(1) @binding(7) var material_sampler: sampler;
+@group(1) @binding(8) var<uniform> material: PBRMaterialUniforms;
+
 
 fn clusterIndex(ix: u32, iy: u32, iz: u32) -> u32 {
     return iz * (clusterParams.gridX * clusterParams.gridY) + iy * clusterParams.gridX + ix;
@@ -225,12 +231,12 @@ fn pickUV(uvIndex: f32, uv0: vec2<f32>, uv1: vec2<f32>) -> vec2<f32> {
 
 // Unpack normal from normal map
 fn getNormalFromMap(fi: FragmentInput, normalIntensity: f32) -> vec3<f32> {
-    if (material.textureFlags.z < 0.5) {
+    if (material.texture_flags0.z < 0.5) {
         return normalize(fi.worldNormal);
     }
 
-    let normalUV = pickUV(material.textureUVs.z, fi.texCoords0, fi.texCoords1);
-    let tangentNormal = textureSample(normalTexture, materialSampler, normalUV).xyz * 2.0 - 1.0;
+    let normalUV = pickUV(material.uv_indices0.z, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+    let tangentNormal = textureSample(normal_texture, material_sampler, normalUV).xyz * 2.0 - 1.0;
 
     var adjustedNormal = tangentNormal;
     adjustedNormal.x *= normalIntensity;
@@ -254,6 +260,7 @@ fn calculateLightContribution(
     albedo: vec3<f32>, 
     metallic: f32, 
     roughness: f32, 
+    specularFactor: f32,
     lightColor: vec3<f32>
 ) -> vec3<f32> {
     let H = normalize(V + L);
@@ -270,7 +277,10 @@ fn calculateLightContribution(
     // Calculate specular and diffuse components
     let numerator = NDF * G * F;
     let denominator = 4.0 * NdotV * NdotL + 0.0001;
-    let specular = numerator / denominator;
+    var specular = numerator / denominator;
+    
+    // Apply specular factor for dielectric materials only
+    specular = specular * mix(specularFactor, 1.0, metallic);
 
     // Energy conservation
     let kS = F; // Specular reflection coefficient
@@ -296,28 +306,7 @@ fn getShadowCascade(viewZ: f32) -> i32 {
 
 fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
     let wp = vec4<f32>(worldPos, 1.0);
-
     let sp = shadow.cascades[cascadeIndex].lightViewProj * wp;
-
-    /*
-    var sp: vec4<f32>;
-
-    switch (cascadeIndex) {
-        case 0: {
-            sp = shadow.cascades[0].lightViewProj * wp;
-        }
-        case 1: {
-            sp = shadow.cascades[1].lightViewProj * wp;
-        }
-        case 2: {
-            sp = shadow.cascades[2].lightViewProj * wp;
-        }
-        default: {
-            sp = shadow.cascades[3].lightViewProj * wp;
-        }
-    }
-    */
-
     let ndc = sp.xyz / sp.w;
     let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
     let depth = ndc.z;
@@ -325,8 +314,6 @@ fn projectToShadowSpace(worldPos: vec3<f32>, cascadeIndex: i32) -> vec3<f32> {
 }
 
 fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32, cascadeIndex: i32) -> f32 {
-    // The sampler is set to clamp-to-edge, so this out-of-bounds coords are handled
-    // automatically on the gpu
     let texel = vec2<f32>(1.0 / mapSize);
     var sum = 0.0;
     let taps = 9.0;
@@ -342,35 +329,53 @@ fn sampleShadowPCF(uv: vec2<f32>, depth: f32, pcfRadius: f32, mapSize: f32, casc
 @fragment
 fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
     // ===== Sample Material Properties =====
-    var albedo = material.albedo.rgb;
-    var metallic = material.metallicRoughnessNormalOcclusion.x;
-    var roughness = material.metallicRoughnessNormalOcclusion.y;
-    let normalIntensity = material.metallicRoughnessNormalOcclusion.z;
-    let occlusionStrength = material.metallicRoughnessNormalOcclusion.w;
+    var albedo = material.albedo_factor.rgb;
+    var metallic = material.params0.x;
+    var roughness = material.params0.y;
+    let normalIntensity = material.params0.z;
+    let occlusionStrength = material.params0.w;
     var emissive = material.emissive.rgb;
+    var specularColor = material.specular.rgb;
+    var specularFactor = material.specular.w;
     var ao = 1.0;
 
     // Textures
-    if (material.textureFlags.x > 0.5) {
-        let albedoUV = pickUV(material.textureUVs.x, fi.texCoords0, fi.texCoords1);
-        let albedoSample = textureSample(albedoTexture, materialSampler, albedoUV);
+    if (material.texture_flags0.x > 0.5) { // hasAlbedoMap
+        let albedoUV = pickUV(material.uv_indices0.x, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+        let albedoSample = textureSample(albedo_texture, material_sampler, albedoUV);
         albedo = albedo * albedoSample.rgb;
     }
-    if (material.textureFlags.y > 0.5) {
-        let mrUV = pickUV(material.textureUVs.y, fi.texCoords0, fi.texCoords1);
-        let mrSample = textureSample(metallicRoughnessTexture, materialSampler, mrUV);
+    
+    let mrUV = pickUV(material.uv_indices0.y, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+    let mrSample = textureSample(metallic_roughness_texture, material_sampler, mrUV);
+    if (material.texture_flags0.y > 0.5) { // hasMetallicRoughnessMap
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }
-    if (material.textureFlags.w > 0.5) {
-        let emissiveUV = pickUV(material.textureUVs.w, fi.texCoords0, fi.texCoords1);
-        let emissiveSample = textureSample(emissiveTexture, materialSampler, emissiveUV);
+    
+    if (material.texture_flags0.w > 0.5) { // hasEmissiveMap
+        let emissiveUV = pickUV(material.uv_indices0.w, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+        let emissiveSample = textureSample(emissive_texture, material_sampler, emissiveUV);
         emissive = emissive * emissiveSample.rgb;
     }
-    if (material.textureFlags2.x > 0.5) {
-        let occlusionUV = pickUV(material.textureFlags2.y, fi.texCoords0, fi.texCoords1);
-        let occlusionSample = textureSample(occlusionTexture, materialSampler, occlusionUV);
+
+    // Occlusion with supports for packed textures (ARM/ORM)
+    if (material.texture_flags1.w > 0.5) { // usesPackedOcclusion
+        ao = mix(1.0, mrSample.r, occlusionStrength);
+    } else if (material.texture_flags1.x > 0.5) { // hasOcclusionMap
+        let occlusionUV = pickUV(material.uv_indices1.x, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+        let occlusionSample = textureSample(occlusion_texture, material_sampler, occlusionUV);
         ao = mix(1.0, occlusionSample.r, occlusionStrength);
+    }
+    
+    // KHR_materials_specular sampling
+    if (material.texture_flags1.y > 0.5) { // hasSpecularFactorMap
+        let uv = pickUV(material.uv_indices1.y, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+        specularFactor = specularFactor * textureSample(specular_factor_texture, material_sampler, uv).a;
+    }
+    if (material.texture_flags1.z > 0.5) { // hasSpecularColorMap
+        let uv = pickUV(material.uv_indices1.z, fi.texCoords0, fi.texCoords1) * material.uv_scale;
+        specularColor = specularColor * textureSample(specular_color_texture, material_sampler, uv).rgb;
     }
 
     // Normals and view vector
@@ -379,7 +384,8 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let R = reflect(-V, N);
 
     // Base reflectance
-    var F0 = vec3<f32>(0.04);
+    // F0 for dielectrics is tinted by specularColor
+    var F0 = vec3<f32>(0.04) * specularColor;
     F0 = mix(F0, albedo, metallic);
     roughness = clamp(roughness, 0.04, 1.0);
 
@@ -428,7 +434,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
             let rangeFalloff = 1.0 - (r * r * r * r);
             let radiance = lightColor * attenuation * intensity * rangeFalloff;
 
-            Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, radiance);
+            Lo += calculateLightContribution(L, N, V, F0, albedo, metallic, roughness, specularFactor, radiance);
         }
     }
 
@@ -449,7 +455,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let shadowSample = sampleShadowPCF(sh.xy, cmpDepth, pcfRadius, mapSize, cascadeIndex);
     let shadowFactor = mix(1.0, shadowSample, receiveShadowsFloat);
     
-    let sunTerm = calculateLightContribution(Ls, N, V, F0, albedo, metallic, roughness, sunColor);
+    let sunTerm = calculateLightContribution(Ls, N, V, F0, albedo, metallic, roughness, specularFactor, sunColor);
     Lo += sunTerm * shadowFactor;
 
 
@@ -466,7 +472,10 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     let maxMipLevel = scene.miscParams.z - 1.0;
     let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxMipLevel).rgb;
     let brdf = textureSample(brdfLUT, iblSampler, vec2<f32>(max(dot(N, V), 0.0), roughness)).rg;
-    let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+    var specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+    
+    // Apply specular factor to IBL for dielectrics only
+    specularIBL = specularIBL * mix(specularFactor, 1.0, metallic);
     
     let ambient = (kD * diffuseIBL + specularIBL) * ao;
 
@@ -519,5 +528,5 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         final_color = ACESFilmicToneMapping(color);
     }
 
-    return vec4<f32>(final_color, material.albedo.a);
+    return vec4<f32>(final_color, material.albedo_factor.a);
 }

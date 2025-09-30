@@ -1,3 +1,4 @@
+// src/core/materials/pbrMaterial.ts
 import { Material } from "./material";
 import { PBRMaterialOptions } from "@/core/types/gpu";
 import shaderUrl from "@/core/shaders/pbr.wgsl?url";
@@ -48,11 +49,15 @@ export class PBRMaterial extends Material {
         { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
         // Occlusion texture
         { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+        // KHR_materials_specular: Specular Factor texture
+        { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+        // KHR_materials_specular: Specular Color texture
+        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: {} },
         // Texture sampler
-        { binding: 5, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        { binding: 7, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
         // Material uniforms
         {
-          binding: 6,
+          binding: 8,
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" },
         },
@@ -84,7 +89,36 @@ export class PBRMaterial extends Material {
   }
 
   /**
-   * Creates a new instance from this material template.
+   * Creates a new material instance from this PBR material template.
+   *
+   * This method takes a set of material options and pre-loaded GPU resources to
+   * create a unique `MaterialInstance`. It is responsible for:
+   * 1.  Creating a GPU uniform buffer populated with the scalar properties from
+   *     the `options` object (like albedo color, metallic factor etc).
+   * 2.  Creating a `GPUBindGroup` that binds all the provided textures, the
+   *     sampler, and the new uniform buffer to the shader bindings defined by
+   *     this material's layout.
+   * 3.  Registering uniform updater functions on the new instance, which allows
+   *     for efficient, partial updates of material properties for features like
+   *     glTF animations.
+   *
+   * @param options The set of scalar PBR properties for
+   *     this instance.
+   * @param albedoTexture The GPU texture for the base color.
+   * @param metallicRoughnessTexture The GPU texture for metallic
+   *     (blue channel) and roughness (green channel). May also contain packed
+   *     ambient occlusion (red channel).
+   * @param normalTexture The GPU texture for the tangent-space
+   *     normal map.
+   * @param emissiveTexture The GPU texture for self-illumination.
+   * @param occlusionTexture The GPU texture for ambient occlusion.
+   * @param specularFactorTexture The GPU texture for specular
+   *     factor (alpha channel).
+   * @param specularColorTexture The GPU texture for specular color
+   *     (RGB channels).
+   * @param sampler The `GPUSampler` to be used for all textures in
+   *     this instance.
+   * @returns A new `MaterialInstance` ready for rendering.
    */
   public createInstance(
     options: PBRMaterialOptions,
@@ -93,6 +127,8 @@ export class PBRMaterial extends Material {
     normalTexture: GPUTexture,
     emissiveTexture: GPUTexture,
     occlusionTexture: GPUTexture,
+    specularFactorTexture: GPUTexture,
+    specularColorTexture: GPUTexture,
     sampler: GPUSampler,
   ): MaterialInstance {
     const uniformBuffer = PBRMaterial.createUniformBuffer(this.device, options);
@@ -106,8 +142,10 @@ export class PBRMaterial extends Material {
         { binding: 2, resource: normalTexture.createView() },
         { binding: 3, resource: emissiveTexture.createView() },
         { binding: 4, resource: occlusionTexture.createView() },
-        { binding: 5, resource: sampler },
-        { binding: 6, resource: { buffer: uniformBuffer } },
+        { binding: 5, resource: specularFactorTexture.createView() },
+        { binding: 6, resource: specularColorTexture.createView() },
+        { binding: 7, resource: sampler },
+        { binding: 8, resource: { buffer: uniformBuffer } },
       ],
     });
 
@@ -135,10 +173,38 @@ export class PBRMaterial extends Material {
       1,
     ); // float roughness
     instance.registerUniformUpdater("emissiveFactor", 32, 3); // vec3 emissive
+    instance.registerUniformUpdater(
+      "extensions/KHR_materials_specular/specularColorFactor",
+      48,
+      3,
+    ); // vec3 specularColor
+    instance.registerUniformUpdater(
+      "extensions/KHR_materials_specular/specularFactor",
+      60,
+      1,
+    ); // float specularFactor
 
     return instance;
   }
 
+  /**
+   * Creates and populates the GPU uniform buffer for a PBR material instance.
+   *
+   * This private static helper method takes a set of material options and packs
+   * them into a `Float32Array` according to the precise layout expected by the
+   * PBR shader's `MaterialUniforms` struct. It handles default values for any
+   * undefined properties in the options object.
+   *
+   * The packed data includes scalar factors (ie `metallic`, `roughness`),
+   * color vectors (`albedo`, `emissive`), boolean-like flags converted to
+   * floats (like `hasNormalMap`), and UV set indices. The final array is then
+   * used to create a `GPUBuffer` with `UNIFORM` and `COPY_DST` usage, allowing
+   * it to be both bound to a shader and updated dynamically for animations.
+   *
+   * @param device The `GPUDevice` used to create the buffer.
+   * @param options The set of PBR properties to be written into the buffer.
+   * @returns A new `GPUBuffer` containing the packed material uniform data.
+   */
   private static createUniformBuffer(
     device: GPUDevice,
     options: PBRMaterialOptions,
@@ -151,6 +217,9 @@ export class PBRMaterial extends Material {
     const emissive = options.emissive ?? [0, 0, 0];
     const emissiveStrength = options.emissiveStrength ?? 1.0;
     const occlusionStrength = options.occlusionStrength ?? 1.0;
+    const specularFactor = options.specularFactor ?? 1.0;
+    const specularColorFactor = options.specularColorFactor ?? [1, 1, 1];
+    const uvScale = options.uvScale ?? [1.0, 1.0];
 
     // Texture flags (1.0 if texture provided, 0.0 otherwise)
     const hasAlbedoMap = options.albedoMap ? 1.0 : 0.0;
@@ -158,6 +227,9 @@ export class PBRMaterial extends Material {
     const hasNormalMap = options.normalMap ? 1.0 : 0.0;
     const hasEmissiveMap = options.emissiveMap ? 1.0 : 0.0;
     const hasOcclusionMap = options.occlusionMap ? 1.0 : 0.0;
+    const hasSpecularFactorMap = options.specularFactorMap ? 1.0 : 0.0;
+    const hasSpecularColorMap = options.specularColorMap ? 1.0 : 0.0;
+    const usesPackedOcclusion = options.usePackedOcclusion ? 1.0 : 0.0;
 
     // UV set indices
     const albedoUV = options.albedoUV ?? 0.0;
@@ -165,39 +237,55 @@ export class PBRMaterial extends Material {
     const normalUV = options.normalUV ?? 0.0;
     const emissiveUV = options.emissiveUV ?? 0.0;
     const occlusionUV = options.occlusionUV ?? 0.0;
+    const specularFactorUV = options.specularFactorUV ?? 0.0;
+    const specularColorUV = options.specularColorUV ?? 0.0;
 
     // Pack data: 16-byte aligned for uniform buffer
-    const uniformData = new Float32Array(24); // 6 vec4s = 96 bytes
+    const uniformData = new Float32Array(36); // 9 vec4s = 144 bytes
 
-    // vec4: albedo
+    // vec4 0: albedo
     uniformData.set(albedo, 0);
 
-    // vec4: metallic, roughness, normalIntensity, occlusionStrength
+    // vec4 1: metallic, roughness, normalIntensity, occlusionStrength
     uniformData[4] = metallic;
     uniformData[5] = roughness;
     uniformData[6] = normalIntensity;
     uniformData[7] = occlusionStrength;
 
-    // vec4: emissive (rgb) + emissiveStrength in .w
+    // vec4 2: emissive (rgb) + emissiveStrength in .w
     uniformData.set([...emissive, emissiveStrength], 8);
 
-    // vec4: texture flags (hasAlbedo, hasMetallicRoughness, hasNormal, hasEmissive)
-    uniformData[12] = hasAlbedoMap;
-    uniformData[13] = hasMetallicRoughnessMap;
-    uniformData[14] = hasNormalMap;
-    uniformData[15] = hasEmissiveMap;
+    // vec4 3: specularColorFactor (rgb) + specularFactor (w)
+    uniformData.set([...specularColorFactor, specularFactor], 12);
 
-    // vec4: texture UV indices (albedo, mr, normal, emissive)
-    uniformData[16] = albedoUV;
-    uniformData[17] = metallicRoughnessUV;
-    uniformData[18] = normalUV;
-    uniformData[19] = emissiveUV;
+    // vec4 4: texture flags 1 (hasAlbedo, hasMR, hasNormal, hasEmissive)
+    uniformData[16] = hasAlbedoMap;
+    uniformData[17] = hasMetallicRoughnessMap;
+    uniformData[18] = hasNormalMap;
+    uniformData[19] = hasEmissiveMap;
 
-    // vec4: texture flags 2 (hasOcclusion, occlusionUV, pad, pad)
+    // vec4 5: texture flags 2 (hasOcclusion, hasSpecularFactorMap, hasSpecularColorMap, usesPackedOcclusion)
     uniformData[20] = hasOcclusionMap;
-    uniformData[21] = occlusionUV;
-    uniformData[22] = 0.0; // padding
-    uniformData[23] = 0.0; // padding
+    uniformData[21] = hasSpecularFactorMap;
+    uniformData[22] = hasSpecularColorMap;
+    uniformData[23] = usesPackedOcclusion;
+
+    // vec4 6: texture UV indices 1 (albedo, mr, normal, emissive)
+    uniformData[24] = albedoUV;
+    uniformData[25] = metallicRoughnessUV;
+    uniformData[26] = normalUV;
+    uniformData[27] = emissiveUV;
+
+    // vec4 7: texture UV indices 2 (occlusion, specularFactor, specularColor, pad)
+    uniformData[28] = occlusionUV;
+    uniformData[29] = specularFactorUV;
+    uniformData[30] = specularColorUV;
+    uniformData[31] = 0.0; // padding
+
+    // vec4 8: uvScale (xy) + padding
+    uniformData.set(uvScale, 32);
+    uniformData[34] = 0.0; // padding
+    uniformData[35] = 0.0; // padding
 
     return createGPUBuffer(
       device,

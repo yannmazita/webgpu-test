@@ -4,7 +4,6 @@ A modern 3D rendering engine (and game engine) built from scratch using TypeScri
 
 [engine_demo_30-09-2025.webm](https://github.com/user-attachments/assets/f4ae8923-2c84-4abb-b5e9-d7e1fd0db251)
 
-
 ## Features (As of 25/09/2025)
 
 ### Architecture
@@ -20,11 +19,19 @@ A modern 3D rendering engine (and game engine) built from scratch using TypeScri
 
 ### Rendering & Graphics
 
-- **Physically-Based Rendering (PBR):** Implements a metallic/roughness PBR workflow for realistic materials.
+- **Physically-Based Rendering (PBR):** Implements a metallic/roughness PBR workflow for realistic materials with a rich feature set:
+  - Core metallic/roughness workflow.
+  - Support for `KHR_materials_specular` extension, enabling realistic rendering of dielectric materials like plastics and ceramics.
+  - Optimized texture handling with support for packed Occlusion-Roughness-Metallic (ORM) maps.
+  - Material-level UV tiling and scaling for controlling texture repetition on surfaces.
 - **Image-Based Lighting (IBL):** Features a complete IBL pipeline for realistic ambient lighting, including diffuse irradiance mapping, pre-filtered specular environment maps, and a pre-computed BRDF lookup table.
 - **Clustered Forward Lighting:** Can handle a large number of dynamic lights efficiently.
 - **Dynamic Shadows:** Real-time cascaded shadow mapping (CSM) from a primary directional light source.
-- **glTF 2.0 Loading:** Supports loading complex scenes, including animated models, from the glTF format.
+- **Robust glTF 2.0 Loading:** Supports loading complex scenes with a focus on material and animation fidelity.
+  - Scene hierarchy, transforms, and meshes.
+  - PBR materials, including textures and animated properties (`KHR_animation_pointer`).
+  - Full parsing of sampler properties (wrapping, filtering) for artist-controlled texture appearance.
+  - Support for common extensions: `KHR_materials_emissive_strength`, `KHR_materials_unlit`, and `KHR_materials_specular`.
 - **Skybox / Environment Mapping:** Renders HDR environment maps as backgrounds and for image-based lighting.
 
 ## Getting Started
@@ -170,4 +177,3 @@ google-chrome --ozone-platform-hint=x11 \
 1.  **GNU/Linux + NVIDIA Development**: Use **Firefox Nightly** - no configuration needed
 2.  **Cross-browser Testing**: Keep Chrome/Chromium
 3.  **CI/CD**: Use Chrome with software rendering for tests
-

@@ -9,6 +9,7 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import {
   createCubeMeshData,
   createIcosphereMeshData,
+  createPlaneMeshData,
 } from "@/core/utils/primitives";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
@@ -82,11 +83,33 @@ async function createPillarForest(
 }
 
 /**
- * Creates a playable scene with procedural pillar forest.
- * @param world The ECS world.
- * @param resourceManager The resource manager for loading assets.
- * @returns An object containing key entity IDs from the scene.
+ * Creates a playable scene with a procedural environment and dynamic objects.
+ *
+ * @remarks
+ * This function sets up the entire game world by orchestrating the creation of
+ * all necessary entities and resources. It loads the skybox and IBL environment,
+ * creates a player entity with physics and controls, sets up global fog,
+ * procedurally generates a tiled ground plane and a forest of pillars, and
+ * places lights and dynamic physics objects in the world.
+ *
+ * @param world The ECS world where all entities will be created.
+ * @param resourceManager The resource manager used for
+ *     creating and loading all mesh and material assets.
+ * @returns
+ *     A promise that resolves to an object containing the entity IDs of key
+ *     objects in the scene, which can be used for debugging or by other
+ *     systems.
  */
+export async function createScene(
+  world: World,
+  resourceManager: ResourceManager,
+): Promise<{
+  cameraEntity: number;
+  playerEntity: number;
+  keyLightEntity: number;
+  fillLightEntity: number;
+  rimLightEntity: number;
+}>;
 export async function createScene(
   world: World,
   resourceManager: ResourceManager,
@@ -146,31 +169,40 @@ export async function createScene(
 
   // --- Ground Plane ---
   {
-    const ground = world.createEntity("ground");
-    const t = new TransformComponent();
-    // A thin box with its top surface at y=0.
-    t.setPosition(0, -0.5, 0);
-    t.setScale(200, 1, 200);
-    world.addComponent(ground, t);
+    const groundEntity = world.createEntity("ground_plane");
+    const groundTransform = new TransformComponent();
+    groundTransform.setPosition(0, 0, 0);
+    world.addComponent(groundEntity, groundTransform);
 
-    // Physics: A fixed body that cannot move.
-    world.addComponent(ground, new PhysicsBodyComponent("fixed"));
-    world.addComponent(
-      ground,
-      new PhysicsColliderComponent(1, [100, 0.5, 100]),
-    ); // Half-extents.
-
-    // Visual: A simple unlit material.
-    const groundMat = await resourceManager.createUnlitGroundMaterial({
-      color: [0.2, 0.22, 0.25, 1],
-    });
+    // Create a 200x200 plane mesh
     const groundMesh = await resourceManager.createMesh(
       "ground_plane_mesh",
-      createCubeMeshData(1),
+      createPlaneMeshData(200),
     );
+
+    // Create a material instance with UV tiling
+    const groundMaterial = await resourceManager.createPBRMaterialInstance(
+      await resourceManager.createPBRMaterialTemplate({}),
+      {
+        albedoMap: "/assets/textures/snow_02_4k/textures/snow_02_diff_4k.jpg",
+        normalMap: "/assets/textures/snow_02_4k/textures/snow_02_nor_gl_4k.jpg",
+        metallicRoughnessMap:
+          "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
+        metallic: 0.0, // Snow is not metallic
+        uvScale: [100, 100], // Tile the texture 100 times across the 200-unit plane
+      },
+    );
+
     world.addComponent(
-      ground,
-      new MeshRendererComponent(groundMesh, groundMat),
+      groundEntity,
+      new MeshRendererComponent(groundMesh, groundMaterial),
+    );
+
+    // Physics: A fixed body that cannot move.
+    world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
+    world.addComponent(
+      groundEntity,
+      new PhysicsColliderComponent(1, [100, 0.5, 100]), // Half-extents for a 200x1x200 collider box
     );
   }
 
