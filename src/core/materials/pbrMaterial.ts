@@ -91,7 +91,7 @@ export class PBRMaterial extends Material {
   /**
    * Creates a new material instance from this PBR material template.
    *
-   * This method takes a set of material options and pre-loaded GPU textures to
+   * This method takes a set of material options and pre-loaded GPU resources to
    * create a unique `MaterialInstance`. It is responsible for:
    * 1.  Creating a GPU uniform buffer populated with the scalar properties from
    *     the `options` object (like albedo color, metallic factor etc).
@@ -102,20 +102,22 @@ export class PBRMaterial extends Material {
    *     for efficient, partial updates of material properties for features like
    *     glTF animations.
    *
-   * @param options The set of scalar PBR properties for this instance.
-   * @param albedoTexture The GPU texture for the base color (albedo).
-   * @param metallicRoughnessTexture The GPU texture for metallic (blue channel)
-   *     and roughness (green channel). May also contain packed ambient
-   *     occlusion (red channel).
-   * @param normalTexture The GPU texture for the tangent-space normal map.
+   * @param options The set of scalar PBR properties for
+   *     this instance.
+   * @param albedoTexture The GPU texture for the base color.
+   * @param metallicRoughnessTexture The GPU texture for metallic
+   *     (blue channel) and roughness (green channel). May also contain packed
+   *     ambient occlusion (red channel).
+   * @param normalTexture The GPU texture for the tangent-space
+   *     normal map.
    * @param emissiveTexture The GPU texture for self-illumination.
    * @param occlusionTexture The GPU texture for ambient occlusion.
-   * @param specularFactorTexture The GPU texture for specular factor (alpha
-   *     channel).
-   * @param specularColorTexture The GPU texture for specular color (RGB
-   *     channels).
-   * @param sampler The `GPUSampler` to be used for all textures in this
-   *     instance.
+   * @param specularFactorTexture The GPU texture for specular
+   *     factor (alpha channel).
+   * @param specularColorTexture The GPU texture for specular color
+   *     (RGB channels).
+   * @param sampler The `GPUSampler` to be used for all textures in
+   *     this instance.
    * @returns A new `MaterialInstance` ready for rendering.
    */
   public createInstance(

@@ -83,11 +83,33 @@ async function createPillarForest(
 }
 
 /**
- * Creates a playable scene with procedural pillar forest.
- * @param world The ECS world.
- * @param resourceManager The resource manager for loading assets.
- * @returns An object containing key entity IDs from the scene.
+ * Creates a playable scene with a procedural environment and dynamic objects.
+ *
+ * @remarks
+ * This function sets up the entire game world by orchestrating the creation of
+ * all necessary entities and resources. It loads the skybox and IBL environment,
+ * creates a player entity with physics and controls, sets up global fog,
+ * procedurally generates a tiled ground plane and a forest of pillars, and
+ * places lights and dynamic physics objects in the world.
+ *
+ * @param world The ECS world where all entities will be created.
+ * @param resourceManager The resource manager used for
+ *     creating and loading all mesh and material assets.
+ * @returns
+ *     A promise that resolves to an object containing the entity IDs of key
+ *     objects in the scene, which can be used for debugging or by other
+ *     systems.
  */
+export async function createScene(
+  world: World,
+  resourceManager: ResourceManager,
+): Promise<{
+  cameraEntity: number;
+  playerEntity: number;
+  keyLightEntity: number;
+  fillLightEntity: number;
+  rimLightEntity: number;
+}>;
 export async function createScene(
   world: World,
   resourceManager: ResourceManager,

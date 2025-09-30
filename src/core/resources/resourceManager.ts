@@ -102,14 +102,62 @@ export interface EnvironmentMap {
   iblComponent: IBLComponent;
 }
 
-// Define a context object type for clarity
+/**
+ * The context object passed through the glTF node instantiation process.
+ * It holds shared data, caches, and mappings to avoid redundant work during
+ * the recursive creation of the scene graph.
+ */
 interface NodeInstantiationContext {
+  /**
+   * The fully parsed glTF asset, including the JSON scene graph and all
+   * associated binary buffer data. This is the primary source of data for the
+   * instantiation process.
+   */
   gltf: ParsedGLTF;
+
+  /**
+   * The base URI of the loaded glTF file. This is used to resolve any
+   * relative paths for external assets like image textures.
+   */
   baseUri: string;
+
+  /**
+   * An array of pre-created `PBRMaterial` templates, indexed to match the
+   * `materials` array in the glTF JSON. This serves as a cache to avoid
+   * redundant shader and pipeline layout creation.
+   */
   materialTemplates: PBRMaterial[];
+
+  /**
+   * A set containing the indices of materials that are targeted by one or more
+   * animations. This is used to determine whether a unique `MaterialInstance`
+   * must be created (for animated materials) or if a shared, static instance
+   * can be reused from the cache.
+   */
   animatedMaterialIndices: Set<number>;
+
+  /**
+   * A map that links a glTF node index to its corresponding created `Entity`.
+   * This is essential for setting up the scene hierarchy (linking children to
+   * parents) and for targeting entities during animation playback.
+   */
   nodeToEntityMap: Map<number, Entity>;
+
+  /**
+   * A map that links a glTF material index to an array of all entities that
+   * use that material. This is primarily used to resolve material property
+   * animations, allowing an animation to affect all objects that share the
+   * targeted material.
+   */
   materialToEntitiesMap: Map<number, Entity[]>;
+
+  /**
+   * A cache for `MaterialInstance` objects that are not targeted by
+   * animations. This prevents the creation of redundant GPU resources (like
+   * bind groups) for static materials that are shared across multiple meshes.
+   * The key is a composite of the material index and sampler configuration to
+   * ensure uniqueness.
+   */
   staticMaterialInstanceCache: Map<string, MaterialInstance>;
 }
 
@@ -216,11 +264,20 @@ export class ResourceManager {
   }
 
   /**
-   * Retrieves or creates a cached GPUSampler based on a glTF sampler definition.
-   * This ensures that samplers with identical properties are not duplicated.
+   * Retrieves or creates a cached GPUSampler based on a glTF sampler
+   * definition.
+   *
+   * @remarks
+   * This method ensures that samplers with identical properties (filter modes,
+   * wrap modes) are not duplicated. It translates the numeric codes from the
+   * glTF file into the string enums required by the WebGPU API and uses a
+   * string-based key for efficient caching.
+   *
    * @param gltf The parsed glTF asset.
-   * @param samplerIndex The index of the sampler in the glTF's `samplers` array.
-   * @returns A GPUSampler matching the glTF definition, or the default sampler.
+   * @param samplerIndex Optional, the index of the sampler in the glTF's
+   *     `samplers` array. If undefined, the default sampler is returned.
+   * @returns A GPUSampler matching the glTF definition, or the
+   *     default sampler if the index is invalid.
    */
   private getGLTFSampler(gltf: ParsedGLTF, samplerIndex?: number): GPUSampler {
     if (samplerIndex === undefined) {
@@ -363,18 +420,20 @@ export class ResourceManager {
    * This method takes a shared PBRMaterial template and a specific set of
    * PBRMaterialOptions to create a fully configured MaterialInstance. It
    * handles the asynchronous loading and creation of all required GPU textures
-   * (albedo, normal, metallic-roughness, specular, etc.) based on the URLs
-   * provided in the options. If a texture URL is not provided for a given map,
-   * a default 1x1 dummy texture is used as a fallback.
+   * based on the URLs provided in the options. If a texture URL is not
+   * provided for a given map, a default 1x1 dummy texture is used as a
+   * fallback.
    *
-   * @param materialTemplate The shared PBRMaterial template that defines the
-   *     shader and pipeline layout for this instance.
-   * @param options An object containing material properties (like albedo color,
-   *     metallic factor) and URLs for the various texture maps.
-   * @param sampler An optional GPUSampler to use for the material's textures.
-   *     If not provided, the resource manager's default sampler will be used.
-   * @returns A promise that resolves to a new MaterialInstance, complete with
-   *     its own uniform buffer and bind group.
+   * @param materialTemplate The shared PBRMaterial template that
+   *     defines the shader and pipeline layout for this instance.
+   * @param options An object containing material properties
+   *     (like albedo color, metallic factor) and URLs for the
+   *     various texture maps.
+   * @param sampler Optional; GPUSampler to use for the
+   *     material's textures. If not provided, the resource manager's default
+   *     sampler will be used.
+   * @returns A promise that resolves to a new MaterialInstance,
+   *     complete with its own uniform buffer and bind group.
    */
   public async createPBRMaterialInstance(
     materialTemplate: PBRMaterial,
@@ -1075,6 +1134,30 @@ export class ResourceManager {
     return options;
   }
 
+  /**
+   * Recursively instantiates a glTF node and its children into the ECS world.
+   *
+   * @remarks
+   * This function traverses the glTF node hierarchy, creating a corresponding
+   * `Entity` for each node and establishing the correct parent-child
+   * relationships. It applies the node's transform, and if a mesh is present,
+   * it resolves the mesh and material resources to create a
+   * `MeshRendererComponent`. It uses a context object to manage caches for
+   * materials and samplers, ensuring that resources are reused efficiently.
+   *
+   * @param world The `World` instance where the scene entities will be
+   *     created.
+   * @param gltf The parsed glTF asset containing all node, mesh,
+   *     and material definitions.
+   * @param nodeIndex The index of the node within the glTF file to
+   *     instantiate.
+   * @param parentEntity The parent entity in the ECS hierarchy to
+   *     which the new node's entity will be attached.
+   * @param ctx The context object holding caches and
+   *     shared data for the entire scene instantiation process.
+   * @returns A promise that resolves when the node and all its
+   *     descendants have been instantiated.
+   */
   private async instantiateNode(
     world: World,
     gltf: ParsedGLTF,
