@@ -3,7 +3,7 @@ import { IComponent } from "@/core/ecs/component";
 import { vec3, Vec3 } from "wgpu-matrix";
 
 export class PlayerControllerComponent implements IComponent {
-  public moveSpeed = 5.0;
+  public moveSpeed = 10.0;
   public jumpForce = 7.5; // m/s upward impulse
   public sensitivity = 0.002;
 

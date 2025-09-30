@@ -24,7 +24,7 @@ import {
 } from "@/core/ecs/components/physicsComponents";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 
-export async function createDefaultScene(
+export async function createScene(
   world: World,
   resourceManager: ResourceManager,
 ): Promise<{

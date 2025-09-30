@@ -30,12 +30,11 @@ import {
   getAxisValue,
   IActionController,
   isActionPressed,
-  updateActionStates,
   updatePreviousActionState,
   wasActionPressed,
 } from "@/core/input/action";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
-import { createDefaultScene } from "./scene";
+import { createScene } from "./scene2";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import {
   InitMsg,
@@ -82,7 +81,6 @@ import {
   STATES_SLOT_SIZE,
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   STATES_WRITE_INDEX_OFFSET,
-  STATES_BODY_STRIDE_BYTES,
 } from "@/core/sharedPhysicsLayout";
 import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 import { getPickRay, raycast } from "@/core/utils/raycast";
@@ -303,7 +301,7 @@ async function initWorker(
   // --- Scene Setup ---
   try {
     console.log("[Worker] Creating default scene...");
-    const sceneEntities = await createDefaultScene(world, resourceManager);
+    const sceneEntities = await createScene(world, resourceManager);
     cameraEntity = sceneEntities.cameraEntity;
     console.log("[Worker] Scene created successfully");
   } catch (error) {
@@ -369,7 +367,7 @@ async function initWorker(
     }
   }
 
-  (self as Worker).postMessage({ type: "READY" });
+  self.postMessage({ type: "READY" });
 }
 
 /**
@@ -398,7 +396,7 @@ function frame(now: number): void {
     !actionMap
   ) {
     // If not ready, immediately signal completion to avoid stalling the main thread.
-    (self as Worker).postMessage({ type: "FRAME_DONE" });
+    self.postMessage({ type: "FRAME_DONE" });
     return;
   }
 
@@ -502,7 +500,7 @@ function frame(now: number): void {
   // --- Signal to Main Thread ---
   // Notify the main thread that this frame is complete, allowing it to
   // schedule the next frame update.
-  (self as Worker).postMessage({ type: "FRAME_DONE" });
+  self.postMessage({ type: "FRAME_DONE" });
 }
 
 /**
@@ -543,7 +541,7 @@ self.onmessage = async (
 
   if (!renderer || !world) {
     if (msg.type === MSG_FRAME) {
-      (self as Worker).postMessage({ type: "FRAME_DONE" });
+      self.postMessage({ type: "FRAME_DONE" });
     }
     return;
   }
@@ -583,7 +581,7 @@ self.onmessage = async (
     }
     case MSG_SET_ENVIRONMENT: {
       // Narrow typing guard
-      const m = msg as SetEnvironmentMsg;
+      const m = msg;
       try {
         if (!resourceManager || !world) break;
         const env = await resourceManager.createEnvironmentMap(
@@ -603,7 +601,7 @@ self.onmessage = async (
     }
     case MSG_RAYCAST_REQUEST: {
       console.log("[Worker] Received raycast request:", msg);
-      const m = msg as RaycastRequestMsg;
+      const m = msg;
       const cam =
         cameraEntity !== -1
           ? world.getComponent(cameraEntity, CameraComponent)
@@ -643,7 +641,7 @@ self.onmessage = async (
           type: MSG_RAYCAST_RESPONSE,
           hit: responseHit,
         };
-        (self as Worker).postMessage(response);
+        self.postMessage(response);
       }
       break;
     }
