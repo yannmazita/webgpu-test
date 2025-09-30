@@ -21,7 +21,6 @@ let brdfLookupTableShader: Shader | null = null;
 let brdfLookupTablePipeline: GPUComputePipeline | null = null;
 
 let equirectToCubemapBGL: GPUBindGroupLayout | null = null;
-let equirectToCubemapSampler: GPUSampler | null = null;
 
 /**
  * Converts an equirectangular HDR texture to a cubemap texture using a compute shader.
@@ -46,20 +45,13 @@ export async function equirectangularToCubemap(
         binding: 0,
         visibility: GPUShaderStage.COMPUTE,
         texture: {
-          sampleType: "float",
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
         },
       },
-      // @binding(1) equirectSampler: sampler
+      // @binding(1) cubemapTexture: texture_storage_2d_array<rgba16float, write>
       {
         binding: 1,
-        visibility: GPUShaderStage.COMPUTE,
-        sampler: {
-          type: "filtering",
-        },
-      },
-      // @binding(2) cubemapTexture: texture_storage_2d_array<rgba16float, write>
-      {
-        binding: 2,
         visibility: GPUShaderStage.COMPUTE,
         storageTexture: {
           access: "write-only",
@@ -68,12 +60,6 @@ export async function equirectangularToCubemap(
         },
       },
     ],
-  });
-
-  equirectToCubemapSampler ??= device.createSampler({
-    label: "EQUIRECT_SAMPLER",
-    magFilter: "linear",
-    minFilter: "linear",
   });
 
   equirectToCubemapShader ??= await Shader.fromUrl(
@@ -118,9 +104,8 @@ export async function equirectangularToCubemap(
     layout: equirectToCubemapBGL,
     entries: [
       { binding: 0, resource: equirectTexture.createView() },
-      { binding: 1, resource: equirectToCubemapSampler },
       {
-        binding: 2,
+        binding: 1,
         resource: cubemapTexture.createView({
           dimension: "2d-array",
           baseMipLevel: 0,
