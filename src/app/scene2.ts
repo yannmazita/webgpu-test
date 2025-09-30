@@ -9,6 +9,7 @@ import { MeshRendererComponent } from "@/core/ecs/components/meshRendererCompone
 import {
   createCubeMeshData,
   createIcosphereMeshData,
+  createPlaneMeshData,
 } from "@/core/utils/primitives";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
@@ -146,27 +147,41 @@ export async function createScene(
 
   // --- Ground Plane ---
   {
-    const groundEntity = await resourceManager.loadSceneFromGLTF(
-      world,
-      "/assets/textures/snow_02_4k/snow_02_4k.gltf",
-    );
-    const groundTransform = world.getComponent(
-      groundEntity,
-      TransformComponent,
-    );
-    // A thin box with its top surface at y=0.
-    if (groundTransform) {
-      groundTransform.setPosition(0, -0.5, 0);
-      groundTransform.setScale(1, 1, 1);
-      world.addComponent(groundEntity, groundTransform);
+    const groundEntity = world.createEntity("ground_plane");
+    const groundTransform = new TransformComponent();
+    groundTransform.setPosition(0, 0, 0);
+    world.addComponent(groundEntity, groundTransform);
 
-      // Physics: A fixed body that cannot move.
-      world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
-      world.addComponent(
-        groundEntity,
-        new PhysicsColliderComponent(1, [100, 0.5, 100]),
-      ); // Half-extents.
-    }
+    // Create a 200x200 plane mesh
+    const groundMesh = await resourceManager.createMesh(
+      "ground_plane_mesh",
+      createPlaneMeshData(200),
+    );
+
+    // Create a material instance with UV tiling
+    const groundMaterial = await resourceManager.createPBRMaterialInstance(
+      await resourceManager.createPBRMaterialTemplate({}),
+      {
+        albedoMap: "/assets/textures/snow_02_4k/textures/snow_02_diff_4k.jpg",
+        normalMap: "/assets/textures/snow_02_4k/textures/snow_02_nor_gl_4k.jpg",
+        metallicRoughnessMap:
+          "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
+        metallic: 0.0, // Snow is not metallic
+        uvScale: [100, 100], // Tile the texture 100 times across the 200-unit plane
+      },
+    );
+
+    world.addComponent(
+      groundEntity,
+      new MeshRendererComponent(groundMesh, groundMaterial),
+    );
+
+    // Physics: A fixed body that cannot move.
+    world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
+    world.addComponent(
+      groundEntity,
+      new PhysicsColliderComponent(1, [100, 0.5, 100]), // Half-extents for a 200x1x200 collider box
+    );
   }
 
   // --- Pillar Forest ---

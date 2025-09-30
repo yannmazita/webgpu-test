@@ -75,6 +75,7 @@ struct PBRMaterialUniforms {
   texture_flags1: vec4<f32>, // .x=hasOcclusion, .y=hasSpecFactor, .z=hasSpecColor, .w=usesPackedOcclusion
   uv_indices0: vec4<f32>, // .x=albedo, .y=mr, .z=normal, .w=emissive
   uv_indices1: vec4<f32>, // .x=occlusion, .y=specFactor, .z=specColor, .w=pad
+  uv_scale: vec2<f32>, // Tiling factor
 }
 
 struct Cascade {
@@ -234,7 +235,7 @@ fn getNormalFromMap(fi: FragmentInput, normalIntensity: f32) -> vec3<f32> {
         return normalize(fi.worldNormal);
     }
 
-    let normalUV = pickUV(material.uv_indices0.z, fi.texCoords0, fi.texCoords1);
+    let normalUV = pickUV(material.uv_indices0.z, fi.texCoords0, fi.texCoords1) * material.uv_scale;
     let tangentNormal = textureSample(normal_texture, material_sampler, normalUV).xyz * 2.0 - 1.0;
 
     var adjustedNormal = tangentNormal;
@@ -340,12 +341,12 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     // Textures
     if (material.texture_flags0.x > 0.5) { // hasAlbedoMap
-        let albedoUV = pickUV(material.uv_indices0.x, fi.texCoords0, fi.texCoords1);
+        let albedoUV = pickUV(material.uv_indices0.x, fi.texCoords0, fi.texCoords1) * material.uv_scale;
         let albedoSample = textureSample(albedo_texture, material_sampler, albedoUV);
         albedo = albedo * albedoSample.rgb;
     }
     
-    let mrUV = pickUV(material.uv_indices0.y, fi.texCoords0, fi.texCoords1);
+    let mrUV = pickUV(material.uv_indices0.y, fi.texCoords0, fi.texCoords1) * material.uv_scale;
     let mrSample = textureSample(metallic_roughness_texture, material_sampler, mrUV);
     if (material.texture_flags0.y > 0.5) { // hasMetallicRoughnessMap
         roughness = roughness * mrSample.g;
@@ -353,7 +354,7 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     }
     
     if (material.texture_flags0.w > 0.5) { // hasEmissiveMap
-        let emissiveUV = pickUV(material.uv_indices0.w, fi.texCoords0, fi.texCoords1);
+        let emissiveUV = pickUV(material.uv_indices0.w, fi.texCoords0, fi.texCoords1) * material.uv_scale;
         let emissiveSample = textureSample(emissive_texture, material_sampler, emissiveUV);
         emissive = emissive * emissiveSample.rgb;
     }
@@ -362,18 +363,18 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
     if (material.texture_flags1.w > 0.5) { // usesPackedOcclusion
         ao = mix(1.0, mrSample.r, occlusionStrength);
     } else if (material.texture_flags1.x > 0.5) { // hasOcclusionMap
-        let occlusionUV = pickUV(material.uv_indices1.x, fi.texCoords0, fi.texCoords1);
+        let occlusionUV = pickUV(material.uv_indices1.x, fi.texCoords0, fi.texCoords1) * material.uv_scale;
         let occlusionSample = textureSample(occlusion_texture, material_sampler, occlusionUV);
         ao = mix(1.0, occlusionSample.r, occlusionStrength);
     }
     
     // KHR_materials_specular sampling
     if (material.texture_flags1.y > 0.5) { // hasSpecularFactorMap
-        let uv = pickUV(material.uv_indices1.y, fi.texCoords0, fi.texCoords1);
+        let uv = pickUV(material.uv_indices1.y, fi.texCoords0, fi.texCoords1) * material.uv_scale;
         specularFactor = specularFactor * textureSample(specular_factor_texture, material_sampler, uv).a;
     }
     if (material.texture_flags1.z > 0.5) { // hasSpecularColorMap
-        let uv = pickUV(material.uv_indices1.z, fi.texCoords0, fi.texCoords1);
+        let uv = pickUV(material.uv_indices1.z, fi.texCoords0, fi.texCoords1) * material.uv_scale;
         specularColor = specularColor * textureSample(specular_color_texture, material_sampler, uv).rgb;
     }
 

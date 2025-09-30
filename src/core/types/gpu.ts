@@ -208,6 +208,13 @@ export interface PBRMaterialOptions {
   specularFactorUV?: number;
   /** UV set index for the specular color map. Defaults to 0. */
   specularColorUV?: number;
+
+  /**
+   * UV scaling (tiling) factor for all textures in this material.
+   * [1, 1] means no scaling. [10, 10] means the texture repeats 10 times.
+   * Default: [1, 1]
+   */
+  uvScale?: [number, number];
 }
 
 /**

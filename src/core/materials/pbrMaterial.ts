@@ -217,6 +217,7 @@ export class PBRMaterial extends Material {
     const occlusionStrength = options.occlusionStrength ?? 1.0;
     const specularFactor = options.specularFactor ?? 1.0;
     const specularColorFactor = options.specularColorFactor ?? [1, 1, 1];
+    const uvScale = options.uvScale ?? [1.0, 1.0];
 
     // Texture flags (1.0 if texture provided, 0.0 otherwise)
     const hasAlbedoMap = options.albedoMap ? 1.0 : 0.0;
@@ -238,7 +239,7 @@ export class PBRMaterial extends Material {
     const specularColorUV = options.specularColorUV ?? 0.0;
 
     // Pack data: 16-byte aligned for uniform buffer
-    const uniformData = new Float32Array(32); // 8 vec4s = 128 bytes
+    const uniformData = new Float32Array(36); // 9 vec4s = 144 bytes
 
     // vec4 0: albedo
     uniformData.set(albedo, 0);
@@ -278,6 +279,11 @@ export class PBRMaterial extends Material {
     uniformData[29] = specularFactorUV;
     uniformData[30] = specularColorUV;
     uniformData[31] = 0.0; // padding
+
+    // vec4 8: uvScale (xy) + padding
+    uniformData.set(uvScale, 32);
+    uniformData[34] = 0.0; // padding
+    uniformData[35] = 0.0; // padding
 
     return createGPUBuffer(
       device,
