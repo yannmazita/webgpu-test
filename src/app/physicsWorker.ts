@@ -108,36 +108,33 @@ async function initRapier(): Promise<void> {
 
   console.log("Starting Rapier initialization...");
 
-  rapierPromise = new Promise((resolve) => {
-    import("@dimforge/rapier3d")
-      .then((r) => {
-        const start = performance.now();
-        RAPIER = r;
-        const loadTime = performance.now() - start;
-        console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`);
+  rapierPromise = (async () => {
+    try {
+      const start = performance.now();
+      const r = await import("@dimforge/rapier3d");
+      RAPIER = r;
+      const loadTime = performance.now() - start;
+      console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`);
 
-        world = new RAPIER.World(GRAVITY);
-        const params: IntegrationParameters = world.integrationParameters;
-        params.dt = FIXED_DT;
+      world = new RAPIER.World(GRAVITY);
+      const params: IntegrationParameters = world.integrationParameters;
+      params.dt = FIXED_DT;
 
-        console.log(
-          "[PhysicsWorker] Rapier initialized. Gravity:",
-          GRAVITY,
-          "Fixed dt:",
-          FIXED_DT,
-        );
+      console.log(
+        "[PhysicsWorker] Rapier initialized. Gravity:",
+        GRAVITY,
+        "Fixed dt:",
+        FIXED_DT,
+      );
 
-        isInitialized = true;
-        resolve();
-      })
-      .catch((error: Error) => {
-        console.error("Physics initialization failed:", error);
-        RAPIER = null;
-        world = null;
-        isInitialized = false;
-        resolve();
-      });
-  });
+      isInitialized = true;
+    } catch (error) {
+      console.error("Physics initialization failed:", error);
+      RAPIER = null;
+      world = null;
+      isInitialized = false;
+    }
+  })();
 
   return rapierPromise;
 }
