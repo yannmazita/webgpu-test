@@ -21,6 +21,7 @@ import {
 } from "@/core/utils/primitives";
 import { UnlitGroundMaterial } from "@/core/materials/unlitGroundMaterial";
 import { loadHDR } from "@/loaders/hdrLoader";
+import { loadEXR } from "@/loaders/exrLoader";
 import {
   equirectangularToCubemap,
   generateBrdfLut,
@@ -560,28 +561,68 @@ export class ResourceManager {
     }
 
     // --- 1. Load and prepare equirectangular source texture ---
-    const hdrData = await loadHDR(url);
-    console.log(
-      `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
-    );
+    let imageData: { width: number; height: number; data: Float32Array };
 
-    const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
-    for (let i = 0; i < hdrData.width * hdrData.height; i++) {
-      rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
-      rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1];
-      rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
-      rgbaData[i * 4 + 3] = 1.0;
+    if (url.endsWith(".hdr")) {
+      const hdrData = await loadHDR(url);
+      console.log(
+        `[ResourceManager] HDR loaded: ${hdrData.width}x${hdrData.height}`,
+      );
+
+      const rgbaData = new Float32Array(hdrData.width * hdrData.height * 4);
+      for (let i = 0; i < hdrData.width * hdrData.height; i++) {
+        rgbaData[i * 4 + 0] = hdrData.data[i * 3 + 0];
+        rgbaData[i * 4 + 1] = hdrData.data[i * 3 + 1];
+        rgbaData[i * 4 + 2] = hdrData.data[i * 3 + 2];
+        rgbaData[i * 4 + 3] = 1.0;
+      }
+      imageData = {
+        width: hdrData.width,
+        height: hdrData.height,
+        data: rgbaData,
+      };
+    } else if (url.endsWith(".exr")) {
+      const exrData = await loadEXR(url);
+      console.log(
+        `[ResourceManager] EXR loaded: ${exrData.width}x${exrData.height}`,
+      );
+
+      // The EXR parser loads the image with the origin at the bottom-left.
+      // WebGPU textures have the origin at the top-left. We must flip it.
+      const { width, height, data } = exrData;
+      const flippedRgbaData = new Float32Array(data.length);
+      const rowSizeInFloats = width * 4; // 4 channels for RGBA
+
+      for (let y = 0; y < height; y++) {
+        const srcY = height - 1 - y;
+        const srcOffset = srcY * rowSizeInFloats;
+        const destOffset = y * rowSizeInFloats;
+        const rowData = data.subarray(srcOffset, srcOffset + rowSizeInFloats);
+        flippedRgbaData.set(rowData, destOffset);
+      }
+
+      imageData = {
+        width: exrData.width,
+        height: exrData.height,
+        data: flippedRgbaData,
+      };
+    } else {
+      throw new Error(
+        `Unsupported environment map format: ${url}. Please use .hdr or .exr`,
+      );
     }
+
+    const { width, height, data: rgbaData } = imageData;
 
     const equirectTexture = this.renderer.device.createTexture({
       label: `EQUIRECTANGULAR_SRC:${url}`,
-      size: [hdrData.width, hdrData.height],
+      size: [width, height],
       format: "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
     // Ensure bytesPerRow meets WebGPU 256-byte alignment
-    const rowBytes = hdrData.width * 4 /*channels*/ * 4; /*bytes/chan*/
+    const rowBytes = width * 4 /*channels*/ * 4; /*bytes/chan*/
     const isAligned = (rowBytes & 0xff) === 0; // rowBytes % 256 === 0
 
     if (isAligned) {
@@ -590,16 +631,16 @@ export class ResourceManager {
         { texture: equirectTexture },
         rgbaData.buffer,
         { bytesPerRow: rowBytes },
-        { width: hdrData.width, height: hdrData.height },
+        { width: width, height: height },
       );
     } else {
       // Padded upload: copy rows into a buffer with 256-byte stride
       const alignedRowBytes = (rowBytes + 255) & ~255; // round up to 256
-      const padded = new ArrayBuffer(alignedRowBytes * hdrData.height);
+      const padded = new ArrayBuffer(alignedRowBytes * height);
       const paddedView = new Uint8Array(padded);
       const srcView = new Uint8Array(rgbaData.buffer);
 
-      for (let y = 0; y < hdrData.height; y++) {
+      for (let y = 0; y < height; y++) {
         const srcOff = y * rowBytes;
         const dstOff = y * alignedRowBytes;
         // copy rowBytes bytes for this row
@@ -610,7 +651,7 @@ export class ResourceManager {
         { texture: equirectTexture },
         padded,
         { bytesPerRow: alignedRowBytes },
-        { width: hdrData.width, height: hdrData.height },
+        { width: width, height: height },
       );
     }
 
