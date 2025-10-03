@@ -41,7 +41,12 @@ export default defineConfig({
   // these libraries load their own wasm files and we don't want
   // Vite to try and process them.
   optimizeDeps: {
-    exclude: ["@mori2003/jsimgui", "mikktspace", "@dimforge/rapier3d"],
+    exclude: [
+      "@mori2003/jsimgui",
+      "mikktspace",
+      "@dimforge/rapier3d",
+      "meshoptimizer",
+    ],
   },
   server: {
     // These headers are required for SharedArrayBuffer, which is used by
