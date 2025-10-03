@@ -5,14 +5,9 @@
  *
  * This module handles the dynamic loading and initialization of the Basis
  * transcoder library. It provides a singleton pattern for loading the WASM module.
- *
  */
 
-// These types are from @/core/types/basis.d.ts
-export type BasisFile = import("basis-universal").BasisFile;
-export type KTX2File = import("basis-universal").KTX2File;
-export type BasisTranscoder = typeof import("basis-universal").BasisTranscoder;
-export type BasisModule = import("basis-universal").BasisModule;
+import type { BasisModule } from "@/core/types/basis";
 
 let BASIS: BasisModule | null = null;
 let basisPromise: Promise<void> | null = null;
@@ -20,9 +15,12 @@ let basisPromise: Promise<void> | null = null;
 /**
  * Initializes the Basis Universal transcoder WASM module.
  *
+ * @param wasmPath Path to the basis_transcoder.wasm file (default: "/basis_transcoder.wasm")
  * @returns A promise that resolves when the transcoder is ready.
  */
-export async function initBasis(): Promise<void> {
+export async function initBasis(
+  wasmPath = "/basis_transcoder.wasm",
+): Promise<void> {
   if (basisPromise) return basisPromise;
 
   console.log("[BasisModule] Starting Basis Universal initialization...");
@@ -31,33 +29,58 @@ export async function initBasis(): Promise<void> {
     try {
       const start = performance.now();
 
-      // Dynamically import the JS wrapper from its new location in src/vendor.
-      // The /* @vite-ignore */ comment is no longer needed.
-      const { BasisTranscoder } = (await import(
-        "../../vendor/basis_transcoder.js"
-      )) as { BasisTranscoder: BasisTranscoder };
+      // Import the factory function from the vendor directory
+      // Vite will handle this as an ES module import
+      const basisModule = await import("../../vendor/basis_transcoder.js");
 
-      const basisModule = {} as BasisModule;
+      // The module exports a default function that is the factory
+      // It might be wrapped, so we need to handle both cases
+      let basisFactory: (config: Partial<BasisModule>) => Promise<BasisModule>;
 
-      await new Promise<void>((resolve, reject) => {
-        basisModule.onRuntimeInitialized = () => {
-          BASIS = basisModule;
-          resolve();
-        };
-        // Tell the transcoder where to find the .wasm file.
-        // Since it's in /public, it will be served from the root.
-        basisModule.locateFile = (path, prefix) => {
-          if (path.endsWith(".wasm")) return "/basis_transcoder.wasm";
-          return prefix + path;
-        };
-        BasisTranscoder(basisModule).catch(reject);
+      if (typeof basisModule.default === "function") {
+        basisFactory = basisModule.default;
+      } else if (typeof basisModule === "function") {
+        basisFactory = basisModule as any;
+      } else {
+        throw new Error(
+          "Could not find Basis factory function in imported module. " +
+            "Module keys: " +
+            Object.keys(basisModule).join(", "),
+        );
+      }
+
+      console.log(
+        "[BasisModule] Factory function loaded, initializing module...",
+      );
+
+      // Call the factory function with our configuration
+      BASIS = await basisFactory({
+        locateFile: (path: string) => {
+          if (path.endsWith(".wasm")) {
+            console.log(`[BasisModule] Locating WASM file: ${wasmPath}`);
+            return wasmPath;
+          }
+          return path;
+        },
       });
+
+      // The factory returns a promise that resolves to the initialized module
+      // The onRuntimeInitialized callback is optional and might be called automatically
+      if (
+        BASIS.onRuntimeInitialized &&
+        typeof BASIS.onRuntimeInitialized === "function"
+      ) {
+        // If it exists as a function, call it
+        BASIS.onRuntimeInitialized();
+      }
 
       const loadTime = performance.now() - start;
       console.log(
-        `[BasisModule] Basis Universal transcoder loaded in ${loadTime.toFixed(
-          2,
-        )}ms`,
+        `[BasisModule] Basis Universal transcoder loaded in ${loadTime.toFixed(2)}ms`,
+      );
+      console.log(
+        "[BasisModule] Available formats:",
+        Object.keys(BASIS.TranscoderTextureFormat || {}),
       );
     } catch (error) {
       console.error("[BasisModule] Initialization failed:", error);

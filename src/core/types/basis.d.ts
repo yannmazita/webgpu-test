@@ -57,7 +57,6 @@ declare module "basis-universal" {
     destroy(): void;
   }
 
-  // This is an auxiliary type, it can remain as is.
   export interface KTX2ImageLevelInfo {
     levelIndex: number;
     layerIndex: number;
@@ -106,6 +105,15 @@ declare module "basis-universal" {
     BasisFile: new (data: Uint8Array) => BasisFile;
   }
 
-  // The BasisTranscoder function is a top-level export that populates the module.
-  export function BasisTranscoder(module: Partial<BasisModule>): Promise<void>;
+  // Factory function type
+  type BasisFactory = (config: Partial<BasisModule>) => Promise<BasisModule>;
+}
+
+// Extend Window to include the global BASIS factory
+declare global {
+  interface Window {
+    BASIS?: (
+      config: Partial<import("basis-universal").BasisModule>,
+    ) => Promise<import("basis-universal").BasisModule>;
+  }
 }

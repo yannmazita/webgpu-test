@@ -5,6 +5,7 @@ import { defineConfig } from "vite";
 import path from "path";
 import wasm from "vite-plugin-wasm";
 import topLevelAwait from "vite-plugin-top-level-await";
+import { vitePluginBasisTranscoderEsm } from "./vite-plugin-basis";
 
 const ReactCompilerConfig = {
   /* ... */
@@ -17,6 +18,7 @@ export default defineConfig({
     }),
     wasm(),
     topLevelAwait(),
+    vitePluginBasisTranscoderEsm(),
   ],
   worker: {
     plugins: () => [wasm(), topLevelAwait()],
@@ -46,6 +48,7 @@ export default defineConfig({
       "mikktspace",
       "@dimforge/rapier3d",
       "meshoptimizer",
+      "basis-universal",
     ],
   },
   server: {
