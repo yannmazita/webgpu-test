@@ -4,35 +4,46 @@ A modern 3D rendering engine (and game engine) built from scratch using TypeScri
 
 [engine_demo_30-09-2025.webm](https://github.com/user-attachments/assets/f4ae8923-2c84-4abb-b5e9-d7e1fd0db251)
 
-## Features (As of 25/09/2025)
+## Features (As of 03/10/2025)
 
-### Architecture
+### Core Architecture
 
-- **Three-Threaded Architecture:** The engine is designed to maximize performance by splitting work across three threads:
-  - **Main Thread:** Handles user input and UI.
-  - **Render Thread:** Manages the scene, runs the ECS, and submits all rendering commands.
-  - **Physics Thread:** Runs the physics simulation at a fixed timestep, independent of the render framerate.
-- **Hybrid Thread Communication:** The engine uses a combination of communication methods, choosing the best tool for each task:
-  - **`SharedArrayBuffer`:** Used for high-frequency, low-latency state synchronization, such as real-time user input, physics state, and editor tweaks. This allows for zero-copy data exchange.
-  - **`postMessage`:** Used for initialization, infrequent events (like resizing the canvas), and synchronizing the frame loop between the main and render threads.
+- **Three-Threaded Design:** Work is split across three threads:
+  - **Main Thread:** Handles user input, the editor UI (ImGui) and the HUD metrics.
+  - **Render Thread (Worker):** Manages the scene graph (ECS), runs all systems, and submits rendering commands to the GPU.
+  - **Physics Thread (Worker):** Runs the Rapier3D physics simulation at a fixed timestep, decoupled from the render framerate.
+- **Lock-Free State Synchronization:** Utilizes `SharedArrayBuffer` for high-frequency, zero-copy state sharing between threads for:
+  - Real-time user input (keyboard/mouse).
+  - Physics state snapshots (positions/rotations).
+  - Live editor tweaks (lighting, fog, shadows).
+- **Event-Driven Communication:** Uses `postMessage` for one-off commands and events, such as initialization, resizing, and asset loading triggers.
 - **Entity-Component-System (ECS):** Data-oriented design (`src/core/ecs`) for flexibility.
 
 ### Rendering & Graphics
 
 - **Physically-Based Rendering (PBR):** Implements a metallic/roughness PBR workflow for realistic materials with a rich feature set:
-  - Core metallic/roughness workflow.
-  - Support for `KHR_materials_specular` extension, enabling realistic rendering of dielectric materials like plastics and ceramics.
-  - Optimized texture handling with support for packed Occlusion-Roughness-Metallic (ORM) maps.
-  - Material-level UV tiling and scaling for controlling texture repetition on surfaces.
-- **Image-Based Lighting (IBL):** Features a complete IBL pipeline for realistic ambient lighting, including diffuse irradiance mapping, pre-filtered specular environment maps, and a pre-computed BRDF lookup table.
-- **Clustered Forward Lighting:** Can handle a large number of dynamic lights efficiently.
-- **Dynamic Shadows:** Real-time cascaded shadow mapping (CSM) from a primary directional light source.
-- **Robust glTF 2.0 Loading:** Supports loading complex scenes with a focus on material and animation fidelity.
+  - Core metallic/roughness properties.
+  - Support for `KHR_materials_specular` extension for realistic dielectrics.
+  - Material-level UV tiling and scaling.
+- **Lighting & Shadows:**
+  - **Clustered Forward Lighting:** It can handle a large number of dynamic point lights per frame.
+  - **Image-Based Lighting (IBL):** A complete IBL pipeline for realistic ambient lighting, including diffuse irradiance mapping, pre-filtered specular environment maps, and a pre-computed BRDF lookup table.
+  - **Dynamic Shadows:** Real-time cascaded shadow mapping (CSM) from a primary directional light (sun).
+- **Atmospherics:**
+  - **Skybox Rendering:** Renders HDR environment maps as dynamic backgrounds.
+  - **Volumetric Fog:** Height-based exponential fog with sun in-scattering for atmospheric depth (needs work).
+
+### Asset Pipeline
+
+- **Advanced glTF 2.0 Loading:** Supports loading complex scenes with a focus on material, animation, and performance fidelity.
   - Scene hierarchy, transforms, and meshes.
-  - PBR materials, including textures and animated properties (`KHR_animation_pointer`).
-  - Full parsing of sampler properties (wrapping, filtering) for artist-controlled texture appearance.
-  - Support for common extensions: `KHR_materials_emissive_strength`, `KHR_materials_unlit`, and `KHR_materials_specular`.
-- **Skybox / Environment Mapping:** Renders HDR environment maps as backgrounds and for image-based lighting.
+  - PBR materials, including textures and animated properties via `KHR_animation_pointer`.
+  - Full parsing of sampler properties (wrapping, filtering).
+  - Support for extensions: `KHR_materials_emissive_strength`, `KHR_materials_unlit`, `KHR_materials_specular`, and `KHR_texture_basisu`.
+- **Optimized Asset Formats:**
+  - **Mesh Compression:** Decodes meshes compressed with `EXT_meshopt_compression` for smaller file sizes and faster loading.
+  - **Texture Compression:** Supports Basis Universal (`.ktx2`) textures, transcoding them on the fly to the most optimal GPU format available (BCn, ETC, ASTC).
+- **Tangent Generation:** Automatically generates MikkTSpace tangents for all loaded meshes to ensure consistent normal mapping.
 
 ## Getting Started
 
