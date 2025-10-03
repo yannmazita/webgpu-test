@@ -8,7 +8,10 @@ import {
   UnlitGroundMaterialOptions,
 } from "@/core/types/gpu";
 import { MeshData } from "@/core/types/mesh";
-import { createTextureFromImage } from "@/core/utils/texture";
+import {
+  createTextureFromBasis,
+  createTextureFromImage,
+} from "@/core/utils/texture";
 import { createGPUBuffer } from "@/core/utils/webgpu";
 import { loadOBJ } from "@/loaders/objLoader";
 import { loadSTL } from "@/loaders/stlLoader";
@@ -35,6 +38,8 @@ import {
 } from "@/core/rendering/ibl";
 import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { getSupportedCompressedFormats } from "@/core/utils/webgpu";
+import { initBasis } from "@/core/wasm/basisModule";
 import {
   decodeMeshopt,
   dequantize,
@@ -202,11 +207,22 @@ export class ResourceManager {
   private pbrMaterialInitialized = false;
   private unlitGroundMaterialInitialized = false;
   private skyboxMaterialInitialized = false;
+  private supportedCompressedFormats: Set<GPUTextureFormat>;
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
     this.preprocessor = new ShaderPreprocessor();
+    this.supportedCompressedFormats = getSupportedCompressedFormats(
+      this.renderer.device,
+    );
+    console.log(
+      "[ResourceManager] Supported compressed formats:",
+      this.supportedCompressedFormats,
+    );
     this.createDefaultResources();
+    initBasis("/basis_transcoder.wasm").catch((e) =>
+      console.error("Failed to initialize Basis transcoder", e),
+    ); // the wasm file is in the public dir, so root of the page
   }
 
   private createDefaultResources(): void {
@@ -411,55 +427,54 @@ export class ResourceManager {
     // If no specific sampler is provided, fall back to the default.
     const finalSampler = sampler ?? this.defaultSampler;
 
-    const albedoTexture = options.albedoMap
-      ? await createTextureFromImage(
+    // Helper to decide which texture loader to use
+    const loadTexture = (
+      url: string | undefined,
+      format: GPUTextureFormat,
+      isNormalMap = false,
+    ): Promise<GPUTexture> => {
+      if (!url) return Promise.resolve(this.dummyTexture);
+      if (url.endsWith(".ktx2")) {
+        return createTextureFromBasis(
           this.renderer.device,
-          options.albedoMap,
-          "rgba8unorm-srgb",
-        )
-      : this.dummyTexture;
-    const metallicRoughnessTexture = options.metallicRoughnessMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.metallicRoughnessMap,
-          "rgba8unorm",
-        )
-      : this.dummyTexture;
-    const normalTexture = options.normalMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.normalMap,
-          "rgba8unorm",
-        )
-      : this.dummyTexture;
-    const emissiveTexture = options.emissiveMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.emissiveMap,
-          "rgba8unorm-srgb",
-        )
-      : this.dummyTexture;
-    const occlusionTexture = options.occlusionMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.occlusionMap,
-          "rgba8unorm",
-        )
-      : this.dummyTexture;
-    const specularFactorTexture = options.specularFactorMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.specularFactorMap,
-          "rgba8unorm",
-        )
-      : this.dummyTexture;
-    const specularColorTexture = options.specularColorMap
-      ? await createTextureFromImage(
-          this.renderer.device,
-          options.specularColorMap,
-          "rgba8unorm-srgb",
-        )
-      : this.dummyTexture;
+          this.supportedCompressedFormats,
+          url,
+          isNormalMap,
+        );
+      }
+      return createTextureFromImage(this.renderer.device, url, format);
+    };
+
+    const albedoTexture = await loadTexture(
+      options.albedoMap,
+      "rgba8unorm-srgb",
+    );
+    const metallicRoughnessTexture = await loadTexture(
+      options.metallicRoughnessMap,
+      "rgba8unorm",
+    );
+    const normalTexture = await loadTexture(
+      options.normalMap,
+      "rgba8unorm",
+      true,
+    );
+    const emissiveTexture = await loadTexture(
+      options.emissiveMap,
+      "rgba8unorm-srgb",
+    );
+    const occlusionTexture = await loadTexture(
+      options.occlusionMap,
+      "rgba8unorm",
+    );
+    const specularFactorTexture = await loadTexture(
+      options.specularFactorMap,
+      "rgba8unorm",
+    );
+    const specularColorTexture = await loadTexture(
+      options.specularColorMap,
+      "rgba8unorm-srgb",
+    );
+
     return materialTemplate.createInstance(
       options,
       albedoTexture,
@@ -1183,7 +1198,7 @@ export class ResourceManager {
     const transform = new TransformComponent();
     if (node.matrix) {
       const pos = vec3.create();
-      mat4.getTranslation(node.matrix as mat4, pos);
+      mat4.getTranslation(node.matrix, pos);
       transform.setPosition(pos);
     } else {
       if (node.translation)
@@ -1318,8 +1333,17 @@ export class ResourceManager {
   ): string | undefined {
     const { json, buffers } = gltf;
     const texture = json.textures?.[textureIndex];
-    if (texture?.source === undefined) return undefined;
-    const image = json.images?.[texture.source];
+    if (!texture) return undefined;
+
+    // --- KHR_texture_basisu ---
+    // Check for the Basis extension first. If it exists, its source is the
+    // one we must use.
+    const basisExtension = texture.extensions?.KHR_texture_basisu;
+    const sourceIndex = basisExtension ? basisExtension.source : texture.source;
+
+    if (sourceIndex === undefined) return undefined;
+
+    const image = json.images?.[sourceIndex];
     if (!image) return undefined;
     if (image.uri) {
       return image.uri.startsWith("data:")
@@ -1674,7 +1698,7 @@ export class ResourceManager {
               data.normals?.length || 0
             }, ` +
             `TexCoords: ${
-              data.texCoords?.length || 0
+              data.texCoords?.length ?? 0
             }. Skipping tangent generation.`,
         );
         canGenerateTangents = false;

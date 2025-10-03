@@ -267,9 +267,17 @@ export interface GLTFBuffer {
   byteLength: number;
 }
 
+export interface GLTFTextureExtensions {
+  KHR_texture_basisu?: {
+    source: number; // index into images array
+  };
+  [key: string]: unknown;
+}
+
 export interface GLTFTexture {
   sampler?: number;
   source?: number;
+  extensions?: GLTFTextureExtensions;
 }
 
 export interface GLTFImage {

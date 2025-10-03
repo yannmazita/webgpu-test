@@ -76,3 +76,81 @@ export const createGPUBuffer = (
 
   return gpuBuffer;
 };
+
+/**
+ * Queries the GPUDevice for supported compressed texture formats.
+ * @param device The GPUDevice to query.
+ * @returns A Set containing the string names of supported formats.
+ */
+export function getSupportedCompressedFormats(
+  device: GPUDevice,
+): Set<GPUTextureFormat> {
+  const supportedFormats = new Set<GPUTextureFormat>();
+  const features = device.features;
+
+  // BCn/DXT (Desktop)
+  if (features.has("texture-compression-bc")) {
+    supportedFormats.add("bc1-rgba-unorm");
+    supportedFormats.add("bc1-rgba-unorm-srgb");
+    supportedFormats.add("bc2-rgba-unorm");
+    supportedFormats.add("bc2-rgba-unorm-srgb");
+    supportedFormats.add("bc3-rgba-unorm");
+    supportedFormats.add("bc3-rgba-unorm-srgb");
+    supportedFormats.add("bc4-r-unorm");
+    supportedFormats.add("bc4-r-snorm");
+    supportedFormats.add("bc5-rg-unorm");
+    supportedFormats.add("bc5-rg-snorm");
+    supportedFormats.add("bc6h-rgb-ufloat");
+    supportedFormats.add("bc6h-rgb-float");
+    supportedFormats.add("bc7-rgba-unorm");
+    supportedFormats.add("bc7-rgba-unorm-srgb");
+  }
+
+  // ETC2 (Mobile/WebGL standard)
+  if (features.has("texture-compression-etc2")) {
+    supportedFormats.add("etc2-rgb8unorm");
+    supportedFormats.add("etc2-rgb8unorm-srgb");
+    supportedFormats.add("etc2-rgb8a1unorm");
+    supportedFormats.add("etc2-rgb8a1unorm-srgb");
+    supportedFormats.add("etc2-rgba8unorm");
+    supportedFormats.add("etc2-rgba8unorm-srgb");
+    supportedFormats.add("eac-r11unorm");
+    supportedFormats.add("eac-r11snorm");
+    supportedFormats.add("eac-rg11unorm");
+    supportedFormats.add("eac-rg11snorm");
+  }
+
+  // ASTC (Modern Mobile)
+  if (features.has("texture-compression-astc")) {
+    supportedFormats.add("astc-4x4-unorm");
+    supportedFormats.add("astc-4x4-unorm-srgb");
+    supportedFormats.add("astc-5x4-unorm");
+    supportedFormats.add("astc-5x4-unorm-srgb");
+    supportedFormats.add("astc-5x5-unorm");
+    supportedFormats.add("astc-5x5-unorm-srgb");
+    supportedFormats.add("astc-6x5-unorm");
+    supportedFormats.add("astc-6x5-unorm-srgb");
+    supportedFormats.add("astc-6x6-unorm");
+    supportedFormats.add("astc-6x6-unorm-srgb");
+    supportedFormats.add("astc-8x5-unorm");
+    supportedFormats.add("astc-8x5-unorm-srgb");
+    supportedFormats.add("astc-8x6-unorm");
+    supportedFormats.add("astc-8x6-unorm-srgb");
+    supportedFormats.add("astc-8x8-unorm");
+    supportedFormats.add("astc-8x8-unorm-srgb");
+    supportedFormats.add("astc-10x5-unorm");
+    supportedFormats.add("astc-10x5-unorm-srgb");
+    supportedFormats.add("astc-10x6-unorm");
+    supportedFormats.add("astc-10x6-unorm-srgb");
+    supportedFormats.add("astc-10x8-unorm");
+    supportedFormats.add("astc-10x8-unorm-srgb");
+    supportedFormats.add("astc-10x10-unorm");
+    supportedFormats.add("astc-10x10-unorm-srgb");
+    supportedFormats.add("astc-12x10-unorm");
+    supportedFormats.add("astc-12x10-unorm-srgb");
+    supportedFormats.add("astc-12x12-unorm");
+    supportedFormats.add("astc-12x12-unorm-srgb");
+  }
+
+  return supportedFormats;
+}

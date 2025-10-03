@@ -8,17 +8,19 @@
     "host": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "tsx scripts/download-basis.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@mori2003/jsimgui": "^0.8.0",
-    "@types/node": "^24.2.1",
+    "@types/node": "^24.6.2",
     "@webgpu/types": "^0.1.64",
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
