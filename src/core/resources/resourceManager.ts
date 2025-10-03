@@ -12,6 +12,11 @@ import { createTextureFromImage } from "@/core/utils/texture";
 import { createGPUBuffer } from "@/core/utils/webgpu";
 import { loadOBJ } from "@/loaders/objLoader";
 import { loadSTL } from "@/loaders/stlLoader";
+import {
+  initMikkTSpace,
+  getMikkTSpaceModule,
+} from "@/core/wasm/mikkTSpaceModule";
+
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { mat4, quat, vec3 } from "wgpu-matrix";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
@@ -31,6 +36,8 @@ import {
 import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import {
+  decodeMeshopt,
+  dequantize,
   getAccessorData,
   GLTFMaterial,
   GLTFPrimitive,
@@ -49,49 +56,9 @@ import {
 } from "@/core/types/animation";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
+import { initMeshopt } from "../wasm/meshoptimizerModule";
 
 const DEBUG_MESH_VALIDATION = true;
-
-// MikkTSpace WASM loader and wrapper
-type MikkTSpace = typeof import("mikktspace");
-let mikktspace: MikkTSpace | null = null;
-let mikktspacePromise: Promise<void> | null = null;
-
-async function initMikkTSpace(): Promise<void> {
-  if (mikktspace || mikktspacePromise) return mikktspacePromise;
-
-  mikktspacePromise = new Promise((resolve) => {
-    import("mikktspace")
-      .then((module) => {
-        const init = module.default ?? module.init;
-        if (typeof init === "function") {
-          init()
-            .then(() => {
-              mikktspace = module;
-              console.log("MikkTSpace initialized successfully.");
-              resolve();
-            })
-            .catch((e: Error) => {
-              console.error("Failed to initialize MikkTSpace:", e);
-              resolve();
-            });
-        } else if (module.generateTangents) {
-          mikktspace = module;
-          console.log("MikkTSpace initialized successfully.");
-          resolve();
-        } else {
-          console.warn("MikkTSpace module format not recognized.");
-          mikktspace = module;
-          resolve();
-        }
-      })
-      .catch((e: Error) => {
-        console.error("Failed to initialize MikkTSpace:", e);
-        resolve();
-      });
-  });
-  return mikktspacePromise;
-}
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -1388,36 +1355,125 @@ export class ResourceManager {
       return cachedMesh;
     }
 
-    const posAccessor = primitive.attributes.POSITION;
-    const normAccessor = primitive.attributes.NORMAL;
-    const uv0Accessor = primitive.attributes.TEXCOORD_0;
-    const uv1Accessor = primitive.attributes.TEXCOORD_1;
-    const indicesAccessor = primitive.indices;
-    if (posAccessor === undefined || indicesAccessor === undefined) {
-      throw new Error("GLTF primitive must have POSITION and indices.");
+    // Per the engine's MeshData interface, all geometry must be indexed.
+    if (primitive.indices === undefined) {
+      throw new Error(
+        `GLTF primitive for mesh "${key}" must be indexed, but indices are missing.`,
+      );
     }
-    const positions = getAccessorData(gltf, posAccessor) as Float32Array;
-    const indices = getAccessorData(gltf, indicesAccessor) as
-      | Uint16Array
-      | Uint32Array;
-    const normals =
-      normAccessor !== undefined
-        ? (getAccessorData(gltf, normAccessor) as Float32Array)
-        : new Float32Array();
-    const texCoords =
-      uv0Accessor !== undefined
-        ? (getAccessorData(gltf, uv0Accessor) as Float32Array)
-        : new Float32Array();
-    const texCoords1 =
-      uv1Accessor !== undefined
-        ? (getAccessorData(gltf, uv1Accessor) as Float32Array)
-        : new Float32Array();
+
+    let positions: Float32Array | undefined;
+    let normals: Float32Array | undefined;
+    let texCoords: Float32Array | undefined;
+    let texCoords1: Float32Array | undefined;
+    let indices: Uint16Array | Uint32Array | undefined;
+
+    const isCompressed = !!primitive.extensions?.EXT_meshopt_compression;
+
+    if (isCompressed) {
+      console.log(
+        `[ResourceManager] Decoding Meshopt compressed primitive for mesh "${key}"`,
+      );
+      await initMeshopt(); // Ensure decoder is ready
+      const decodedData = decodeMeshopt(gltf, primitive);
+
+      indices = decodedData.indexData;
+      if (!indices) {
+        // This can happen if primitive.indices was defined but decoding failed.
+        throw new Error(
+          `Failed to decode indices for compressed GLTF primitive in "${key}".`,
+        );
+      }
+
+      // Process decoded attributes
+      for (const [attributeName, rawData] of Object.entries(
+        decodedData.vertexData,
+      )) {
+        const accessorIndex = primitive.attributes[attributeName];
+        const accessor = gltf.json.accessors![accessorIndex];
+        let finalData: Float32Array;
+
+        if (accessor.normalized) {
+          finalData = dequantize(rawData, accessor);
+        } else if (rawData instanceof Float32Array) {
+          finalData = rawData;
+        } else {
+          finalData = new Float32Array(rawData);
+        }
+
+        switch (attributeName) {
+          case "POSITION":
+            positions = finalData;
+            break;
+          case "NORMAL":
+            normals = finalData;
+            break;
+          case "TEXCOORD_0":
+            texCoords = finalData;
+            break;
+          case "TEXCOORD_1":
+            texCoords1 = finalData;
+            break;
+        }
+      }
+      if (!positions) {
+        throw new Error(
+          `Compressed GLTF primitive in "${key}" must have POSITION attribute.`,
+        );
+      }
+    } else {
+      // Standard, non-compressed path
+      const posAccessorIndex = primitive.attributes.POSITION;
+      // We already checked primitive.indices is defined at the top.
+      const indicesAccessorIndex = primitive.indices!;
+
+      if (posAccessorIndex === undefined) {
+        throw new Error(
+          `GLTF primitive in "${key}" must have POSITION attribute.`,
+        );
+      }
+
+      // Helper to get and dequantize data for a given attribute semantic
+      const getAttribute = (
+        attributeName: string,
+      ): Float32Array | undefined => {
+        const accessorIndex = primitive.attributes[attributeName];
+        if (accessorIndex === undefined) return undefined;
+
+        const accessor = gltf.json.accessors![accessorIndex];
+        const rawData = getAccessorData(gltf, accessorIndex);
+
+        if (accessor.normalized) {
+          return dequantize(rawData, accessor);
+        }
+        if (rawData instanceof Float32Array) {
+          return rawData;
+        }
+        return new Float32Array(rawData);
+      };
+
+      positions = getAttribute("POSITION");
+      normals = getAttribute("NORMAL");
+      texCoords = getAttribute("TEXCOORD_0");
+      texCoords1 = getAttribute("TEXCOORD_1");
+      indices = getAccessorData(gltf, indicesAccessorIndex) as
+        | Uint16Array
+        | Uint32Array;
+
+      if (!positions) {
+        // This case is technically covered by the posAccessorIndex check above, but for safety:
+        throw new Error(
+          `GLTF primitive in "${key}" must have POSITION attribute.`,
+        );
+      }
+    }
+
     const meshData: MeshData = {
-      positions,
-      normals,
-      texCoords,
-      texCoords1,
-      indices,
+      positions: positions!,
+      normals: normals ?? new Float32Array(),
+      texCoords: texCoords ?? new Float32Array(),
+      texCoords1: texCoords1 ?? new Float32Array(),
+      indices: indices!, // We've ensured indices is not undefined.
     };
     return this.createMesh(key, meshData);
   }
@@ -1656,16 +1712,17 @@ export class ResourceManager {
         }
 
         try {
-          // Ensure MikkTSpace is initialized before use
+          // Check MikkTSpace is initialized before use
           await initMikkTSpace();
-          if (!mikktspace) {
+          const MIKKTSPACE = getMikkTSpaceModule();
+          if (!MIKKTSPACE) {
             throw new Error("MikkTSpace library is not available.");
           }
 
           console.log(
             `[ResourceManager] Generating tangents for mesh "${key}"...`,
           );
-          const deindexedTangents = mikktspace.generateTangents(
+          const deindexedTangents = MIKKTSPACE.generateTangents(
             deindexedPositions,
             deindexedNormals,
             deindexedTexCoords,
@@ -1758,11 +1815,12 @@ export class ResourceManager {
         // Non-indexed geometry - generate tangents directly
         try {
           await initMikkTSpace();
-          if (mikktspace) {
+          const MIKKTSPACE = getMikkTSpaceModule();
+          if (MIKKTSPACE) {
             console.log(
               `[ResourceManager] Generating tangents for non-indexed mesh "${key}"...`,
             );
-            finalTangents = mikktspace.generateTangents(
+            finalTangents = MIKKTSPACE.generateTangents(
               data.positions,
               data.normals!,
               data.texCoords!,
