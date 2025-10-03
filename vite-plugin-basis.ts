@@ -18,7 +18,7 @@ import type { Plugin } from "vite";
  */
 export function vitePluginBasisTranscoderEsm(): Plugin {
   return {
-    name: "vendor-plugin",
+    name: "vite-plugin-basis-transcoder-esm",
     transform(code, id) {
       // Handle the basis_transcoder.js file specially
       if (id.includes("basis_transcoder.js")) {
