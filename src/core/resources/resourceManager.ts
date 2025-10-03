@@ -12,6 +12,11 @@ import { createTextureFromImage } from "@/core/utils/texture";
 import { createGPUBuffer } from "@/core/utils/webgpu";
 import { loadOBJ } from "@/loaders/objLoader";
 import { loadSTL } from "@/loaders/stlLoader";
+import {
+  initMikkTSpace,
+  getMikkTSpaceModule,
+} from "@/core/wasm/mikkTSpaceModule";
+
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { mat4, quat, vec3 } from "wgpu-matrix";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
@@ -51,47 +56,6 @@ import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 
 const DEBUG_MESH_VALIDATION = true;
-
-// MikkTSpace WASM loader and wrapper
-type MikkTSpace = typeof import("mikktspace");
-let mikktspace: MikkTSpace | null = null;
-let mikktspacePromise: Promise<void> | null = null;
-
-async function initMikkTSpace(): Promise<void> {
-  if (mikktspace || mikktspacePromise) return mikktspacePromise;
-
-  mikktspacePromise = new Promise((resolve) => {
-    import("mikktspace")
-      .then((module) => {
-        const init = module.default ?? module.init;
-        if (typeof init === "function") {
-          init()
-            .then(() => {
-              mikktspace = module;
-              console.log("MikkTSpace initialized successfully.");
-              resolve();
-            })
-            .catch((e: Error) => {
-              console.error("Failed to initialize MikkTSpace:", e);
-              resolve();
-            });
-        } else if (module.generateTangents) {
-          mikktspace = module;
-          console.log("MikkTSpace initialized successfully.");
-          resolve();
-        } else {
-          console.warn("MikkTSpace module format not recognized.");
-          mikktspace = module;
-          resolve();
-        }
-      })
-      .catch((e: Error) => {
-        console.error("Failed to initialize MikkTSpace:", e);
-        resolve();
-      });
-  });
-  return mikktspacePromise;
-}
 
 export interface PBRMaterialSpec {
   type: "PBR";
@@ -1656,16 +1620,17 @@ export class ResourceManager {
         }
 
         try {
-          // Ensure MikkTSpace is initialized before use
+          // Check MikkTSpace is initialized before use
           await initMikkTSpace();
-          if (!mikktspace) {
+          const MIKKTSPACE = getMikkTSpaceModule();
+          if (!MIKKTSPACE) {
             throw new Error("MikkTSpace library is not available.");
           }
 
           console.log(
             `[ResourceManager] Generating tangents for mesh "${key}"...`,
           );
-          const deindexedTangents = mikktspace.generateTangents(
+          const deindexedTangents = MIKKTSPACE.generateTangents(
             deindexedPositions,
             deindexedNormals,
             deindexedTexCoords,
@@ -1758,11 +1723,12 @@ export class ResourceManager {
         // Non-indexed geometry - generate tangents directly
         try {
           await initMikkTSpace();
-          if (mikktspace) {
+          const MIKKTSPACE = getMikkTSpaceModule();
+          if (MIKKTSPACE) {
             console.log(
               `[ResourceManager] Generating tangents for non-indexed mesh "${key}"...`,
             );
-            finalTangents = mikktspace.generateTangents(
+            finalTangents = MIKKTSPACE.generateTangents(
               data.positions,
               data.normals!,
               data.texCoords!,
