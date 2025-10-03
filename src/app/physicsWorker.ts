@@ -39,16 +39,18 @@ import {
   COMMANDS_MAX_PARAMS_F32,
 } from "@/core/sharedPhysicsLayout";
 
-// Type imports from Rapier
-type RAPIER = typeof import("@dimforge/rapier3d");
-type World = import("@dimforge/rapier3d").World;
-type RigidBodyDesc = import("@dimforge/rapier3d").RigidBodyDesc;
-type RigidBody = import("@dimforge/rapier3d").RigidBody;
-type ColliderDesc = import("@dimforge/rapier3d").ColliderDesc;
-type Collider = import("@dimforge/rapier3d").Collider;
-type IntegrationParameters = import("@dimforge/rapier3d").IntegrationParameters;
-type KinematicCharacterController =
-  import("@dimforge/rapier3d").KinematicCharacterController;
+// Import Rapier physics module
+import {
+  initRapier,
+  getRapierModule,
+  createWorld,
+  isRapierReady,
+  World,
+  RigidBodyDesc,
+  RigidBody,
+  ColliderDesc,
+  KinematicCharacterController,
+} from "@/core/wasm/rapierModule";
 
 /**
  * Physics worker:
@@ -58,7 +60,6 @@ type KinematicCharacterController =
  * - Publishes snapshots to a triple-buffered states SAB
  */
 
-let RAPIER: RAPIER | null = null;
 let world: World | null = null;
 
 let commandsView: Int32Array | null = null; // Int32 view (header + slots)
@@ -78,9 +79,6 @@ let lastStepTimeMs = 0.0; // Metric: wall time for last step batch
 
 const FIXED_DT = 1 / 60;
 const GRAVITY = { x: 0.0, y: -9.81, z: 0.0 };
-
-let isInitialized = false;
-let rapierPromise: Promise<void> | null = null;
 
 /* ---------------------------------------------
    Helpers
@@ -103,40 +101,30 @@ function validateHeader(
    Rapier init
 ----------------------------------------------*/
 
-async function initRapier(): Promise<void> {
-  if (rapierPromise) return rapierPromise;
+/**
+ * Initializes Rapier and creates the physics world.
+ *
+ * Uses the centralized rapierModule for WASM loading, then creates
+ * a world instance owned by this worker.
+ */
+async function initializePhysics(): Promise<void> {
+  try {
+    // Initialize the Rapier WASM module
+    await initRapier();
 
-  console.log("Starting Rapier initialization...");
-
-  rapierPromise = (async () => {
-    try {
-      const start = performance.now();
-      const r = await import("@dimforge/rapier3d");
-      RAPIER = r;
-      const loadTime = performance.now() - start;
-      console.log(`Rapier loaded in ${loadTime.toFixed(2)}ms`);
-
-      world = new RAPIER.World(GRAVITY);
-      const params: IntegrationParameters = world.integrationParameters;
-      params.dt = FIXED_DT;
-
-      console.log(
-        "[PhysicsWorker] Rapier initialized. Gravity:",
-        GRAVITY,
-        "Fixed dt:",
-        FIXED_DT,
-      );
-
-      isInitialized = true;
-    } catch (error) {
-      console.error("Physics initialization failed:", error);
-      RAPIER = null;
-      world = null;
-      isInitialized = false;
+    if (!isRapierReady()) {
+      throw new Error("Rapier module failed to initialize");
     }
-  })();
 
-  return rapierPromise;
+    // Create the physics world owned by this worker
+    world = createWorld(GRAVITY, FIXED_DT);
+
+    console.log("[PhysicsWorker] Physics initialized successfully");
+  } catch (error) {
+    console.error("[PhysicsWorker] Initialization failed:", error);
+    world = null;
+    throw error;
+  }
 }
 
 /* ---------------------------------------------
@@ -170,6 +158,7 @@ async function initRapier(): Promise<void> {
  */
 function processCommands(): void {
   // --- Guard Clause ---
+  const RAPIER = getRapierModule();
   if (!commandsView || !world || !RAPIER) {
     return;
   }
@@ -522,7 +511,6 @@ function stopPhysicsLoop(): void {
   playerOnGround.clear();
   accumulator = 0;
   stepCounter = 0;
-  isInitialized = false;
   console.log("[PhysicsWorker] Loop stopped and resources freed.");
 }
 
@@ -537,9 +525,11 @@ self.onmessage = async (
 
   if (msg.type === "INIT") {
     try {
-      await initRapier();
-      if (!isInitialized || !RAPIER || !world) {
-        throw new Error("Rapier init failed; no world available.");
+      // Use centralized initialization
+      await initializePhysics();
+
+      if (!world) {
+        throw new Error("Physics world creation failed");
       }
 
       commandsView = new Int32Array(msg.commandsBuffer);
@@ -591,10 +581,12 @@ self.onmessage = async (
     return;
   }
 
-  if (!world || !isInitialized) return;
+  if (!world) return;
 
   switch (msg.type) {
     case "STEP": {
+      if (!world) return;
+
       const steps = msg.steps ?? 1;
       for (let i = 0; i < steps; i++) {
         stepWorld(FIXED_DT);
