@@ -3,75 +3,7 @@
 // basis_transcoder.js script.
 
 declare module "basis-universal" {
-  export interface BasisModule {
-    onRuntimeInitialized?: () => void;
-    locateFile?: (path: string, prefix: string) => string;
-    // This is the enum-like object for texture formats
-    TranscoderTextureFormat: {
-      ETC1_RGB: number;
-      ETC2_RGBA: number;
-      BC1_RGB: number;
-      BC3_RGBA: number;
-      BC4_R: number;
-      BC5_RG: number;
-      BC7_RGBA: number;
-      PVRTC1_4_RGB: number;
-      PVRTC1_4_RGBA: number;
-      ASTC_4x4_RGBA: number;
-      ATC_RGB: number;
-      ATC_RGBA: number;
-      FXT1_RGB: number;
-      RGBA32: number;
-      RGB565: number;
-      BGR565: number;
-      RGBA4444: number;
-      ETC2_EAC_R11: number;
-      ETC2_EAC_RG11: number;
-    };
-  }
-
-  export class BasisFile {
-    constructor(data: Uint8Array);
-    close(): void;
-    getHasAlpha(): boolean;
-    getNumImages(): number;
-    getNumLevels(imageIndex: number): number;
-    getImageWidth(imageIndex: number, levelIndex: number): number;
-    getImageHeight(imageIndex: number, levelIndex: number): number;
-    getImageTranscodedSizeInBytes(
-      imageIndex: number,
-      levelIndex: number,
-      format: number,
-    ): number;
-    startTranscoding(): boolean;
-    transcodeImage(
-      dst: Uint8Array,
-      imageIndex: number,
-      levelIndex: number,
-      format: number,
-      unused: number,
-      getAlphaForOpaqueFormats: number,
-    ): Uint8Array | null;
-    destroy(): void;
-  }
-
-  export interface KTX2ImageLevelInfo {
-    levelIndex: number;
-    layerIndex: number;
-    faceIndex: number;
-    origWidth: number;
-    origHeight: number;
-    width: number;
-    height: number;
-    numBlocksX: number;
-    numBlocksY: number;
-    totalBlocks: number;
-    alphaFlag: boolean;
-    iframeFlag: boolean;
-  }
-
-  export class KTX2File {
-    constructor(data: Uint8Array);
+  interface KTX2File {
     close(): void;
     isValid(): boolean;
     getWidth(): number;
@@ -101,5 +33,79 @@ declare module "basis-universal" {
     destroy(): void;
   }
 
+  interface BasisFile {
+    close(): void;
+    getHasAlpha(): boolean;
+    getNumImages(): number;
+    getNumLevels(imageIndex: number): number;
+    getImageWidth(imageIndex: number, levelIndex: number): number;
+    getImageHeight(imageIndex: number, levelIndex: number): number;
+    getImageTranscodedSizeInBytes(
+      imageIndex: number,
+      levelIndex: number,
+      format: number,
+    ): number;
+    startTranscoding(): boolean;
+    transcodeImage(
+      dst: Uint8Array,
+      imageIndex: number,
+      levelIndex: number,
+      format: number,
+      unused: number,
+      getAlphaForOpaqueFormats: number,
+    ): Uint8Array | null;
+    destroy(): void;
+  }
+
+  // This is an auxiliary type, it can remain as is.
+  export interface KTX2ImageLevelInfo {
+    levelIndex: number;
+    layerIndex: number;
+    faceIndex: number;
+    origWidth: number;
+    origHeight: number;
+    width: number;
+    height: number;
+    numBlocksX: number;
+    numBlocksY: number;
+    totalBlocks: number;
+    alphaFlag: boolean;
+    iframeFlag: boolean;
+  }
+
+  // This is the main module object that is initialized.
+  export interface BasisModule {
+    onRuntimeInitialized?: () => void;
+    locateFile?: (path: string, prefix: string) => string;
+
+    // The enum-like object for texture formats
+    TranscoderTextureFormat: {
+      ETC1_RGB: number;
+      ETC2_RGBA: number;
+      BC1_RGB: number;
+      BC3_RGBA: number;
+      BC4_R: number;
+      BC5_RG: number;
+      BC7_RGBA: number;
+      PVRTC1_4_RGB: number;
+      PVRTC1_4_RGBA: number;
+      ASTC_4x4_RGBA: number;
+      ATC_RGB: number;
+      ATC_RGBA: number;
+      FXT1_RGB: number;
+      RGBA32: number;
+      RGB565: number;
+      BGR565: number;
+      RGBA4444: number;
+      ETC2_EAC_R11: number;
+      ETC2_EAC_RG11: number;
+    };
+
+    // The constructors are properties on the module object.
+    KTX2File: new (data: Uint8Array) => KTX2File;
+    BasisFile: new (data: Uint8Array) => BasisFile;
+  }
+
+  // The BasisTranscoder function is a top-level export that populates the module.
   export function BasisTranscoder(module: Partial<BasisModule>): Promise<void>;
 }
