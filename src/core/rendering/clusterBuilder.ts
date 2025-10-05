@@ -156,7 +156,7 @@ export class ClusterBuilder {
    * Updates the cluster parameters uniform buffer.
    *
    * This method packs camera and viewport data into a uniform buffer that is
-   * used by the compute shaders to correctly assign lights to clusters. It
+   * used by the compute shaders to assign lights to clusters. It
    * should be called every frame before the `record` method.
    *
    * @param camera The camera component.

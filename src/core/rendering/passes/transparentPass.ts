@@ -1,32 +1,74 @@
 // src/core/rendering/passes/transparentPass.ts
-import { Renderable } from "@/core/types/gpu";
-import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { Vec3, vec3 } from "wgpu-matrix";
 import { Renderer } from "@/core/rendering/renderer";
+import { RenderContext, RenderPass } from "@/core/types/rendering";
 
-export class TransparentPass {
-  private device: GPUDevice;
+/**
+ * Renders all alpha-blended (transparent) geometry for the main scene pass.
+ *
+ * @remarks
+ * The primary challenge with rendering transparent objects is ensuring correct
+ * visual layering. To achieve this, the pass performs a crucial back-to-front
+ * sort of all transparent objects based on each object's distance from the
+ * camera. This ensures that objects farther away are drawn before closer ones,
+ * allowing their colors to blend correctly.
+ *
+ * This pass reuses the same feature-rich `pbr.wgsl` shader as the `OpaquePass`.
+ * As a result, transparent objects receive the full suite of lighting effects,
+ * including direct lighting from clusters, sun shadows, and image-based
+ * lighting (IBL). This allows for realistic rendering of materials like glass
+ * or colored plastics that still have specular highlights and are affected by
+ * scene lighting.
+ *
+ * For efficiency, the pass attempts to batch consecutive, sorted objects that
+ * share the same mesh and material into single instanced draw calls. However,
+ * the sorting requirement often results in more draw calls compared to the
+ * opaque pass.
+ *
+ * The actual alpha blending is not performed in the shader itself but is
+ * enabled by the GPU's pipeline state, which is configured by the material to
+ * combine the fragment shader's output color with the color already in the
+ * framebuffer.
+ */
+export class TransparentPass implements RenderPass {
   private tempVec3A: Vec3 = vec3.create();
   private tempVec3B: Vec3 = vec3.create();
   private tempCameraPos: Vec3 = vec3.create();
 
-  constructor(device: GPUDevice) {
-    this.device = device;
-  }
-
-  public record(
+  /**
+   * Executes the transparent rendering pass.
+   *
+   * @remarks
+   * It filters for transparent objects from the context, sorts them
+   * back-to-front relative to the camera, and then records the necessary draw
+   * commands into the provided render pass encoder.
+   *
+   * @param context The immutable render context for the current frame.
+   * @param passEncoder The `GPURenderPassEncoder` for the main scene pass,
+   *   into which the transparent geometry will be drawn.
+   * @returns The total number of draw calls issued by the pass.
+   */
+  public execute(
+    context: RenderContext,
     passEncoder: GPURenderPassEncoder,
-    renderables: Renderable[],
-    camera: CameraComponent,
-    instanceBuffer: GPUBuffer,
-    instanceBufferOffset: number,
-    frameInstanceData: Float32Array,
-    frameBindGroupLayout: GPUBindGroupLayout,
-    canvasFormat: GPUTextureFormat,
-    depthFormat: GPUTextureFormat,
   ): number {
+    const {
+      camera,
+      instanceBuffer,
+      instanceAllocations,
+      frameBindGroupLayout,
+      canvasFormat,
+      depthFormat,
+    } = context;
+
+    // 1. Filter transparent renderables
+    const renderables = context.sceneData.renderables.filter(
+      (r) => r.material.material.isTransparent,
+    );
+
     if (renderables.length === 0) return 0;
 
+    // 2. Sort back-to-front
     this.tempCameraPos[0] = camera.inverseViewMatrix[12];
     this.tempCameraPos[1] = camera.inverseViewMatrix[13];
     this.tempCameraPos[2] = camera.inverseViewMatrix[14];
@@ -43,34 +85,9 @@ export class TransparentPass {
       return db - da;
     });
 
-    const floatsPerInstance = Renderer.INSTANCE_STRIDE_IN_FLOATS;
-    const instanceDataView = new Float32Array(
-      frameInstanceData.buffer,
-      instanceBufferOffset,
-      renderables.length * floatsPerInstance,
-    );
-    const instanceUintView = new Uint32Array(
-      instanceDataView.buffer,
-      instanceDataView.byteOffset,
-    );
-
-    for (let i = 0; i < renderables.length; i++) {
-      const { modelMatrix, isUniformlyScaled, receiveShadows } = renderables[i];
-      const floatOff = i * floatsPerInstance;
-      const uintOff = floatOff;
-
-      instanceDataView.set(modelMatrix, floatOff);
-
-      const flags =
-        (isUniformlyScaled ? 1 : 0) | (((receiveShadows ?? true) ? 1 : 0) << 1);
-      instanceUintView[uintOff + 16] = flags;
-    }
-
-    this.device.queue.writeBuffer(
-      instanceBuffer,
-      instanceBufferOffset,
-      instanceDataView,
-    );
+    // 3. Record draw calls (instance data is already on GPU)
+    const instanceBufferOffset =
+      instanceAllocations.transparents.offset * Renderer.INSTANCE_BYTE_STRIDE;
 
     let drawCalls = 0;
     let i = 0;

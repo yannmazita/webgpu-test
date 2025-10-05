@@ -1,7 +1,6 @@
-// src/core/renderer.ts
-import { Light, Mesh, Renderable } from "@/core/types/gpu";
-import { Material } from "@/core/materials/material";
-import { SceneRenderData } from "@/core/types/rendering";
+// src/core/rendering/renderer.ts
+import { Light, Renderable } from "@/core/types/gpu";
+import { SceneRenderData, RenderContext } from "@/core/types/rendering";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { BatchManager } from "@/core/rendering/batchManager";
 import { UniformManager } from "@/core/rendering/uniformManager";
@@ -10,7 +9,7 @@ import { testAABBFrustum, transformAABB } from "@/core/utils/bounds";
 import { ClusterPass } from "@/core/rendering/passes/clusterPass";
 import { ShadowPass } from "@/core/rendering/passes/shadowPass";
 import { SkyboxPass } from "@/core/rendering/passes/skyboxPass";
-import { DrawBatch, RendererStats } from "@/core/types/renderer";
+import { RendererStats } from "@/core/types/renderer";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
@@ -18,14 +17,23 @@ import {
 import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
 import { UIPass } from "@/core/rendering/passes/uiPass";
+import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";
 
 /**
- * The central rendering engine.
+ * The central rendering engine for the application.
  *
- * This class manages the `GPUDevice`, canvas context, shader modules,
- * render pipelines, and buffers. It orchestrates the entire rendering
- * process each frame, from setting up resources to submitting commands to the
- * GPU.
+ * @remarks
+ * This class is the primary orchestrator of the entire rendering process. Its
+ * core responsibilities include initializing the WebGPU device and context,
+ * managing global frame-level GPU resources (like uniform buffers and the
+ * frame bind group), and executing the main render loop each frame.
+ *
+ * The rendering architecture is based on a sequence of self-contained render
+ * passes. The `Renderer` prepares a single, immutable `RenderContext` object
+ * for each frame, which contains all the necessary scene data and resources.
+ * This context is then passed to each `RenderPass` in sequence, allowing them
+ * to perform their specific tasks (ie shadow mapping, light clustering,
+ * opaque geometry rendering) independently.
  */
 export class Renderer {
   /** The primary WebGPU device used for all GPU operations. */
@@ -43,14 +51,13 @@ export class Renderer {
   private canvas: HTMLCanvasElement | OffscreenCanvas;
   private context!: GPUCanvasContext;
   private adapter!: GPUAdapter;
-  private instanceBuffer!: GPUBuffer;
   private depthTexture!: GPUTexture;
   private dummyTexture!: GPUTexture;
   private dummyCubemapTexture!: GPUTexture;
 
   // Optimization managers
-  private batchManager!: BatchManager;
   private uniformManager!: UniformManager;
+  private instanceBufferManager!: InstanceBufferManager;
 
   // Rendering passes
   private clusterPass!: ClusterPass;
@@ -67,15 +74,6 @@ export class Renderer {
   private sceneDataBuffer!: GPUBuffer;
   private lightStorageBuffer!: GPUBuffer;
   private lightStorageBufferCapacity!: number;
-
-  // CPU-side buffer for all instance data for a single frame
-  private frameInstanceData!: Float32Array;
-  private frameInstanceCapacity = 100; // Initial capacity
-
-  // Pre-allocated arrays for render data
-  private visibleRenderables: Renderable[] = [];
-  private transparentRenderables: Renderable[] = [];
-  private opaqueBatches: DrawBatch[] = [];
 
   private stats: RendererStats = {
     canvasWidth: 0,
@@ -134,11 +132,20 @@ export class Renderer {
   }
 
   /**
-   * Initializes the renderer.
+   * Initializes the renderer and all its core WebGPU resources.
    *
-   * This method sets up the WebGPU device and context, creates the depth
-   * texture, and initializes the uniform buffers and other resources.
-   * It must be called before any rendering can be done.
+   * @remarks
+   * This asynchronous method must be called and awaited before any rendering
+   * can occur. It performs several critical setup steps:
+   * - Requests the `GPUDevice` and `GPUCanvasContext`.
+   * - Creates default fallback resources like a 1x1 white texture and a
+   *   default sampler.
+   * - Sets up a `ResizeObserver` to handle canvas resizing automatically.
+   * - Creates the core uniform buffers for camera, scene, and light data.
+   * - Initializes all the individual `RenderPass` instances.
+   * - Creates the global `frameBindGroupLayout` that defines the structure of
+   *   shared, frame-level resources for all shaders.
+   * - Initializes helper managers like `UniformManager` and `InstanceBufferManager`.
    */
   public async init(): Promise<void> {
     await this.setupDevice();
@@ -320,9 +327,7 @@ export class Renderer {
 
     this.batchManager = new BatchManager(100);
     this.uniformManager = new UniformManager();
-    this.frameInstanceData = new Float32Array(
-      this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
-    );
+    this.instanceBufferManager = new InstanceBufferManager(this.device);
 
     // Check for errors after init
     const error = await this.device.popErrorScope();
@@ -332,8 +337,14 @@ export class Renderer {
   }
 
   /**
-   * Enables or disables ACES tone mapping in shaders.
-   * This is a UI-driven toggle and does not reconfigure the canvas.
+   * Enables or disables ACES tone mapping in the PBR shader.
+   *
+   * @remarks
+   * This method updates a uniform flag that is read by the PBR fragment
+   * shader. It provides a simple toggle for the tone mapping effect without
+   * needing to reconfigure any render pipelines.
+   *
+   * @param enabled Whether tone mapping should be active.
    */
   public setToneMappingEnabled(enabled: boolean): void {
     this.toneMappingEnabled = !!enabled;
@@ -352,7 +363,10 @@ export class Renderer {
         }
       });
       // Only observe if DOM canvas
-      if (typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function") {
+      if (
+        typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect ===
+        "function"
+      ) {
         this.resizeObserver.observe(this.canvas as HTMLCanvasElement);
       }
     }
@@ -361,7 +375,8 @@ export class Renderer {
       window.addEventListener("resize", () => {
         this.currentDPR = window.devicePixelRatio || 1;
         const rect =
-          typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect === "function"
+          typeof (this.canvas as HTMLCanvasElement).getBoundingClientRect ===
+          "function"
             ? (this.canvas as HTMLCanvasElement).getBoundingClientRect()
             : { width: this.cssWidth, height: this.cssHeight };
         this.cssWidth = Math.max(0, Math.floor(rect.width));
@@ -372,10 +387,17 @@ export class Renderer {
   }
 
   /**
-   * External resize hook for worker-driven sizing.
+   * Handles resizing of the canvas.
    *
-   * Computes physical size, updates canvas, depth texture, and camera aspect
-   * immediately.
+   * @remarks
+   * This method is used when a `ResizeObserver` is not available, such as in a
+   * Web Worker. It directly sets the canvas's physical dimensions, recreates
+   * the depth texture to match, and updates the active camera's aspect ratio.
+   *
+   * @param cssWidth The new width of the canvas in CSS pixels.
+   * @param cssHeight The new height of the canvas in CSS pixels.
+   * @param devicePixelRatio The device's current pixel ratio.
+   * @param camera The camera whose aspect ratio needs to be updated.
    */
   public requestResize(
     cssWidth: number,
@@ -389,10 +411,7 @@ export class Renderer {
     this.cssHeight = Math.max(0, Math.floor(cssHeight));
     const physW = Math.max(1, Math.round(this.cssWidth * this.currentDPR));
     const physH = Math.max(1, Math.round(this.cssHeight * this.currentDPR));
-    if (
-      this.canvas.width !== physW ||
-      this.canvas.height !== physH
-    ) {
+    if (this.canvas.width !== physW || this.canvas.height !== physH) {
       this.canvas.width = physW;
       this.canvas.height = physH;
       this.createDepthTexture();
@@ -432,9 +451,14 @@ export class Renderer {
 
     // Diagnostics: detect software fallback
     // Chrome implements isFallbackAdapter; if true, we're likely on SwiftShader (CPU).
-    const adapterWithFallback = this.adapter as GPUAdapter & { isFallbackAdapter?: boolean };
+    const adapterWithFallback = this.adapter as GPUAdapter & {
+      isFallbackAdapter?: boolean;
+    };
     if (typeof adapterWithFallback.isFallbackAdapter === "boolean") {
-      console.warn("WebGPU Adapter fallback:", adapterWithFallback.isFallbackAdapter);
+      console.warn(
+        "WebGPU Adapter fallback:",
+        adapterWithFallback.isFallbackAdapter,
+      );
     } else {
       console.warn("WebGPU Adapter fallback: unknown (property not available)");
     }
@@ -675,19 +699,6 @@ export class Renderer {
     );
   }
 
-  private _prepareInstanceBuffer(instanceCount: number): void {
-    const requiredBufferSize = instanceCount * Renderer.INSTANCE_BYTE_STRIDE;
-    if (!this.instanceBuffer || this.instanceBuffer.size < requiredBufferSize) {
-      if (this.instanceBuffer) this.instanceBuffer.destroy();
-      const newSize = Math.ceil(requiredBufferSize * 1.5);
-      this.instanceBuffer = this.device.createBuffer({
-        label: "INSTANCE_DATA_BUFFER",
-        size: newSize,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      });
-    }
-  }
-
   /**
    * Tests if a renderable object is within the camera's view frustum.
    * Uses AABB vs frustum planes testing for accurate culling.
@@ -706,28 +717,32 @@ export class Renderer {
     return testAABBFrustum(worldAABB, camera.frustumPlanes);
   }
 
-  private ensureCpuInstanceCapacity(requiredInstances: number): void {
-    if (requiredInstances <= this.frameInstanceCapacity) return;
-
-    // Grow capacity with a 1.5x factor to reduce reallocations
-    this.frameInstanceCapacity = Math.ceil(requiredInstances * 1.5);
-
-    // We repack per frame, so we don't need to copy old contents
-    this.frameInstanceData = new Float32Array(
-      this.frameInstanceCapacity * Renderer.INSTANCE_STRIDE_IN_FLOATS,
-    );
-  }
-
   /**
-   * Renders a single frame.
+   * Renders a single frame of the scene.
    *
-   * This method performs frustum culling, batching, and sorting of renderable
-   * objects, and then records and submits the necessary render passes to the
-   * GPU.
+   * @remarks
+   * This is the main entry point for the render loop. It orchestrates the
+   * entire frame pipeline in this sequence:
+   * 1. Handles any pending resize events.
+   * 2. Updates global GPU uniform buffers for the camera, scene, and lights.
+   * 3. Performs frustum culling to get a list of potentially visible objects.
+   * 4. Delegates to the `InstanceBufferManager` to pack all instance data
+   *    (model matrices, flags) for all render queues (shadows, opaques,
+   *    transparents) into a single GPU buffer with one upload.
+   * 5. Constructs the immutable `RenderContext` for the frame.
+   * 6. Executes the sequence of render passes: `ClusterPass` and `ShadowPass`
+   *    run first, followed by the main scene passes (`SkyboxPass`,
+   *    `OpaquePass`, `TransparentPass`) which draw into the canvas.
+   * 7. If provided, invokes a callback to allow for custom UI rendering on top
+   *    of the scene.
+   * 8. Submits all recorded GPU commands for execution.
+   *
    * @param camera The camera to render from.
    * @param sceneData The data for the scene to render.
    * @param postSceneDrawCallback An optional callback to render UI or other
-   * content after the main scene has been drawn.
+   *   content after the main scene has been drawn.
+   * @param sun The scene's directional sun component.
+   * @param shadowSettings The current shadow quality settings.
    */
   public render(
     camera: CameraComponent,
@@ -764,26 +779,24 @@ export class Renderer {
     );
     Profiler.end("Render.UpdateUniforms");
 
-    Profiler.begin("Render.FrustumCullAndSeparate");
-    this.visibleRenderables.length = 0;
-    this.transparentRenderables.length = 0;
-    for (const r of sceneData.renderables) {
-      if (this._isInFrustum(r, camera)) {
-        if (r.material.material.isTransparent) {
-          this.transparentRenderables.push(r);
-        } else {
-          this.visibleRenderables.push(r);
-        }
+    // 1. Frustum Culling
+    Profiler.begin("Render.FrustumCull");
+    const visibleRenderables = sceneData.renderables.filter((r) =>
+      this._isInFrustum(r, camera),
+    );
+    Profiler.end("Render.FrustumCull");
+
+    // 2. Separate by render queue
+    Profiler.begin("Render.Separate");
+    const opaqueRenderables: Renderable[] = [];
+    const transparentRenderables: Renderable[] = [];
+    for (const r of visibleRenderables) {
+      if (r.material.material.isTransparent) {
+        transparentRenderables.push(r);
+      } else {
+        opaqueRenderables.push(r);
       }
     }
-    this.stats.visibleOpaque = this.visibleRenderables.length;
-    this.stats.visibleTransparent = this.transparentRenderables.length;
-    this.stats.lightCount = sceneData.lights.length;
-    this.stats.canvasWidth = this.canvas.width;
-    this.stats.canvasHeight = this.canvas.height;
-    this.clusterPass.updateStats(this.stats);
-    Profiler.end("Render.FrustumCullAndSeparate");
-
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
@@ -791,120 +804,54 @@ export class Renderer {
               r.castShadows !== false && !r.material.material.isTransparent,
           )
         : [];
-    const shadowCasterCount = shadowCasters.length;
+    Profiler.end("Render.Separate");
 
-    const opaqueInstanceTotal = this.visibleRenderables.length;
-    const transparentInstanceTotal = this.transparentRenderables.length;
-
-    const requiredInstanceCapacity = Math.max(
-      shadowCasterCount,
-      opaqueInstanceTotal + transparentInstanceTotal,
+    // 3. Pack all instance data for the frame into a single buffer
+    Profiler.begin("Render.PackInstanceBuffer");
+    const instanceAllocations = this.instanceBufferManager.packAndUpload(
+      shadowCasters,
+      opaqueRenderables,
+      transparentRenderables,
     );
-    this.ensureCpuInstanceCapacity(requiredInstanceCapacity);
-    this._prepareInstanceBuffer(requiredInstanceCapacity);
+    Profiler.end("Render.PackInstanceBuffer");
 
-    const commandBuffers: GPUCommandBuffer[] = [];
-
-    const clusterEncoder = this.device.createCommandEncoder({
-      label: "CLUSTER_COMMAND_ENCODER",
+    // 4. Create an immutable context for the frame's render passes
+    const commandEncoder = this.device.createCommandEncoder({
+      label: "MAIN_FRAME_ENCODER",
     });
-    this.clusterPass.record(
-      clusterEncoder,
-      this.stats.lightCount,
+    const context: RenderContext = {
+      // Pass the culled list of renderables to the context
+      sceneData: { ...sceneData, renderables: visibleRenderables },
       camera,
-      this.canvas.width,
-      this.canvas.height,
-      this.lightStorageBuffer,
-    );
-    commandBuffers.push(clusterEncoder.finish());
+      sun,
+      shadowSettings,
+      device: this.device,
+      commandEncoder,
+      canvasView: this.context.getCurrentTexture().createView(),
+      depthView: this.depthTexture.createView(),
+      canvasFormat: this.canvasFormat,
+      depthFormat: this.depthFormat,
+      frameBindGroup: this.frameBindGroup,
+      frameBindGroupLayout: this.frameBindGroupLayout,
+      lightStorageBuffer: this.lightStorageBuffer,
+      instanceBuffer: this.instanceBufferManager.getBuffer(),
+      instanceAllocations,
+      clusterBuilder: this.clusterPass.getClusterBuilder(),
+      shadowSubsystem: this.shadowPass.getShadowSubsystem(),
+      canvasWidth: this.canvas.width,
+      canvasHeight: this.canvas.height,
+    };
 
-    if (shadowCasterCount > 0 && shadowSettings) {
-      Profiler.begin("Render.ShadowPass");
-      const shadowEncoder = this.device.createCommandEncoder({
-        label: "SHADOW_COMMAND_ENCODER",
-      });
-      this.shadowPass.record(
-        shadowEncoder,
-        shadowCasters,
-        shadowSettings,
-        this.instanceBuffer,
-        this.frameInstanceData,
-      );
-      commandBuffers.push(shadowEncoder.finish());
-      Profiler.end("Render.ShadowPass");
-    }
+    // 5. Execute passes
+    this.clusterPass.execute(context);
+    this.shadowPass.execute(context);
 
-    const mainEncoder = this.device.createCommandEncoder({
-      label: "MAIN_COMMAND_ENCODER",
-    });
-
-    Profiler.begin("Render.Batching");
-    const getPipelineCallback = (material: Material, mesh: Mesh) =>
-      material.getPipeline(
-        mesh.layouts,
-        Renderer.INSTANCE_DATA_LAYOUT,
-        this.frameBindGroupLayout,
-        this.canvasFormat,
-        this.depthFormat,
-      );
-    const opaquePipelineBatches = this.batchManager.getOpaqueBatches(
-      this.visibleRenderables,
-      getPipelineCallback,
-    );
-
-    this.opaqueBatches.length = 0;
-    let currentInstanceOffset = 0;
-    for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
-      for (const drawGroup of pipelineBatch.drawGroups) {
-        if (drawGroup.instances.length === 0) continue;
-
-        this.opaqueBatches.push({
-          pipeline: getPipelineCallback(
-            drawGroup.materialInstance.material,
-            drawGroup.mesh,
-          ),
-          materialInstance: drawGroup.materialInstance,
-          mesh: drawGroup.mesh,
-          instanceCount: drawGroup.instances.length,
-          firstInstance: currentInstanceOffset,
-        });
-
-        for (const instance of drawGroup.instances) {
-          const floatOffset =
-            currentInstanceOffset * Renderer.INSTANCE_STRIDE_IN_FLOATS;
-          this.frameInstanceData.set(instance.modelMatrix, floatOffset);
-          const u32 = new Uint32Array(this.frameInstanceData.buffer);
-          const flags =
-            (instance.isUniformlyScaled ? 1 : 0) |
-            ((instance.receiveShadows ? 1 : 0) << 1);
-          u32[floatOffset + 16] = flags;
-          currentInstanceOffset++;
-        }
-      }
-    }
-    this.stats.instancesOpaque = opaqueInstanceTotal;
-    this.stats.instancesTransparent = transparentInstanceTotal;
-    Profiler.end("Render.Batching");
-
-    Profiler.begin("Render.WriteInstanceBuffer");
-    if (opaqueInstanceTotal > 0) {
-      this.device.queue.writeBuffer(
-        this.instanceBuffer,
-        0,
-        this.frameInstanceData.buffer,
-        0,
-        opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE,
-      );
-    }
-    Profiler.end("Render.WriteInstanceBuffer");
-
-    const textureView = this.context.getCurrentTexture().createView();
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
       (this.depthFormat as string) === "depth32float-stencil8";
 
     const depthAttachment: GPURenderPassDepthStencilAttachment = {
-      view: this.depthTexture.createView(),
+      view: context.depthView,
       depthClearValue: 1.0,
       depthLoadOp: "clear",
       depthStoreOp: "store",
@@ -915,10 +862,11 @@ export class Renderer {
       depthAttachment.stencilStoreOp = "discard";
     }
 
-    const scenePassEncoder = mainEncoder.beginRenderPass({
+    const scenePassEncoder = context.commandEncoder.beginRenderPass({
+      label: "MAIN_SCENE_PASS",
       colorAttachments: [
         {
-          view: textureView,
+          view: context.canvasView,
           loadOp: "clear",
           storeOp: "store",
           clearValue: {
@@ -935,42 +883,22 @@ export class Renderer {
     scenePassEncoder.setViewport(
       0,
       0,
-      this.canvas.width,
-      this.canvas.height,
+      context.canvasWidth,
+      context.canvasHeight,
       0,
       1,
     );
-    scenePassEncoder.setBindGroup(0, this.frameBindGroup);
+    scenePassEncoder.setBindGroup(0, context.frameBindGroup);
 
-    if (sceneData.skyboxMaterial) {
-      this.skyboxPass.record(
-        scenePassEncoder,
-        sceneData.skyboxMaterial,
-        this.frameBindGroupLayout,
-        this.canvasFormat,
-        this.depthFormat,
-      );
-    }
-
+    // Execute passes that render into the main scene pass
+    this.skyboxPass.execute(context, scenePassEncoder);
     Profiler.begin("Render.OpaquePass");
-    this.stats.drawsOpaque = this.opaquePass.record(
-      scenePassEncoder,
-      this.opaqueBatches,
-      this.instanceBuffer,
-    );
+    this.stats.drawsOpaque = this.opaquePass.execute(context, scenePassEncoder);
     Profiler.end("Render.OpaquePass");
-
     Profiler.begin("Render.TransparentPass");
-    this.stats.drawsTransparent = this.transparentPass.record(
+    this.stats.drawsTransparent = this.transparentPass.execute(
+      context,
       scenePassEncoder,
-      this.transparentRenderables,
-      camera,
-      this.instanceBuffer,
-      opaqueInstanceTotal * Renderer.INSTANCE_BYTE_STRIDE,
-      this.frameInstanceData,
-      this.frameBindGroupLayout,
-      this.canvasFormat,
-      this.depthFormat,
     );
     Profiler.end("Render.TransparentPass");
 
@@ -978,20 +906,29 @@ export class Renderer {
 
     if (postSceneDrawCallback) {
       this.uiPass.record(
-        mainEncoder,
-        textureView,
-        this.canvas.width,
-        this.canvas.height,
+        context.commandEncoder,
+        context.canvasView,
+        context.canvasWidth,
+        context.canvasHeight,
         postSceneDrawCallback,
       );
     }
 
-    commandBuffers.push(mainEncoder.finish());
-
+    // 6. Submit
     Profiler.begin("Render.Submit");
-    this.device.queue.submit(commandBuffers);
+    this.device.queue.submit([commandEncoder.finish()]);
     this.clusterPass.onSubmitted();
     Profiler.end("Render.Submit");
+
+    // 7. Update Stats
+    this.stats.visibleOpaque = opaqueRenderables.length;
+    this.stats.visibleTransparent = transparentRenderables.length;
+    this.stats.instancesOpaque = opaqueRenderables.length;
+    this.stats.instancesTransparent = transparentRenderables.length;
+    this.stats.lightCount = sceneData.lights.length;
+    this.stats.canvasWidth = context.canvasWidth;
+    this.stats.canvasHeight = context.canvasHeight;
+    this.clusterPass.updateStats(this.stats);
 
     this.stats.cpuTotalUs = Math.max(
       0,
@@ -1001,28 +938,10 @@ export class Renderer {
   }
 
   /**
-   * Returns the CSS size of the viewport.
-   */
-  public getViewportCssSize(): { width: number; height: number } {
-    return { width: this.cssWidth, height: this.cssHeight };
-  }
-
-  /**
-   * Returns the frame bind group layout.
+   * Returns the rendering statistics for the most recently completed frame.
    *
-   * This layout defines the structure of the bind group that is used for
-   * frame-level uniforms, such as the camera and lights.
-   */
-  public getFrameBindGroupLayout(): GPUBindGroupLayout {
-    if (!this.frameBindGroupLayout)
-      throw new Error(
-        "Frame bind group layout is not initialized. Call init() first.",
-      );
-    return this.frameBindGroupLayout;
-  }
-
-  /**
-   * Returns the rendering statistics for the last frame.
+   * @returns An object containing performance metrics like draw counts,
+   *   instance counts, and CPU timings.
    */
   public getStats(): RendererStats {
     return this.stats;

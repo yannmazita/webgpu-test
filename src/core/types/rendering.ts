@@ -13,12 +13,30 @@ import { Light, Renderable } from "@/core/types/gpu";
 import { vec4, Vec4 } from "wgpu-matrix";
 
 /**
+ * An interface representing the data properties of the scene to be rendered.
+ * This is used in the RenderContext to provide an immutable snapshot of the scene data.
+ */
+export interface ISceneRenderData {
+  readonly renderables: readonly Renderable[];
+  readonly lights: readonly Light[];
+  readonly skyboxMaterial?: MaterialInstance;
+  readonly iblComponent?: IBLComponent;
+  readonly prefilteredMipLevels: number;
+  readonly fogEnabled: boolean;
+  readonly fogColor: Vec4;
+  readonly fogDensity: number;
+  readonly fogHeight: number;
+  readonly fogHeightFalloff: number;
+  readonly fogInscatteringIntensity: number;
+}
+
+/**
  * A context object containing all necessary data and resources for a single
  * frame's render passes. It is passed immutably to each pass's `execute` method.
  */
 export interface RenderContext {
   // Immutable scene data for the frame
-  readonly sceneData: SceneRenderData;
+  readonly sceneData: ISceneRenderData;
   readonly camera: CameraComponent;
   readonly sun?: SceneSunComponent;
   readonly shadowSettings?: ShadowSettingsComponent;
@@ -34,6 +52,7 @@ export interface RenderContext {
   // Shared frame resources
   readonly frameBindGroup: GPUBindGroup;
   readonly frameBindGroupLayout: GPUBindGroupLayout;
+  readonly lightStorageBuffer: GPUBuffer;
 
   // Instance data (prepared once per frame)
   readonly instanceBuffer: GPUBuffer;
@@ -64,7 +83,7 @@ export interface RenderPass {
  * A container for all the data required by the Renderer to render a single frame.
  * This is a class with pre-allocated arrays to avoid GC pressure.
  */
-export class SceneRenderData {
+export class SceneRenderData implements ISceneRenderData {
   public renderables: Renderable[] = [];
   public lights: Light[] = [];
   public skyboxMaterial?: MaterialInstance;
@@ -86,6 +105,5 @@ export class SceneRenderData {
     this.iblComponent = undefined;
     this.prefilteredMipLevels = 0;
     this.fogEnabled = false; // Reset per frame
-    // Default fog params remain
   }
 }
