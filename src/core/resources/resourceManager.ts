@@ -16,7 +16,6 @@ import {
   createCubeMeshData,
   createIcosphereMeshData,
 } from "@/core/utils/primitives";
-import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import { getSupportedCompressedFormats } from "@/core/utils/webgpu";
 import { initBasis } from "@/core/wasm/basisModule";
@@ -44,7 +43,7 @@ export interface PBRMaterialSpec {
 }
 
 export interface EnvironmentMap {
-  skyboxMaterial: SkyboxMaterial;
+  skyboxMaterial: MaterialInstance;
   iblComponent: IBLComponent;
 }
 
@@ -416,8 +415,6 @@ export class ResourceManager {
     return instance;
   }
 
-  // ---------- Mesh resolution by handle ----------
-
   /**
    * Retrieves or creates a mesh from a resource handle.
    *
@@ -493,8 +490,6 @@ export class ResourceManager {
     this.meshToHandle.set(mesh, handle);
     return mesh;
   }
-
-  // ---------- Scene Loading ----------
 
   /**
    * Loads a glTF file and instantiates its scene graph into the ECS world.

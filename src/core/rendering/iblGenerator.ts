@@ -9,11 +9,12 @@ import {
 } from "@/core/rendering/ibl";
 import { loadEXR } from "@/loaders/exrLoader";
 import { loadHDR } from "@/loaders/hdrLoader";
-import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
+import { MaterialInstance } from "../materials/materialInstance";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { SkyboxMaterial } from "../materials/skyboxMaterial";
 
 export interface EnvironmentMapResult {
-  skyboxMaterial: SkyboxMaterial;
+  skyboxMaterial: MaterialInstance;
   iblComponent: IBLComponent;
   brdfLut: GPUTexture;
 }
@@ -170,7 +171,7 @@ export class IblGenerator {
 
     // --- 3. Create final components ---
     const skyboxTemplate = SkyboxMaterial.createTemplate(device);
-    const skyboxMaterial = skyboxTemplate.createInstance(
+    const skyboxMaterialInstance = skyboxTemplate.createInstance(
       environmentMap,
       skyboxSampler,
     );
@@ -181,6 +182,6 @@ export class IblGenerator {
       skyboxSampler,
     );
 
-    return { skyboxMaterial, iblComponent, brdfLut };
+    return { skyboxMaterial: skyboxMaterialInstance, iblComponent, brdfLut };
   }
 }
