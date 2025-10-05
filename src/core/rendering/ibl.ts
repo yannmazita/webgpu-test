@@ -8,8 +8,10 @@ import { ShaderPreprocessor } from "../shaders/preprocessor";
 
 /**
  * A container for all pre-compiled GPU resources needed for IBL generation.
- * This class centralizes the asynchronous and expensive creation of shaders and pipelines.
- * @internal
+ *
+ * This class centralizes the asynchronous and expensive creation of shaders and
+ * pipelines. An instance of this class should be created and initialized once,
+ * then passed to the stateless IBL generation functions.
  */
 export class IblPipelines {
   public equirectToCubemapPipeline!: GPUComputePipeline;
@@ -22,6 +24,11 @@ export class IblPipelines {
   private device: GPUDevice;
   private preprocessor: ShaderPreprocessor;
 
+  /**
+   * Constructs a new IblPipelines instance.
+   * @param device The WebGPU device used to create GPU resources.
+   * @param preprocessor The shader preprocessor for resolving includes.
+   */
   constructor(device: GPUDevice, preprocessor: ShaderPreprocessor) {
     this.device = device;
     this.preprocessor = preprocessor;
@@ -117,7 +124,12 @@ export class IblPipelines {
 }
 
 /**
- * Converts an equirectangular HDR texture to a cubemap texture using a compute shader.
+ * Converts an equirectangular HDR texture to a cubemap texture.
+ *
+ * @remarks
+ * This is a stateless function that executes a compute shader pass. It does not
+ * create or cache any pipelines itself.
+ *
  * @param device The GPU device.
  * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @param equirectTexture The source HDR texture.
@@ -177,6 +189,11 @@ export function equirectangularToCubemap(
 
 /**
  * Generates a diffuse irradiance map from an environment cubemap.
+ *
+ * @remarks
+ * This is a stateless function that executes a compute shader pass to convolve
+ * the environment map into a diffuse irradiance probe.
+ *
  * @param device The GPU device.
  * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @param environmentMap The source environment cubemap.
@@ -227,13 +244,18 @@ export function generateIrradianceMap(
 }
 
 /**
- * Generates a prefiltered specular environment cubemap using a compute shader.
+ * Generates a pre-filtered specular environment cubemap.
+ *
+ * @remarks
+ * This stateless function executes a series of compute passes, one for each
+ * mip level of the output texture, to generate the specular IBL probe.
+ *
  * @param device The GPU device.
  * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @param environmentMap Source environment cubemap.
  * @param sampler Sampler used when sampling the environment map.
- * @param baseSize Desired cube face size for the prefiltered output at mip level 0.
- * @returns The generated prefiltered cubemap GPUTexture.
+ * @param baseSize Desired cube face size for the pre-filtered output at mip level 0.
+ * @returns The generated pre-filtered cubemap GPUTexture.
  */
 export function generatePrefilteredMap(
   device: GPUDevice,
@@ -303,6 +325,11 @@ export function generatePrefilteredMap(
 
 /**
  * Generates the BRDF integration lookup table.
+ *
+ * @remarks
+ * This is a stateless function that executes a compute shader pass to generate
+ * the 2D LUT used to approximate the BRDF component of the PBR specular term.
+ *
  * @param device The GPU device.
  * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @returns The generated 2D LUT GPUTexture.

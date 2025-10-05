@@ -38,6 +38,11 @@ export class IblGenerator {
   private pipelines: IblPipelines;
   private skyboxInitialized = false;
 
+  /**
+   * Constructs a new IblGenerator.
+   * @param device The WebGPU device.
+   * @param preprocessor The shader preprocessor.
+   */
   constructor(device: GPUDevice, preprocessor: ShaderPreprocessor) {
     this.device = device;
     this.preprocessor = preprocessor;
@@ -58,15 +63,12 @@ export class IblGenerator {
    * @remarks
    * This method performs the following steps:
    * 1.  Loads the source `.hdr` or `.exr` file.
-   * 2.  Converts the equirectangular image into a base environment cubemap.
-   * 3.  Creates a `SkyboxMaterial` instance for rendering the environment.
-   * 4.  Generates the diffuse irradiance map.
-   * 5.  Generates the specular pre-filtered mipmapped environment map.
-   * 6.  Generates the BRDF lookup table (LUT) if one is not provided, which can be
-   *     cached and reused across all environment maps.
-   * 7.  Packages the results into an `IBLComponent` and a `SkyboxMaterial`.
+   * 2.  Delegates to stateless functions to convert the image to a cubemap.
+   * 3.  Delegates to generate the irradiance and pre-filtered maps.
+   * 4.  Generates the BRDF lookup table (LUT) if one is not provided.
+   * 5.  Packages the results into an `IBLComponent` and a `SkyboxMaterial`.
    *
-   * @param options The set of parameters for IBL generation.
+   * @param options The set of parameters for IBL generation, including the source URL.
    * @returns A promise that resolves to an `EnvironmentMapResult` containing all
    *     the generated GPU resources.
    * @throws If the source image format is not `.hdr` or `.exr`.
