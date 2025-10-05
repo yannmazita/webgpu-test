@@ -6,86 +6,130 @@ import brdfLookupTableUrl from "@/core/shaders/brdf_lookup_table.wgsl?url";
 import { Shader } from "../shaders/shader";
 import { ShaderPreprocessor } from "../shaders/preprocessor";
 
-// Module-level cache for shaders and pipelines
-let equirectToCubemapShader: Shader | null = null;
-let equirectToCubemapPipeline: GPUComputePipeline | null = null;
+/**
+ * A container for all pre-compiled GPU resources needed for IBL generation.
+ * This class centralizes the asynchronous and expensive creation of shaders and pipelines.
+ * @internal
+ */
+export class IblPipelines {
+  public equirectToCubemapPipeline!: GPUComputePipeline;
+  public equirectToCubemapBGL!: GPUBindGroupLayout;
+  public irradiancePipeline!: GPUComputePipeline;
+  public prefilterPipeline!: GPUComputePipeline;
+  public prefilterParamsBuffer!: GPUBuffer;
+  public brdfLookupTablePipeline!: GPUComputePipeline;
 
-let irradianceShader: Shader | null = null;
-let irradiancePipeline: GPUComputePipeline | null = null;
+  private device: GPUDevice;
+  private preprocessor: ShaderPreprocessor;
 
-let prefilterShader: Shader | null = null;
-let prefilterPipeline: GPUComputePipeline | null = null;
-let prefilterParamsBuffer: GPUBuffer | null = null;
+  constructor(device: GPUDevice, preprocessor: ShaderPreprocessor) {
+    this.device = device;
+    this.preprocessor = preprocessor;
+  }
 
-let brdfLookupTableShader: Shader | null = null;
-let brdfLookupTablePipeline: GPUComputePipeline | null = null;
+  /**
+   * Compiles all shaders and creates all compute pipelines asynchronously.
+   * This should be called once before any IBL generation is performed.
+   */
+  public async initialize(): Promise<void> {
+    const device = this.device;
+    const preprocessor = this.preprocessor;
 
-let equirectToCubemapBGL: GPUBindGroupLayout | null = null;
+    // --- Equirectangular to Cubemap ---
+    this.equirectToCubemapBGL = device.createBindGroupLayout({
+      label: "EQUIRECT_TO_CUBEMAP_BGL",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: {
+            access: "write-only",
+            format: "rgba16float",
+            viewDimension: "2d-array",
+          },
+        },
+      ],
+    });
+    const equirectToCubemapShader = await Shader.fromUrl(
+      device,
+      preprocessor,
+      equirectToCubemapUrl,
+      "EQUIRECT_TO_CUBEMAP",
+    );
+    const equirectPL = device.createPipelineLayout({
+      label: "EQUIRECT_TO_CUBEMAP_PL",
+      bindGroupLayouts: [this.equirectToCubemapBGL],
+    });
+    this.equirectToCubemapPipeline = await device.createComputePipelineAsync({
+      label: "EQUIRECT_TO_CUBEMAP_PIPELINE",
+      layout: equirectPL,
+      compute: { module: equirectToCubemapShader.module, entryPoint: "main" },
+    });
+
+    // --- Irradiance ---
+    const irradianceShader = await Shader.fromUrl(
+      device,
+      preprocessor,
+      irradianceUrl,
+      "IRRADIANCE_SHADER",
+    );
+    this.irradiancePipeline = await device.createComputePipelineAsync({
+      label: "IRRADIANCE_PIPELINE",
+      layout: "auto",
+      compute: { module: irradianceShader.module, entryPoint: "main" },
+    });
+
+    // --- Prefilter ---
+    const prefilterShader = await Shader.fromUrl(
+      device,
+      preprocessor,
+      prefilterUrl,
+      "PREFILTER_SHADER",
+    );
+    this.prefilterPipeline = await device.createComputePipelineAsync({
+      label: "PREFILTER_PIPELINE",
+      layout: "auto",
+      compute: { module: prefilterShader.module, entryPoint: "main" },
+    });
+    this.prefilterParamsBuffer = device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // --- BRDF LUT ---
+    const brdfLookupTableShader = await Shader.fromUrl(
+      device,
+      preprocessor,
+      brdfLookupTableUrl,
+      "BRDF_LUT_SHADER",
+    );
+    this.brdfLookupTablePipeline = await device.createComputePipelineAsync({
+      label: "BRDF_LUT_PIPELINE",
+      layout: "auto",
+      compute: { module: brdfLookupTableShader.module, entryPoint: "main" },
+    });
+  }
+}
 
 /**
  * Converts an equirectangular HDR texture to a cubemap texture using a compute shader.
  * @param device The GPU device.
- * @param preprocessor The shader preprocessor.
+ * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @param equirectTexture The source HDR texture.
  * @param cubemapSize The desired size for each face of the cubemap.
  * @returns The generated cubemap GPUTexture.
  */
-export async function equirectangularToCubemap(
+export function equirectangularToCubemap(
   device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
+  pipelines: IblPipelines,
   equirectTexture: GPUTexture,
   cubemapSize: number,
-): Promise<GPUTexture> {
-  // Ensure shared shader/pipeline/BGL are initialized
-  equirectToCubemapBGL ??= device.createBindGroupLayout({
-    label: "EQUIRECT_TO_CUBEMAP_BGL",
-    entries: [
-      // @binding(0) equirectangularTexture: texture_2d<f32>
-      {
-        binding: 0,
-        visibility: GPUShaderStage.COMPUTE,
-        texture: {
-          sampleType: "unfilterable-float",
-          viewDimension: "2d",
-        },
-      },
-      // @binding(1) cubemapTexture: texture_storage_2d_array<rgba16float, write>
-      {
-        binding: 1,
-        visibility: GPUShaderStage.COMPUTE,
-        storageTexture: {
-          access: "write-only",
-          format: "rgba16float",
-          viewDimension: "2d-array",
-        },
-      },
-    ],
-  });
-
-  equirectToCubemapShader ??= await Shader.fromUrl(
-    device,
-    preprocessor,
-    equirectToCubemapUrl,
-    "EQUIRECT_TO_CUBEMAP",
-    "main",
-    "main",
-  );
-
-  if (!equirectToCubemapPipeline) {
-    const pl = device.createPipelineLayout({
-      label: "EQUIRECT_TO_CUBEMAP_PL",
-      bindGroupLayouts: [equirectToCubemapBGL],
-    });
-    equirectToCubemapPipeline = device.createComputePipeline({
-      label: "EQUIRECT_TO_CUBEMAP_PIPELINE",
-      layout: pl,
-      compute: {
-        module: equirectToCubemapShader.module,
-        entryPoint: "main",
-      },
-    });
-  }
-
+): GPUTexture {
   const cubemapTexture = device.createTexture({
     label: "IBL_ENVIRONMENT_CUBEMAP",
     size: [cubemapSize, cubemapSize, 6],
@@ -101,7 +145,7 @@ export async function equirectangularToCubemap(
 
   const bindGroup = device.createBindGroup({
     label: "EQUIRECT_TO_CUBEMAP_BG",
-    layout: equirectToCubemapBGL,
+    layout: pipelines.equirectToCubemapBGL,
     entries: [
       { binding: 0, resource: equirectTexture.createView() },
       {
@@ -121,7 +165,7 @@ export async function equirectangularToCubemap(
   const passEncoder = commandEncoder.beginComputePass({
     label: "EQUIRECT_TO_CUBEMAP_PASS",
   });
-  passEncoder.setPipeline(equirectToCubemapPipeline);
+  passEncoder.setPipeline(pipelines.equirectToCubemapPipeline);
   passEncoder.setBindGroup(0, bindGroup);
   const wg = Math.ceil(cubemapSize / 8);
   passEncoder.dispatchWorkgroups(wg, wg, 6);
@@ -134,33 +178,18 @@ export async function equirectangularToCubemap(
 /**
  * Generates a diffuse irradiance map from an environment cubemap.
  * @param device The GPU device.
- * @param preprocessor The shader preprocessor.
+ * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @param environmentMap The source environment cubemap.
  * @param sampler A sampler for the environment map.
  * @returns The generated irradiance map GPUTexture.
  */
-export async function generateIrradianceMap(
+export function generateIrradianceMap(
   device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
+  pipelines: IblPipelines,
   environmentMap: GPUTexture,
   sampler: GPUSampler,
-): Promise<GPUTexture> {
+): GPUTexture {
   const IRRADIANCE_MAP_SIZE = 32;
-
-  irradianceShader ??= await Shader.fromUrl(
-    device,
-    preprocessor,
-    irradianceUrl,
-    "IRRADIANCE_SHADER",
-    "main",
-    "main",
-  );
-
-  irradiancePipeline ??= device.createComputePipeline({
-    label: "IRRADIANCE_PIPELINE",
-    layout: "auto",
-    compute: { module: irradianceShader.module, entryPoint: "main" },
-  });
 
   const irradianceMap = device.createTexture({
     label: "IBL_IRRADIANCE_MAP",
@@ -171,7 +200,7 @@ export async function generateIrradianceMap(
   });
 
   const bindGroup = device.createBindGroup({
-    layout: irradiancePipeline.getBindGroupLayout(0),
+    layout: pipelines.irradiancePipeline.getBindGroupLayout(0),
     entries: [
       {
         binding: 0,
@@ -187,7 +216,7 @@ export async function generateIrradianceMap(
 
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
-  passEncoder.setPipeline(irradiancePipeline);
+  passEncoder.setPipeline(pipelines.irradiancePipeline);
   passEncoder.setBindGroup(0, bindGroup);
   const workgroupCount = Math.ceil(IRRADIANCE_MAP_SIZE / 8);
   passEncoder.dispatchWorkgroups(workgroupCount, workgroupCount, 6);
@@ -198,60 +227,24 @@ export async function generateIrradianceMap(
 }
 
 /**
- * Generates a prefiltered specular environment cubemap using a compute shader (Specular IBL).
- *
- * This takes an environment cubemap (typically produced from an equirectangular HDR)
- * and builds a mipmapped cubemap where each mip level encodes increasing roughness.
- * The result is sampled in PBR shading to approximate the specular term efficiently.
- *
- * - The provided environmentMap must be a cubemap texture (viewDimension="cube").
- * - baseSize should be the width/height (in texels) of the desired prefiltered map
- *   at mip level 0. It should be a positive integer (preferably power-of-two).
- * - The number of mip levels is derived as floor(log2(baseSize)) + 1.
- * - Each mip level is processed in a separate compute dispatch targeting the corresponding
- *   storage view on the destination cubemap.
- *
- * @param device The active GPUDevice used to create resources and submit work.
- * @param preprocessor WGSL preprocessor used to resolve shader includes; compiled once and cached.
- * @param environmentMap Source environment cubemap (texture_cube<f32> in WGSL). Only sampled (read-only).
+ * Generates a prefiltered specular environment cubemap using a compute shader.
+ * @param device The GPU device.
+ * @param pipelines A pre-initialized container with the required GPU pipelines.
+ * @param environmentMap Source environment cubemap.
  * @param sampler Sampler used when sampling the environment map.
  * @param baseSize Desired cube face size for the prefiltered output at mip level 0.
- * @returns A Promise resolving to the generated prefiltered cubemap GPUTexture.
+ * @returns The generated prefiltered cubemap GPUTexture.
  */
-export async function generatePrefilteredMap(
+export function generatePrefilteredMap(
   device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
+  pipelines: IblPipelines,
   environmentMap: GPUTexture,
   sampler: GPUSampler,
   baseSize: number,
-): Promise<GPUTexture> {
-  // Lazy-load and cache the shader/pipeline for prefiltering
-  prefilterShader ??= await Shader.fromUrl(
-    device,
-    preprocessor,
-    prefilterUrl,
-    "PREFILTER_SHADER",
-    "main",
-    "main",
-  );
-
-  prefilterPipeline ??= device.createComputePipeline({
-    label: "PREFILTER_PIPELINE",
-    layout: "auto",
-    compute: { module: prefilterShader.module, entryPoint: "main" },
-  });
-
-  // Tiny uniform buffer to pass the current roughness per mip
-  prefilterParamsBuffer ??= device.createBuffer({
-    size: 4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-
-  // Compute the number of mip levels from the requested base size
+): GPUTexture {
   const clampedBase = Math.max(1, Math.floor(baseSize));
   const maxMipLevels = Math.floor(Math.log2(clampedBase)) + 1;
 
-  // Destination prefiltered cubemap (storage-binding for compute writes + sampling later)
   const prefilteredMap = device.createTexture({
     label: "IBL_PREFILTERED_MAP",
     size: [clampedBase, clampedBase, 6],
@@ -263,12 +256,10 @@ export async function generatePrefilteredMap(
 
   const commandEncoder = device.createCommandEncoder();
 
-  // For each mip level, set roughness in [0..1], create a view into that single mip,
-  // and dispatch the compute shader over all faces.
   for (let mip = 0; mip < maxMipLevels; mip++) {
-    const roughness = maxMipLevels > 1 ? mip / (maxMipLevels - 1) : 0.0; // avoid NaN if only 1 mip
+    const roughness = maxMipLevels > 1 ? mip / (maxMipLevels - 1) : 0.0;
     device.queue.writeBuffer(
-      prefilterParamsBuffer,
+      pipelines.prefilterParamsBuffer,
       0,
       new Float32Array([roughness]),
     );
@@ -277,7 +268,7 @@ export async function generatePrefilteredMap(
 
     const bindGroup = device.createBindGroup({
       label: `PREFILTER_BG_MIP_${mip}`,
-      layout: prefilterPipeline.getBindGroupLayout(0),
+      layout: pipelines.prefilterPipeline.getBindGroupLayout(0),
       entries: [
         {
           binding: 0,
@@ -292,17 +283,17 @@ export async function generatePrefilteredMap(
             mipLevelCount: 1,
           }),
         },
-        { binding: 3, resource: { buffer: prefilterParamsBuffer } },
+        { binding: 3, resource: { buffer: pipelines.prefilterParamsBuffer } },
       ],
     });
 
     const pass = commandEncoder.beginComputePass({
       label: `PREFILTER_PASS_MIP_${mip}`,
     });
-    pass.setPipeline(prefilterPipeline);
+    pass.setPipeline(pipelines.prefilterPipeline);
     pass.setBindGroup(0, bindGroup);
     const workgroupCount = Math.ceil(mipSize / 8);
-    pass.dispatchWorkgroups(workgroupCount, workgroupCount, 6); // 6 cubemap faces
+    pass.dispatchWorkgroups(workgroupCount, workgroupCount, 6);
     pass.end();
   }
 
@@ -313,29 +304,14 @@ export async function generatePrefilteredMap(
 /**
  * Generates the BRDF integration lookup table.
  * @param device The GPU device.
- * @param preprocessor The shader preprocessor.
+ * @param pipelines A pre-initialized container with the required GPU pipelines.
  * @returns The generated 2D LUT GPUTexture.
  */
-export async function generateBrdfLut(
+export function generateBrdfLut(
   device: GPUDevice,
-  preprocessor: ShaderPreprocessor,
-): Promise<GPUTexture> {
+  pipelines: IblPipelines,
+): GPUTexture {
   const LUT_SIZE = 512;
-
-  brdfLookupTableShader ??= await Shader.fromUrl(
-    device,
-    preprocessor,
-    brdfLookupTableUrl,
-    "BRDF_LUT_SHADER",
-    "main",
-    "main",
-  );
-
-  brdfLookupTablePipeline ??= device.createComputePipeline({
-    label: "BRDF_LUT_PIPELINE",
-    layout: "auto",
-    compute: { module: brdfLookupTableShader.module, entryPoint: "main" },
-  });
 
   const brdfLookupTable = device.createTexture({
     label: "IBL_BRDF_LUT",
@@ -345,13 +321,13 @@ export async function generateBrdfLut(
   });
 
   const bindGroup = device.createBindGroup({
-    layout: brdfLookupTablePipeline.getBindGroupLayout(0),
+    layout: pipelines.brdfLookupTablePipeline.getBindGroupLayout(0),
     entries: [{ binding: 0, resource: brdfLookupTable.createView() }],
   });
 
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
-  passEncoder.setPipeline(brdfLookupTablePipeline);
+  passEncoder.setPipeline(pipelines.brdfLookupTablePipeline);
   passEncoder.setBindGroup(0, bindGroup);
   const workgroupCount = Math.ceil(LUT_SIZE / 8);
   passEncoder.dispatchWorkgroups(workgroupCount, workgroupCount, 1);

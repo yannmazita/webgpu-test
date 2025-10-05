@@ -5,6 +5,7 @@ import {
   generateBrdfLut,
   generateIrradianceMap,
   generatePrefilteredMap,
+  IblPipelines,
 } from "@/core/rendering/ibl";
 import { loadEXR } from "@/loaders/exrLoader";
 import { loadHDR } from "@/loaders/hdrLoader";
@@ -18,22 +19,38 @@ export interface EnvironmentMapResult {
 }
 
 export interface IblGeneratorOptions {
-  device: GPUDevice;
-  preprocessor: ShaderPreprocessor;
   url: string;
   cubemapSize?: number;
   brdfLut?: GPUTexture | null;
 }
 
 /**
- * A stateless utility class for generating Image-Based Lighting (IBL) resources.
+ * A class for generating Image-Based Lighting (IBL) resources.
  *
  * This class orchestrates the entire pipeline for creating an environment map,
  * including loading the source image, converting it to a cubemap, and
  * pre-computing the necessary textures for physically-based rendering.
+ * It owns the pre-compiled GPU pipelines required for these operations.
  */
 export class IblGenerator {
-  private static skyboxInitialized = false;
+  private device: GPUDevice;
+  private preprocessor: ShaderPreprocessor;
+  private pipelines: IblPipelines;
+  private skyboxInitialized = false;
+
+  constructor(device: GPUDevice, preprocessor: ShaderPreprocessor) {
+    this.device = device;
+    this.preprocessor = preprocessor;
+    this.pipelines = new IblPipelines(device, preprocessor);
+  }
+
+  /**
+   * Initializes all necessary GPU pipelines for IBL generation.
+   * This must be called before `generate`.
+   */
+  public async initialize(): Promise<void> {
+    await this.pipelines.initialize();
+  }
 
   /**
    * Generates a complete set of IBL resources from a single equirectangular source texture.
@@ -54,16 +71,17 @@ export class IblGenerator {
    *     the generated GPU resources.
    * @throws If the source image format is not `.hdr` or `.exr`.
    */
-  public static async generate(
+  public async generate(
     options: IblGeneratorOptions,
   ): Promise<EnvironmentMapResult> {
-    const { device, preprocessor, url, cubemapSize = 512 } = options;
+    const { url, cubemapSize = 512 } = options;
+    const device = this.device;
     console.log(
       `[IblGenerator] Creating environment map from ${url}, size=${cubemapSize}`,
     );
 
     if (!this.skyboxInitialized) {
-      await SkyboxMaterial.initialize(device, preprocessor);
+      await SkyboxMaterial.initialize(device, this.preprocessor);
       this.skyboxInitialized = true;
     }
 
@@ -85,7 +103,6 @@ export class IblGenerator {
       };
     } else if (url.endsWith(".exr")) {
       const exrData = await loadEXR(url);
-      // Flip EXR data vertically as its origin is bottom-left
       const { width, height, data } = exrData;
       const flippedData = new Float32Array(data.length);
       const rowSize = width * 4;
@@ -118,13 +135,13 @@ export class IblGenerator {
     );
 
     // --- 2. Convert to cubemap and pre-compute IBL textures ---
-    const environmentMap = await equirectangularToCubemap(
+    const environmentMap = equirectangularToCubemap(
       device,
-      preprocessor,
+      this.pipelines,
       equirectTexture,
       cubemapSize,
     );
-    equirectTexture.destroy(); // Source texture is no longer needed
+    equirectTexture.destroy();
 
     const skyboxSampler = device.createSampler({
       magFilter: "linear",
@@ -135,18 +152,18 @@ export class IblGenerator {
     const [irradianceMap, prefilteredMap, brdfLut] = await Promise.all([
       generateIrradianceMap(
         device,
-        preprocessor,
+        this.pipelines,
         environmentMap,
         skyboxSampler,
       ),
       generatePrefilteredMap(
         device,
-        preprocessor,
+        this.pipelines,
         environmentMap,
         skyboxSampler,
         cubemapSize,
       ),
-      options.brdfLut ?? generateBrdfLut(device, preprocessor),
+      options.brdfLut ?? generateBrdfLut(device, this.pipelines),
     ]);
 
     // --- 3. Create final components ---

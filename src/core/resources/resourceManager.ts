@@ -64,6 +64,7 @@ export class ResourceManager {
   private preprocessor: ShaderPreprocessor;
   private brdfLut: GPUTexture | null = null;
   private supportedCompressedFormats: Set<GPUTextureFormat>;
+  private iblGenerator: IblGenerator | null = null;
   private meshToHandle = new WeakMap<Mesh, ResourceHandle<Mesh>>();
   private materialInstanceToSpec = new WeakMap<
     MaterialInstance,
@@ -361,15 +362,22 @@ export class ResourceManager {
     url: string,
     cubemapSize = 512,
   ): Promise<EnvironmentMap> {
-    const result = await IblGenerator.generate({
-      device: this.renderer.device,
-      preprocessor: this.preprocessor,
+    // Lazily initialize the IBL generator and its pipelines once.
+    if (!this.iblGenerator) {
+      this.iblGenerator = new IblGenerator(
+        this.renderer.device,
+        this.preprocessor,
+      );
+      await this.iblGenerator.initialize();
+    }
+
+    const result = await this.iblGenerator.generate({
       url: url,
       cubemapSize: cubemapSize,
       brdfLut: this.brdfLut,
     });
 
-    // Cache the BRDF LUT if it was newly generated
+    // Cache the BRDF LUT as it is scene-independent.
     this.brdfLut = result.brdfLut;
 
     return {
