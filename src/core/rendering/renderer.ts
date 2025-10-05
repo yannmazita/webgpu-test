@@ -2,7 +2,6 @@
 import { Light, Renderable } from "@/core/types/gpu";
 import { SceneRenderData, RenderContext } from "@/core/types/rendering";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
-import { BatchManager } from "@/core/rendering/batchManager";
 import { UniformManager } from "@/core/rendering/uniformManager";
 import { Profiler } from "@/core/utils/profiler";
 import { testAABBFrustum, transformAABB } from "@/core/utils/bounds";
@@ -325,7 +324,6 @@ export class Renderer {
       ],
     });
 
-    this.batchManager = new BatchManager(100);
     this.uniformManager = new UniformManager();
     this.instanceBufferManager = new InstanceBufferManager(this.device);
 

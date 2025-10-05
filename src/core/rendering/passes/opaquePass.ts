@@ -4,7 +4,7 @@ import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { Renderer } from "@/core/rendering/renderer";
 import { RenderContext, RenderPass } from "@/core/types/rendering";
-import { BatchManager } from "../batchManager";
+import { BatchManager } from "@/core/rendering/batchManager";
 import { Material } from "@/core/materials/material";
 
 /**
@@ -87,26 +87,10 @@ export class OpaquePass implements RenderPass {
 
     // 4. Convert to a flat list of draw batches, calculating instance offsets
     const batches: DrawBatch[] = [];
+    let currentInstanceOffset = 0;
     for (const [, pipelineBatch] of opaquePipelineBatches.entries()) {
       for (const drawGroup of pipelineBatch.drawGroups) {
         if (drawGroup.instances.length === 0) continue;
-
-        // Find the index of the first instance of this group within the original filtered list.
-        // This is crucial for calculating the correct offset into the instance buffer.
-        const firstRenderable = opaqueRenderables.find(
-          (r) =>
-            r.mesh === drawGroup.mesh &&
-            r.material === drawGroup.materialInstance,
-        );
-        const firstInstanceIndex = firstRenderable
-          ? opaqueRenderables.indexOf(firstRenderable)
-          : -1;
-        if (firstInstanceIndex === -1) {
-          console.warn(
-            "Could not find first instance for batching, skipping draw group.",
-          );
-          continue;
-        }
 
         batches.push({
           pipeline: getPipelineCallback(
@@ -117,8 +101,11 @@ export class OpaquePass implements RenderPass {
           mesh: drawGroup.mesh,
           instanceCount: drawGroup.instances.length,
           firstInstance:
-            context.instanceAllocations.opaques.offset + firstInstanceIndex,
+            context.instanceAllocations.opaques.offset + currentInstanceOffset,
         });
+
+        // Increment the offset by the number of instances in this group for the next one.
+        currentInstanceOffset += drawGroup.instances.length;
       }
     }
 
