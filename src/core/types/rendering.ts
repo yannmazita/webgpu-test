@@ -1,14 +1,89 @@
 // src/core/types/rendering.ts
-import { IBLComponent } from "../ecs/components/iblComponent";
-import { MaterialInstance } from "../materials/materialInstance";
-import { Light, Renderable } from "./gpu";
-import { Vec4, vec4 } from "wgpu-matrix";
+import {
+  SceneSunComponent,
+  ShadowSettingsComponent,
+} from "@/core/ecs/components/sunComponent";
+import { CameraComponent } from "@/core/ecs/components/cameraComponent";
+import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
+import { InstanceAllocations } from "@/core/rendering/instanceBufferManager";
+import { ShadowSubsystem } from "@/core/rendering/shadow";
+import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { MaterialInstance } from "@/core/materials/materialInstance";
+import { Light, Renderable } from "@/core/types/gpu";
+import { vec4, Vec4 } from "wgpu-matrix";
+
+/**
+ * An interface representing the data properties of the scene to be rendered.
+ * This is used in the RenderContext to provide an immutable snapshot of the scene data.
+ */
+export interface ISceneRenderData {
+  readonly renderables: readonly Renderable[];
+  readonly lights: readonly Light[];
+  readonly skyboxMaterial?: MaterialInstance;
+  readonly iblComponent?: IBLComponent;
+  readonly prefilteredMipLevels: number;
+  readonly fogEnabled: boolean;
+  readonly fogColor: Vec4;
+  readonly fogDensity: number;
+  readonly fogHeight: number;
+  readonly fogHeightFalloff: number;
+  readonly fogInscatteringIntensity: number;
+}
+
+/**
+ * A context object containing all necessary data and resources for a single
+ * frame's render passes. It is passed immutably to each pass's `execute` method.
+ */
+export interface RenderContext {
+  // Immutable scene data for the frame
+  readonly sceneData: ISceneRenderData;
+  readonly camera: CameraComponent;
+  readonly sun?: SceneSunComponent;
+  readonly shadowSettings?: ShadowSettingsComponent;
+
+  // Core GPU resources (read-only references)
+  readonly device: GPUDevice;
+  readonly commandEncoder: GPUCommandEncoder;
+  readonly canvasView: GPUTextureView;
+  readonly depthView: GPUTextureView;
+  readonly canvasFormat: GPUTextureFormat;
+  readonly depthFormat: GPUTextureFormat;
+
+  // Shared frame resources
+  readonly frameBindGroup: GPUBindGroup;
+  readonly frameBindGroupLayout: GPUBindGroupLayout;
+  readonly lightStorageBuffer: GPUBuffer;
+
+  // Instance data (prepared once per frame)
+  readonly instanceBuffer: GPUBuffer;
+  readonly instanceAllocations: InstanceAllocations;
+
+  // Subsystems (for passes that need direct access)
+  readonly clusterBuilder: ClusterBuilder;
+  readonly shadowSubsystem: ShadowSubsystem;
+
+  // Canvas dimensions
+  readonly canvasWidth: number;
+  readonly canvasHeight: number;
+}
+
+/**
+ * Interface for a self-contained rendering pass.
+ */
+export interface RenderPass {
+  /**
+   * Executes the render pass.
+   * @param context The immutable render context for the frame.
+   * @param passEncoder An optional encoder for passes that render into the main scene render pass.
+   */
+  execute(context: RenderContext, passEncoder?: GPURenderPassEncoder): void;
+}
 
 /**
  * A container for all the data required by the Renderer to render a single frame.
  * This is a class with pre-allocated arrays to avoid GC pressure.
  */
-export class SceneRenderData {
+export class SceneRenderData implements ISceneRenderData {
   public renderables: Renderable[] = [];
   public lights: Light[] = [];
   public skyboxMaterial?: MaterialInstance;
@@ -30,6 +105,5 @@ export class SceneRenderData {
     this.iblComponent = undefined;
     this.prefilteredMipLevels = 0;
     this.fogEnabled = false; // Reset per frame
-    // Default fog params remain
   }
 }

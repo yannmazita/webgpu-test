@@ -485,6 +485,7 @@ export class ShadowSubsystem {
     mapSize: number,
     renderables: Renderable[],
     instanceBuffer: GPUBuffer,
+    instanceByteOffset: number,
   ): void {
     if (!this.pipeline || renderables.length === 0) {
       return;
@@ -530,14 +531,11 @@ export class ShadowSubsystem {
         pass.setVertexBuffer(
           mesh.layouts.length,
           instanceBuffer,
-          drawnCount * this.instanceByteStride,
+          instanceByteOffset + drawnCount * this.instanceByteStride,
         );
 
         if (mesh.indexBuffer) {
-          pass.setIndexBuffer(
-            mesh.indexBuffer,
-            mesh.indexFormat ?? "uint32",
-          );
+          pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat ?? "uint32");
           pass.drawIndexed(mesh.indexCount ?? 0, count, 0, 0, 0);
         } else {
           pass.draw(mesh.vertexCount, count, 0, 0);
