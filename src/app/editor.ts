@@ -149,6 +149,7 @@ function handleKeyUp(e: KeyboardEvent): void {
 }
 
 function handleMouseUp(e: MouseEvent): void {
+  console.log(`[Editor] handleMouseUp: button=${e.button}, state=false`);
   updateMouseButtonState(inputContext, e.button, false);
 }
 
@@ -211,6 +212,7 @@ function handleMouseMove(e: MouseEvent): void {
 }
 
 function handleMouseDown(e: MouseEvent): void {
+  console.log(`[Editor] handleMouseDown: button=${e.button}, state=true`);
   updateMouseButtonState(inputContext, e.button, true);
 
   // If pointer is locked, the click is for gameplay (handled by worker).

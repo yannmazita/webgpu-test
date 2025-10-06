@@ -273,6 +273,22 @@ function processCommands(): void {
       }
 
       if (colliderDesc) {
+        // Set up collision groups based on Rapier documentation
+        const GROUP_PLAYER = 0x0001;
+        const GROUP_SCENERY = 0x0002;
+
+        if (isPlayer) {
+          // Player is in group 1, and will interact with things in group 2
+          colliderDesc.setCollisionGroups(
+            (GROUP_PLAYER << 16) | GROUP_SCENERY,
+          );
+        } else {
+          // Scenery is in group 2, and will interact with things in group 1
+          colliderDesc.setCollisionGroups(
+            (GROUP_SCENERY << 16) | GROUP_PLAYER,
+          );
+        }
+
         world.createCollider(colliderDesc, body);
         // If this is the player, create and configure a character controller.
         if (isPlayer) {
@@ -337,6 +353,7 @@ function processCommands(): void {
       }
       processedAny = true;
     } else if (type === CMD_WEAPON_RAYCAST) {
+      console.log(`[PhysicsWorker] Received CMD_WEAPON_RAYCAST for entity ${physId}.`);
       if (raycastResultsI32 && raycastResultsF32) {
         const origin = {
           x: paramsView[0],
@@ -346,12 +363,26 @@ function processCommands(): void {
         const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
         const maxToi = paramsView[6];
         const ray = new RAPIER.Ray(origin, dir);
-        const hit = world.castRay(ray, maxToi, true);
+
+        // Set up collision groups for the raycast filter
+        const GROUP_PLAYER = 0x0001;
+        const GROUP_SCENERY = 0x0002;
+        // The ray is in group 1, and should only hit things in group 2
+        const filterGroups = (GROUP_PLAYER << 16) | GROUP_SCENERY;
+
+        const hit = world.castRayAndGetNormal(
+          ray,
+          maxToi,
+          true,
+          undefined, // filterFlags
+          filterGroups, // filterGroups
+        );
 
         if (hit) {
           const hitPoint = ray.pointAt(hit.toi);
           const hitBody = world.getCollider(hit.colliderHandle)?.parent();
-          const hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
+          const hitEntityId = hitBody ? bodyToEntity.get(hitBody) ?? 0 : 0;
+          console.log(`[PhysicsWorker] Raycast HIT entity ${hitEntityId} at distance ${hit.toi}.`);
 
           Atomics.store(
             raycastResultsI32,
@@ -363,6 +394,7 @@ function processCommands(): void {
             RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
           );
         } else {
+          console.log("[PhysicsWorker] Raycast MISSED.");
           // No hit, store 0
           Atomics.store(
             raycastResultsI32,
@@ -389,9 +421,6 @@ function processCommands(): void {
   }
 }
 
-/* ---------------------------------------------
-   Step + Snapshot
-----------------------------------------------*/
 
 function stepWorld(dt: number): void {
   if (!world) return;
