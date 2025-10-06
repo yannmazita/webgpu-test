@@ -273,23 +273,11 @@ function processCommands(): void {
       }
 
       if (colliderDesc) {
-        // Set up collision groups based on Rapier documentation
-        const GROUP_PLAYER = 0x0001;
-        const GROUP_SCENERY = 0x0002;
-
-        if (isPlayer) {
-          // Player is in group 1, and will interact with things in group 2
-          colliderDesc.setCollisionGroups(
-            (GROUP_PLAYER << 16) | GROUP_SCENERY,
-          );
-        } else {
-          // Scenery is in group 2, and will interact with things in group 1
-          colliderDesc.setCollisionGroups(
-            (GROUP_SCENERY << 16) | GROUP_PLAYER,
-          );
-        }
+        // Don't set collision groups - use default behavior (everything collides)
+        // The raycast filtering will handle excluding the player via filterExcludeRigidBody
 
         world.createCollider(colliderDesc, body);
+
         // If this is the player, create and configure a character controller.
         if (isPlayer) {
           const controller = world.createCharacterController(0.1); // Small collision offset.
@@ -353,7 +341,9 @@ function processCommands(): void {
       }
       processedAny = true;
     } else if (type === CMD_WEAPON_RAYCAST) {
-      console.log(`[PhysicsWorker] Received CMD_WEAPON_RAYCAST for entity ${physId}.`);
+      console.log(
+        `[PhysicsWorker] Received CMD_WEAPON_RAYCAST for entity ${physId}.`,
+      );
       if (raycastResultsI32 && raycastResultsF32) {
         const origin = {
           x: paramsView[0],
@@ -362,27 +352,47 @@ function processCommands(): void {
         };
         const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
         const maxToi = paramsView[6];
+
+        console.log(
+          `[PhysicsWorker] Ray origin: (${origin.x.toFixed(2)}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(2)})`,
+        );
+        console.log(
+          `[PhysicsWorker] Ray direction: (${dir.x.toFixed(2)}, ${dir.y.toFixed(2)}, ${dir.z.toFixed(2)})`,
+        );
+        console.log(`[PhysicsWorker] Max range: ${maxToi.toFixed(2)}`);
+
         const ray = new RAPIER.Ray(origin, dir);
 
-        // Set up collision groups for the raycast filter
-        const GROUP_PLAYER = 0x0001;
-        const GROUP_SCENERY = 0x0002;
-        // The ray is in group 1, and should only hit things in group 2
-        const filterGroups = (GROUP_PLAYER << 16) | GROUP_SCENERY;
+        // Get the player's rigid body to exclude it from the raycast
+        const playerBody = entityToBody.get(physId);
 
+        // Cast ray with proper parameters:
+        // castRayAndGetNormal(ray, maxToi, solid, filterFlags?, filterGroups?,
+        //                     filterExcludeCollider?, filterExcludeRigidBody?, filterPredicate?)
         const hit = world.castRayAndGetNormal(
           ray,
           maxToi,
-          true,
-          undefined, // filterFlags
-          filterGroups, // filterGroups
+          true, // solid
+          undefined, // filterFlags - use default (no filtering by type)
+          undefined, // filterGroups - use default (hit everything)
+          undefined, // filterExcludeCollider - not needed
+          playerBody, // filterExcludeRigidBody - exclude the player's rigid body
         );
 
         if (hit) {
-          const hitPoint = ray.pointAt(hit.toi);
-          const hitBody = world.getCollider(hit.colliderHandle)?.parent();
-          const hitEntityId = hitBody ? bodyToEntity.get(hitBody) ?? 0 : 0;
-          console.log(`[PhysicsWorker] Raycast HIT entity ${hitEntityId} at distance ${hit.toi}.`);
+          const hitPoint = ray.pointAt(hit.timeOfImpact);
+          const hitBody = hit.collider.parent();
+          const hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
+
+          console.log(
+            `[PhysicsWorker] Raycast HIT entity ${hitEntityId} at distance ${hit.timeOfImpact.toFixed(2)}.`,
+          );
+          console.log(
+            `[PhysicsWorker] Hit point: (${hitPoint.x.toFixed(2)}, ${hitPoint.y.toFixed(2)}, ${hitPoint.z.toFixed(2)})`,
+          );
+          console.log(
+            `[PhysicsWorker] Hit normal: (${hit.normal.x.toFixed(2)}, ${hit.normal.y.toFixed(2)}, ${hit.normal.z.toFixed(2)})`,
+          );
 
           Atomics.store(
             raycastResultsI32,
@@ -390,7 +400,7 @@ function processCommands(): void {
             hitEntityId,
           );
           raycastResultsF32.set(
-            [hit.toi, hitPoint.x, hitPoint.y, hitPoint.z],
+            [hit.timeOfImpact, hitPoint.x, hitPoint.y, hitPoint.z],
             RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
           );
         } else {
@@ -420,7 +430,6 @@ function processCommands(): void {
     Atomics.add(commandsView, COMMANDS_GEN_OFFSET >> 2, 1);
   }
 }
-
 
 function stepWorld(dt: number): void {
   if (!world) return;
