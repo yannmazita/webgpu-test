@@ -17,6 +17,7 @@ import {
   getAndResetMouseDelta,
   getMousePosition,
   isPointerLocked,
+  isMouseButtonDown,
 } from "@/core/input/manager";
 import {
   createMetricsContext,
@@ -86,6 +87,7 @@ import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 import { getPickRay, raycast } from "@/core/utils/raycast";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
+import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
 
 /**
  * Main render worker script.
@@ -262,7 +264,7 @@ async function initWorker(
     },
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
     jump: { type: "button", keys: ["Space"] },
-    fire: { type: "button", keys: ["Mouse0"] },
+    fire: { type: "button", mouseButtons: [0] }, // 0 = Left Mouse Button
   };
 
   actionController = {
@@ -465,6 +467,9 @@ function frame(now: number): void {
   if (physicsCtx) {
     applyPhysicsSnapshot(world, physicsCtx);
   }
+
+  // --- Gameplay Systems ---
+  weaponSystem(world, actionController, physicsCtx, raycastResultsCtx, dt);
 
   // --- Core ECS System Execution Order ---
   // The order of system execution is critical for correctness.

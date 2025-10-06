@@ -23,6 +23,8 @@ import {
 } from "@/core/ecs/components/physicsComponents";
 import { PRNG } from "@/core/utils/prng";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
+import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
+import { HealthComponent } from "@/core/ecs/components/healthComponent";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -156,6 +158,8 @@ export async function createScene(
 
     // Controller component to link input and physics.
     world.addComponent(playerEntity, new PlayerControllerComponent());
+    // Weapon component for firing
+    world.addComponent(playerEntity, new WeaponComponent());
   }
 
   // --- Fog ---
@@ -237,6 +241,8 @@ export async function createScene(
         cube,
         new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
       );
+      // Health component to make it a target
+      world.addComponent(cube, new HealthComponent(50));
     }
   }
 

@@ -11,6 +11,7 @@ import {
   POINTER_LOCK_OFFSET,
   MOUSE_X_OFFSET,
   MOUSE_Y_OFFSET,
+  MOUSE_BUTTONS_OFFSET,
 } from "@/core/sharedInputLayout";
 
 /** The context object holding views for the input buffer. */
