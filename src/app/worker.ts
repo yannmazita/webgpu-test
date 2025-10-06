@@ -132,6 +132,7 @@ let metricsFrameId = 0;
 
 // Physics globals
 let physicsCtx: PhysicsContext | null = null;
+let raycastResultsCtx: { i32: Int32Array; f32: Float32Array } | null = null;
 let physicsCommandSystem: PhysicsCommandSystem | null = null;
 let physicsWorker: Worker | null = null;
 let lastSnapshotGen = 0; // track last applied physics snapshot generation
@@ -139,6 +140,7 @@ let lastSnapshotGen = 0; // track last applied physics snapshot generation
 // State for raycast
 let lastViewportWidth = 0;
 let lastViewportHeight = 0;
+let lastRaycastGen = 0;
 
 // State for dt
 let lastFrameTime = 0;
@@ -224,6 +226,7 @@ async function initWorker(
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
+  sharedRaycastResultsBuffer: SharedArrayBuffer,
 ): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -316,6 +319,12 @@ async function initWorker(
   physicsCtx = createPhysicsContext(commandsBuffer, statesBuffer);
   initializePhysicsHeaders(physicsCtx);
 
+  // Create context for raycast results
+  raycastResultsCtx = {
+    i32: new Int32Array(sharedRaycastResultsBuffer),
+    f32: new Float32Array(sharedRaycastResultsBuffer),
+  };
+
   // Create physics worker
   physicsWorker = new Worker(new URL("./physicsWorker.ts", import.meta.url), {
     type: "module",
@@ -343,6 +352,7 @@ async function initWorker(
     type: "INIT",
     commandsBuffer,
     statesBuffer,
+    raycastResultsBuffer: sharedRaycastResultsBuffer,
   };
   physicsWorker.postMessage(initMsg);
 
@@ -535,6 +545,7 @@ self.onmessage = async (
       msg.sharedInputBuffer,
       msg.sharedMetricsBuffer,
       msg.sharedEngineStateBuffer,
+      msg.sharedRaycastResultsBuffer,
     );
     return;
   }
