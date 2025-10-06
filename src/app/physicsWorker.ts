@@ -341,9 +341,6 @@ function processCommands(): void {
       }
       processedAny = true;
     } else if (type === CMD_WEAPON_RAYCAST) {
-      console.log(
-        `[PhysicsWorker] Received CMD_WEAPON_RAYCAST for entity ${physId}.`,
-      );
       if (raycastResultsI32 && raycastResultsF32) {
         const origin = {
           x: paramsView[0],
@@ -352,15 +349,6 @@ function processCommands(): void {
         };
         const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
         const maxToi = paramsView[6];
-
-        console.log(
-          `[PhysicsWorker] Ray origin: (${origin.x.toFixed(2)}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(2)})`,
-        );
-        console.log(
-          `[PhysicsWorker] Ray direction: (${dir.x.toFixed(2)}, ${dir.y.toFixed(2)}, ${dir.z.toFixed(2)})`,
-        );
-        console.log(`[PhysicsWorker] Max range: ${maxToi.toFixed(2)}`);
-
         const ray = new RAPIER.Ray(origin, dir);
 
         // Get the player's rigid body to exclude it from the raycast
@@ -384,16 +372,6 @@ function processCommands(): void {
           const hitBody = hit.collider.parent();
           const hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
 
-          console.log(
-            `[PhysicsWorker] Raycast HIT entity ${hitEntityId} at distance ${hit.timeOfImpact.toFixed(2)}.`,
-          );
-          console.log(
-            `[PhysicsWorker] Hit point: (${hitPoint.x.toFixed(2)}, ${hitPoint.y.toFixed(2)}, ${hitPoint.z.toFixed(2)})`,
-          );
-          console.log(
-            `[PhysicsWorker] Hit normal: (${hit.normal.x.toFixed(2)}, ${hit.normal.y.toFixed(2)}, ${hit.normal.z.toFixed(2)})`,
-          );
-
           Atomics.store(
             raycastResultsI32,
             RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
@@ -404,7 +382,6 @@ function processCommands(): void {
             RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
           );
         } else {
-          console.log("[PhysicsWorker] Raycast MISSED.");
           // No hit, store 0
           Atomics.store(
             raycastResultsI32,

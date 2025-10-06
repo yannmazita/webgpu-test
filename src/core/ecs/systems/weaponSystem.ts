@@ -59,7 +59,6 @@ export function weaponSystem(
 
   // 2. Check for fire input
   if (actions.isPressed("fire") && weapon.cooldown <= 0) {
-    console.log("[WeaponSystem] Fire action detected.");
     weapon.cooldown = 1.0 / weapon.fireRate;
 
     const cameraQuery = world.query([
@@ -90,7 +89,6 @@ export function weaponSystem(
         );
         vec3.normalize(rayDirection, rayDirection);
 
-        console.log("[WeaponSystem] Enqueuing raycast command to physics worker.");
         // Enqueue raycast command for the physics worker
         tryEnqueueCommand(physCtx, CMD_WEAPON_RAYCAST, playerEntity, [
           rayOrigin[0],
@@ -111,7 +109,6 @@ export function weaponSystem(
     RAYCAST_RESULTS_GEN_OFFSET >> 2,
   );
   if (currentGen !== lastRaycastGen) {
-    console.log(`[WeaponSystem] New raycast result received (gen: ${currentGen}).`);
     lastRaycastGen = currentGen;
 
     const hitEntityId = Atomics.load(
@@ -119,7 +116,6 @@ export function weaponSystem(
       RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
     );
 
-    console.log(`[WeaponSystem] Raycast hit entity ID: ${hitEntityId}`);
     if (hitEntityId !== 0) {
       // The physics worker returns the physId, which is the same as the entity ID
       const hitEntity = hitEntityId;

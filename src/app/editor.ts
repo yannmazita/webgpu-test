@@ -149,7 +149,6 @@ function handleKeyUp(e: KeyboardEvent): void {
 }
 
 function handleMouseUp(e: MouseEvent): void {
-  console.log(`[Editor] handleMouseUp: button=${e.button}, state=false`);
   updateMouseButtonState(inputContext, e.button, false);
 }
 
@@ -212,15 +211,13 @@ function handleMouseMove(e: MouseEvent): void {
 }
 
 function handleMouseDown(e: MouseEvent): void {
-  console.log(`[Editor] handleMouseDown: button=${e.button}, state=true`);
-  updateMouseButtonState(inputContext, e.button, true);
-
-  // If pointer is locked, the click is for gameplay (handled by worker).
-  // If unlocked, it might be for editor picking.
+  // If pointer is locked, this is a "fire" action for the gameplay systems.
   if (isPointerLockedState) {
+    updateMouseButtonState(inputContext, e.button, true);
     return;
   }
 
+  // If pointer is not locked, this is an editor picking action.
   const io = ImGui.GetIO();
   // Don't raycast if clicking on UI or if it's not the left mouse button (0)
   if (io.WantCaptureMouse || e.button !== 0) {
