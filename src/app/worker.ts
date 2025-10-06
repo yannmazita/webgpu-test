@@ -260,6 +260,7 @@ async function initWorker(
     },
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
     jump: { type: "button", keys: ["Space"] },
+    fire: { type: "button", keys: [] },
   };
 
   actionController = {
