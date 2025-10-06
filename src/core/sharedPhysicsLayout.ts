@@ -166,6 +166,8 @@ export const RAYCAST_RESULTS_MAGIC = 0x52534C54; // 'RSLT'
 /** Current schema version for raycast results. */
 export const RAYCAST_RESULTS_VERSION = 1;
 
+export const RAYCAST_RESULTS_MAGIC_OFFSET = 0;
+export const RAYCAST_RESULTS_VERSION_OFFSET = 4;
 export const RAYCAST_RESULTS_GEN_OFFSET = 8;
 export const RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET = 16;
 export const RAYCAST_RESULTS_HIT_DISTANCE_OFFSET = 20;

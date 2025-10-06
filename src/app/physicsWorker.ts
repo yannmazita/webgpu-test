@@ -36,7 +36,15 @@ import {
   CMD_DESTROY_BODY,
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   CMD_MOVE_PLAYER,
+  CMD_WEAPON_RAYCAST,
   COMMANDS_MAX_PARAMS_F32,
+  RAYCAST_RESULTS_MAGIC,
+  RAYCAST_RESULTS_VERSION,
+  RAYCAST_RESULTS_MAGIC_OFFSET,
+  RAYCAST_RESULTS_VERSION_OFFSET,
+  RAYCAST_RESULTS_GEN_OFFSET,
+  RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET,
+  RAYCAST_RESULTS_HIT_DISTANCE_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 // Import Rapier physics module
@@ -343,7 +351,7 @@ function processCommands(): void {
         if (hit) {
           const hitPoint = ray.pointAt(hit.toi);
           const hitBody = world.getCollider(hit.colliderHandle)?.parent();
-          const hitEntityId = hitBody ? bodyToEntity.get(hitBody) ?? 0 : 0;
+          const hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
 
           Atomics.store(
             raycastResultsI32,
