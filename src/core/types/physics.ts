@@ -16,6 +16,7 @@ export interface PhysicsInitMsg {
   type: "INIT";
   commandsBuffer: SharedArrayBuffer;
   statesBuffer: SharedArrayBuffer;
+  raycastResultsBuffer: SharedArrayBuffer;
 }
 
 /** Step command (for testing; internal fixed-step loop used in prod). */

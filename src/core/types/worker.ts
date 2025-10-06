@@ -42,6 +42,8 @@ export interface InitMsg {
   sharedMetricsBuffer: SharedArrayBuffer;
   /** The `SharedArrayBuffer` for engine state controlled by the UI. */
   sharedEngineStateBuffer: SharedArrayBuffer;
+  /** The `SharedArrayBuffer` for receiving raycast hit results from the physics worker. */
+  sharedRaycastResultsBuffer: SharedArrayBuffer;
 }
 
 /**
