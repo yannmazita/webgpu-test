@@ -143,6 +143,36 @@ export const CMD_SET_TRANSFORM = 3;
 export const CMD_SET_GRAVITY = 4;
 /** Command type: Move a player. */
 export const CMD_MOVE_PLAYER = 5;
+/** Command type: Perform a weapon raycast. */
+export const CMD_WEAPON_RAYCAST = 6;
+
+/* ==========================================================================================
+ * Raycast Results SAB (physics → render)
+ * A single-slot buffer to return the result of the last weapon raycast.
+ * Layout (bytes):
+ *   [0]   MAGIC (u32) - 'RSLT'
+ *   [4]   VERSION (u32)
+ *   [8]   GEN (u32) - Generation counter. Incremented by physics on write.
+ *   [12]  (pad)
+ *   [16]  HIT_ENTITY_ID (u32) - 0 if no hit, otherwise the physId of the hit body.
+ *   [20]  HIT_DISTANCE (f32)
+ *   [24]  HIT_POINT_X (f32)
+ *   [28]  HIT_POINT_Y (f32)
+ *   [32]  HIT_POINT_Z (f32)
+ * ======================================================================================== */
+
+/** Magic number for raycast results SAB validation ('RSLT'). */
+export const RAYCAST_RESULTS_MAGIC = 0x52534C54; // 'RSLT'
+/** Current schema version for raycast results. */
+export const RAYCAST_RESULTS_VERSION = 1;
+
+export const RAYCAST_RESULTS_GEN_OFFSET = 8;
+export const RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET = 16;
+export const RAYCAST_RESULTS_HIT_DISTANCE_OFFSET = 20;
+export const RAYCAST_RESULTS_HIT_POINT_OFFSET = 24;
+
+/** Total raycast results SAB size (bytes), padded to a multiple of 16. */
+export const RAYCAST_RESULTS_BUFFER_SIZE = 48;
 
 /* ==========================================================================================
  * Usage Notes:
