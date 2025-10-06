@@ -65,6 +65,8 @@ let world: World | null = null;
 let commandsView: Int32Array | null = null; // Int32 view (header + slots)
 let statesI32: Int32Array | null = null; // Int32 view for states (header + count/id)
 let statesF32: Float32Array | null = null; // Float32 view for states (pos/rot payload)
+let raycastResultsI32: Int32Array | null = null;
+let raycastResultsF32: Float32Array | null = null;
 
 let stepInterval: number | null = null;
 
@@ -326,6 +328,44 @@ function processCommands(): void {
         playerOnGround.set(physId, isOnGround ? 1.0 : 0.0);
       }
       processedAny = true;
+    } else if (type === CMD_WEAPON_RAYCAST) {
+      if (raycastResultsI32 && raycastResultsF32) {
+        const origin = {
+          x: paramsView[0],
+          y: paramsView[1],
+          z: paramsView[2],
+        };
+        const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
+        const maxToi = paramsView[6];
+        const ray = new RAPIER.Ray(origin, dir);
+        const hit = world.castRay(ray, maxToi, true);
+
+        if (hit) {
+          const hitPoint = ray.pointAt(hit.toi);
+          const hitBody = world.getCollider(hit.colliderHandle)?.parent();
+          const hitEntityId = hitBody ? bodyToEntity.get(hitBody) ?? 0 : 0;
+
+          Atomics.store(
+            raycastResultsI32,
+            RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
+            hitEntityId,
+          );
+          raycastResultsF32.set(
+            [hit.toi, hitPoint.x, hitPoint.y, hitPoint.z],
+            RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
+          );
+        } else {
+          // No hit, store 0
+          Atomics.store(
+            raycastResultsI32,
+            RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
+            0,
+          );
+        }
+        // Signal new result is available
+        Atomics.add(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 1);
+      }
+      processedAny = true;
     }
 
     // --- Advance Tail ---
@@ -570,6 +610,20 @@ self.onmessage = async (
         Atomics.store(statesI32, STATES_READ_GEN_OFFSET >> 2, 0);
         Atomics.store(statesI32, STATES_GEN_OFFSET >> 2, 0);
       }
+
+      raycastResultsI32 = new Int32Array(msg.raycastResultsBuffer);
+      raycastResultsF32 = new Float32Array(msg.raycastResultsBuffer);
+      Atomics.store(
+        raycastResultsI32,
+        RAYCAST_RESULTS_MAGIC_OFFSET >> 2,
+        RAYCAST_RESULTS_MAGIC,
+      );
+      Atomics.store(
+        raycastResultsI32,
+        RAYCAST_RESULTS_VERSION_OFFSET >> 2,
+        RAYCAST_RESULTS_VERSION,
+      );
+      Atomics.store(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 0);
 
       startPhysicsLoop();
       postMessage({ type: "READY" } as PhysicsReadyMsg);
