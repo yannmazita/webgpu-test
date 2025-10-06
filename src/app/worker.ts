@@ -242,6 +242,8 @@ async function initWorker(
   inputContext = createInputContext(sharedInputBuffer, false);
   inputReader = {
     isKeyDown: (code: string) => isKeyDown(inputContext!, code),
+    isMouseButtonDown: (button: number) =>
+      isMouseButtonDown(inputContext!, button),
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
     getMousePosition: () => getMousePosition(inputContext!),
     isPointerLocked: () => isPointerLocked(inputContext!),
@@ -260,7 +262,7 @@ async function initWorker(
     },
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
     jump: { type: "button", keys: ["Space"] },
-    fire: { type: "button", keys: [] },
+    fire: { type: "button", keys: ["Mouse0"] },
   };
 
   actionController = {

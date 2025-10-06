@@ -4,7 +4,8 @@ import { IInputSource } from "./iinputSource";
 /** Defines a mapping for a single button action. */
 export interface ButtonActionBinding {
   type: "button";
-  keys: string[]; // List of KeyboardEvent.code values
+  keys?: string[]; // List of KeyboardEvent.code values
+  mouseButtons?: number[]; // List of mouse button indices (0=left, 1=middle, 2=right)
 }
 
 /** Defines a mapping for a single axis action. */
@@ -34,7 +35,7 @@ export interface IActionController {
 
 /**
  * Checks if a button-type action is currently being pressed.
- * This checks if any of the keys associated with the action are down.
+ * This checks if any of the keys or mouse buttons associated with the action are down.
  * @param actionMap The configuration of all actions.
  * @param inputSource The input source to query key states from.
  * @param name The name of the action to check.
@@ -47,12 +48,22 @@ export function isActionPressed(
 ): boolean {
   const action = actionMap[name];
   if (!action || action.type !== "button") {
-    // This warning is triggered when this function is called for an axis action.
-    console.warn(`Action "${name}" is not a defined button action.`);
     return false;
   }
-  // An action is pressed if at least one of its assigned keys is down.
-  return action.keys.some((key) => inputSource.isKeyDown(key));
+
+  // Check keyboard presses
+  if (action.keys?.some((key) => inputSource.isKeyDown(key))) {
+    return true;
+  }
+
+  // Check mouse button presses
+  if (
+    action.mouseButtons?.some((button) => inputSource.isMouseButtonDown(button))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
