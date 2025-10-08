@@ -47,12 +47,19 @@ export function createCubeMeshData(size = 1.0): MeshData {
 
   // prettier-ignore
   const texCoords = new Float32Array([
-    0, 0, 1, 0, 1, 1, 0, 1, // front
-    0, 0, 1, 0, 1, 1, 0, 1, // back
-    0, 0, 1, 0, 1, 1, 0, 1, // top
-    0, 0, 1, 0, 1, 1, 0, 1, // bottom
-    0, 0, 1, 0, 1, 1, 0, 1, // right
-    0, 0, 1, 0, 1, 1, 0, 1, // left
+    // Each face has its own set of UVs to prevent mirroring/incorrect orientation.
+    // Front face
+    0, 0, 1, 0, 1, 1, 0, 1,
+    // Back face
+    1, 0, 0, 0, 0, 1, 1, 1,
+    // Top face
+    0, 1, 0, 0, 1, 0, 1, 1,
+    // Bottom face
+    0, 0, 0, 1, 1, 1, 1, 0,
+    // Right face
+    1, 0, 0, 0, 0, 1, 1, 1,
+    // Left face
+    0, 0, 1, 0, 1, 1, 0, 1,
   ]);
 
   // prettier-ignore
@@ -64,15 +71,6 @@ export function createCubeMeshData(size = 1.0): MeshData {
     16, 17, 18, 16, 18, 19, // right
     20, 21, 22, 20, 22, 23, // left
   ]);
-
-  console.log(`[Primitives] Creating cube with size ${size}`);
-  console.log(
-    `  First position: [${positions[0]}, ${positions[1]}, ${positions[2]}]`,
-  );
-  console.log(`  First normal: [${normals[0]}, ${normals[1]}, ${normals[2]}]`);
-  console.log(`  First UV: [${texCoords[0]}, ${texCoords[1]}]`);
-  console.log(`  Position count: ${positions.length / 3} vertices`);
-  console.log(`  Index count: ${indices.length} indices`);
 
   return { positions, normals, texCoords, indices };
 }

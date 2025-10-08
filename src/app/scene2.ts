@@ -23,6 +23,7 @@ import { PRNG } from "@/core/utils/prng";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
+import { ResourceHandle } from "@/core/resources/resourceHandle";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -170,9 +171,9 @@ export async function createScene(
     groundTransform.setPosition(0, 0, 0);
     world.addComponent(groundEntity, groundTransform);
 
-    // Create a 200x200 plane mesh
+    // Create a 200x200 plane mesh directly from the primitive data.
     const groundMesh = await resourceManager.createMesh(
-      "ground_plane_mesh",
+      "PRIM:plane:size=200",
       createPlaneMeshData(200),
     );
 
@@ -185,7 +186,7 @@ export async function createScene(
         metallicRoughnessMap:
           "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
         metallic: 0.0, // Snow is not metallic
-        uvScale: [100, 100], // Tile the texture 100 times across the 200-unit plane
+        uvScale: [50, 50], // Tile the texture 50 times
       },
     );
 
@@ -198,7 +199,7 @@ export async function createScene(
     world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
     world.addComponent(
       groundEntity,
-      new PhysicsColliderComponent(1, [100, 0, 100]), // Half-extents for a 200x1x200 collider box
+      new PhysicsColliderComponent(1, [100, 0.001, 100]), // Box collider with a small thickness
     );
   }
 
@@ -224,15 +225,14 @@ export async function createScene(
   // --- Dynamic Physics Objects ---
   // Create a stack of cubes for the player to interact with.
   {
-    const cubeMesh = await resourceManager.createMesh(
-      "interactive_cube",
-      createCubeMeshData(1),
+    const cubeMesh = await resourceManager.resolveMeshByHandle(
+      ResourceHandle.forMesh("PRIM:cube:size=1"),
     );
     const cubeMat = await resourceManager.createPBRMaterialInstance(
       await resourceManager.createPBRMaterialTemplate({
         albedo: [0.9, 0.5, 0.2, 1],
         metallic: 0.8,
-        roughness: 1,
+        roughness: 0.2,
       }),
     );
     const CUBE_COUNT = 8;
