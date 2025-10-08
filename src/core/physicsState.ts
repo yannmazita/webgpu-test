@@ -32,6 +32,14 @@ import {
   STATES_READ_GEN_OFFSET,
   STATES_GEN_OFFSET,
   STATES_BUFFER_SIZE,
+  COLLISION_EVENTS_BUFFER_SIZE,
+  COLLISION_EVENTS_MAGIC,
+  COLLISION_EVENTS_VERSION,
+  COLLISION_EVENTS_MAGIC_OFFSET,
+  COLLISION_EVENTS_VERSION_OFFSET,
+  COLLISION_EVENTS_HEAD_OFFSET,
+  COLLISION_EVENTS_TAIL_OFFSET,
+  COLLISION_EVENTS_GEN_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 /** Context holding typed-array views into the shared physics buffers. */
@@ -44,6 +52,8 @@ export interface PhysicsContext {
   statesI32: Int32Array;
   /** States (physics → render) Float32 view (same buffer as statesI32). */
   statesF32: Float32Array;
+  /** Collision Events (physics → render) Int32 view. */
+  collisionEventsI32: Int32Array;
 }
 
 /**
@@ -56,18 +66,21 @@ const idx = (byteOffset: number) => byteOffset >> 2;
 /**
  * Creates a physics context from the shared buffers.
  *
- * Behavior:
- * - Does not modify memory (no header writes). Use initializePhysicsHeaders on the writer.
- * - Throws if buffer sizes do not match expected layout sizes.
+ * @remarks
+ * This function validates that the byte length of each provided buffer matches
+ * the expected size defined in the shared layout. It does not modify memory;
+ * headers must be initialized separately by the writer.
  *
- * @param commandsBuffer SharedArrayBuffer for commands (render → physics).
- * @param statesBuffer SharedArrayBuffer for states (physics → render).
- * @returns PhysicsContext with typed views for both buffers.
- * @throws If buffer sizes are invalid.
+ * @param commandsBuffer - SharedArrayBuffer for commands (render → physics).
+ * @param statesBuffer - SharedArrayBuffer for states (physics → render).
+ * @param collisionEventsBuffer - SharedArrayBuffer for collision events (physics → render).
+ * @returns PhysicsContext with typed views for all buffers.
+ * @throws If any buffer has an invalid size.
  */
 export function createPhysicsContext(
   commandsBuffer: SharedArrayBuffer,
   statesBuffer: SharedArrayBuffer,
+  collisionEventsBuffer: SharedArrayBuffer,
 ): PhysicsContext {
   if (commandsBuffer.byteLength !== COMMANDS_BUFFER_SIZE) {
     throw new Error(
@@ -79,24 +92,29 @@ export function createPhysicsContext(
       `createPhysicsContext: statesBuffer has invalid size ${statesBuffer.byteLength}, expected ${STATES_BUFFER_SIZE}`,
     );
   }
+  if (collisionEventsBuffer.byteLength !== COLLISION_EVENTS_BUFFER_SIZE) {
+    throw new Error(
+      `createPhysicsContext: collisionEventsBuffer has invalid size ${collisionEventsBuffer.byteLength}, expected ${COLLISION_EVENTS_BUFFER_SIZE}`,
+    );
+  }
   return {
     commandsI32: new Int32Array(commandsBuffer),
     commandsF32: new Float32Array(commandsBuffer),
     statesI32: new Int32Array(statesBuffer),
     statesF32: new Float32Array(statesBuffer),
+    collisionEventsI32: new Int32Array(collisionEventsBuffer),
   };
 }
 
 /**
  * Initializes the headers for the physics shared buffers (writer-side).
  *
- * Writes:
- * - Commands: MAGIC, VERSION, HEAD=0, TAIL=0, GEN=0
- * - States: MAGIC, VERSION, WRITE_INDEX=0, READ_GEN=0, GEN=0
+ * @remarks
+ * This function writes the MAGIC and VERSION numbers to the commands, states,
+ * and collision event buffers. It also resets all ring buffer indices (head,
+ * tail) and generation counters to zero. It is safe to call multiple times.
  *
- * Safe to call multiple times; values are idempotent. Does not clear slots.
- *
- * @param ctx PhysicsContext wrapping the shared buffers.
+ * @param ctx - PhysicsContext wrapping the shared buffers.
  */
 export function initializePhysicsHeaders(ctx: PhysicsContext): void {
   // Commands header
@@ -112,6 +130,21 @@ export function initializePhysicsHeaders(ctx: PhysicsContext): void {
   Atomics.store(ctx.statesI32, idx(STATES_WRITE_INDEX_OFFSET), 0);
   Atomics.store(ctx.statesI32, idx(STATES_READ_GEN_OFFSET), 0);
   Atomics.store(ctx.statesI32, idx(STATES_GEN_OFFSET), 0);
+
+  // Collision Events header
+  Atomics.store(
+    ctx.collisionEventsI32,
+    idx(COLLISION_EVENTS_MAGIC_OFFSET),
+    COLLISION_EVENTS_MAGIC,
+  );
+  Atomics.store(
+    ctx.collisionEventsI32,
+    idx(COLLISION_EVENTS_VERSION_OFFSET),
+    COLLISION_EVENTS_VERSION,
+  );
+  Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_HEAD_OFFSET), 0);
+  Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_TAIL_OFFSET), 0);
+  Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_GEN_OFFSET), 0);
 }
 
 /**

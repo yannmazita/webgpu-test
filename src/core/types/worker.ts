@@ -44,6 +44,8 @@ export interface InitMsg {
   sharedEngineStateBuffer: SharedArrayBuffer;
   /** The `SharedArrayBuffer` for receiving raycast hit results from the physics worker. */
   sharedRaycastResultsBuffer: SharedArrayBuffer;
+  /** The `SharedArrayBuffer` for collision events */
+  sharedCollisionEventsBuffer: SharedArrayBuffer;
 }
 
 /**

@@ -89,6 +89,7 @@ import { PlayerControllerComponent } from "@/core/ecs/components/playerControlle
 import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
 import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
 import { DamageSystem } from "@/core/ecs/systems/damageSystem";
+import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
 
 /**
  * Main render worker script.
@@ -214,16 +215,19 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
 /**
  * Initializes the render worker.
  *
- * Sets up the GPU renderer, shared contexts (input, metrics, engine state),
- * input action mapping, camera controller, resource manager, ECS world, and scene.
- * Creates the physics worker and posts INIT to it (Stage 2). Publishes an initial
- * engine state snapshot for the main thread UI. Posts READY to signal completion.
+ * @remarks
+ * This function orchestrates the entire setup process for the render worker.
+ * It initializes the WebGPU renderer, sets up all shared memory contexts
+ * (input, metrics, engine state, physics), creates the ECS world and systems
+ * and spawns the physics worker, passing it the necessary shared buffers.
  *
- * @param offscreen OffscreenCanvas for WebGPU rendering (transferred from main).
- * @param sharedInputBuffer SharedArrayBuffer for input state (keyboard/mouse).
- * @param sharedMetricsBuffer SharedArrayBuffer for performance metrics.
- * @param sharedEngineStateBuffer SharedArrayBuffer for editor state sync.
- * @returns Promise that resolves when initialization completes.
+ * @param offscreen - OffscreenCanvas for WebGPU rendering.
+ * @param sharedInputBuffer - SharedArrayBuffer for input state.
+ * @param sharedMetricsBuffer - SharedArrayBuffer for performance metrics.
+ * @param sharedEngineStateBuffer - SharedArrayBuffer for editor state sync.
+ * @param sharedRaycastResultsBuffer - SharedArrayBuffer for weapon raycast results.
+ * @param sharedCollisionEventsBuffer - SharedArrayBuffer for physics collision events.
+ * @returns A promise that resolves when initialization is complete.
  */
 async function initWorker(
   offscreen: OffscreenCanvas,
@@ -231,6 +235,7 @@ async function initWorker(
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
   sharedRaycastResultsBuffer: SharedArrayBuffer,
+  sharedCollisionEventsBuffer: SharedArrayBuffer,
 ): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -319,11 +324,15 @@ async function initWorker(
     throw error;
   }
 
-  // --- Physics Setup (Stage 2) ---
+  // --- Physics Setup ---
   console.log("[Worker] Setting up physics...");
   const commandsBuffer = new SharedArrayBuffer(COMMANDS_BUFFER_SIZE);
   const statesBuffer = new SharedArrayBuffer(STATES_BUFFER_SIZE);
-  physicsCtx = createPhysicsContext(commandsBuffer, statesBuffer);
+  physicsCtx = createPhysicsContext(
+    commandsBuffer,
+    statesBuffer,
+    sharedCollisionEventsBuffer,
+  );
   initializePhysicsHeaders(physicsCtx);
 
   // Create context for raycast results
@@ -360,6 +369,7 @@ async function initWorker(
     commandsBuffer,
     statesBuffer,
     raycastResultsBuffer: sharedRaycastResultsBuffer,
+    collisionEventsBuffer: sharedCollisionEventsBuffer,
   };
   physicsWorker.postMessage(initMsg);
 
@@ -393,15 +403,18 @@ async function initWorker(
 /**
  * Main frame update loop for the render worker.
  *
- * This function orchestrates all per-frame activity. It processes user input,
- * applies state changes from the editor and physics worker, runs all ECS
- * systems in a specific order, renders the scene, and publishes performance
- * metrics. The execution order is critical for data consistency: input is
- * processed, simulations are run, transforms are finalized, and then rendering
- * occurs.
+ * @remarks
+ * This function orchestrates all per-frame activity. The execution order is
+ * critical for data consistency:
+ * 1. Sync state from editor and physics (snapshots).
+ * 2. Process physics collision events via `CollisionEventSystem`.
+ * 3. Run input-driven controllers.
+ * 4. Run gameplay systems (`weaponSystem`, `damageSystem`).
+ * 5. Run core ECS systems (`animation`, `transform`, `physicsCommands`, `camera`).
+ * 6. Render the scene.
+ * 7. Publish metrics.
  *
- * @param {number} now The current high-resolution timestamp from
- *     `requestAnimationFrame`, in milliseconds.
+ * @param now - The current high-resolution timestamp from `requestAnimationFrame`.
  */
 function frame(now: number): void {
   // --- Guard Clause ---
@@ -570,6 +583,7 @@ self.onmessage = async (
       msg.sharedMetricsBuffer,
       msg.sharedEngineStateBuffer,
       msg.sharedRaycastResultsBuffer,
+      msg.sharedCollisionEventsBuffer,
     );
     return;
   }

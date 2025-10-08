@@ -34,10 +34,12 @@ const engineStateCtx = createEngineStateCtx(engineStateBuffer);
 initializeEngineStateHeader(engineStateCtx);
 
 // --- Physics Communication Setup ---
-const { RAYCAST_RESULTS_BUFFER_SIZE } = await import(
-  "@/core/sharedPhysicsLayout"
-);
+const { RAYCAST_RESULTS_BUFFER_SIZE, COLLISION_EVENTS_BUFFER_SIZE } =
+  await import("@/core/sharedPhysicsLayout");
 const raycastResultsBuffer = new SharedArrayBuffer(RAYCAST_RESULTS_BUFFER_SIZE);
+const collisionEventsBuffer = new SharedArrayBuffer(
+  COLLISION_EVENTS_BUFFER_SIZE,
+);
 
 // --- Render Worker Setup ---
 const worker = new Worker(new URL("./worker.ts", import.meta.url), {
@@ -63,6 +65,7 @@ worker.postMessage(
     sharedMetricsBuffer: metricsBuffer,
     sharedEngineStateBuffer: engineStateBuffer,
     sharedRaycastResultsBuffer: raycastResultsBuffer,
+    sharedCollisionEventsBuffer: collisionEventsBuffer,
   },
   [offscreen],
 );
