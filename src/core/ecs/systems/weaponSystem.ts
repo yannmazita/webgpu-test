@@ -1,10 +1,8 @@
 // src/core/ecs/systems/weaponSystem.ts
+
 import { World } from "@/core/ecs/world";
 import { IActionController } from "@/core/input/action";
-import {
-  PhysicsContext,
-  tryEnqueueCommand,
-} from "@/core/physicsState";
+import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import {
   CMD_WEAPON_RAYCAST,
   RAYCAST_RESULTS_GEN_OFFSET,
@@ -17,6 +15,7 @@ import { TransformComponent } from "../components/transformComponent";
 import { WeaponComponent } from "../components/weaponComponent";
 import { PlayerControllerComponent } from "../components/playerControllerComponent";
 import { vec3 } from "wgpu-matrix";
+import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();
@@ -32,6 +31,7 @@ let lastRaycastGen = 0;
  * @param actions The input action controller.
  * @param physCtx The context for the physics command buffer.
  * @param raycastResultsCtx The context for the raycast results buffer.
+ * @param damageSystem The system responsible for processing damage events.
  * @param deltaTime The time elapsed since the last frame in seconds.
  */
 export function weaponSystem(
@@ -39,6 +39,7 @@ export function weaponSystem(
   actions: IActionController,
   physCtx: PhysicsContext,
   raycastResultsCtx: { i32: Int32Array; f32: Float32Array },
+  damageSystem: DamageSystem,
   deltaTime: number,
 ): void {
   const query = world.query([PlayerControllerComponent, WeaponComponent]);
@@ -119,16 +120,14 @@ export function weaponSystem(
     if (hitEntityId !== 0) {
       // The physics worker returns the physId, which is the same as the entity ID
       const hitEntity = hitEntityId;
-      const health = world.getComponent(hitEntity, HealthComponent);
-      if (health) {
-        health.currentHealth -= weapon.damage;
-        console.log(
-          `[WeaponSystem] Hit entity ${hitEntity}! Health remaining: ${health.currentHealth}`,
-        );
-        if (health.currentHealth <= 0) {
-          // For now, just log. Later, we could destroy the entity.
-          console.log(`[WeaponSystem] Entity ${hitEntity} has been defeated!`);
-        }
+      // Check if the hit entity can take damage
+      if (world.hasComponent(hitEntity, HealthComponent)) {
+        // Enqueue a damage event instead of applying damage directly
+        damageSystem.enqueueDamageEvent({
+          target: hitEntity,
+          amount: weapon.damage,
+          source: playerEntity,
+        });
       }
     }
   }
