@@ -90,28 +90,45 @@ import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSyste
 import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
 import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
+import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 
 /**
  * Main render worker script.
  *
  * This worker handles the core rendering loop, ECS systems, input processing,
- * and shared state synchronization with the main thread. It receives messages
- * from the main thread (e.g., INIT, FRAME, RESIZE) and responds with readiness
- * signals (READY, FRAME_DONE). All heavy computation (rendering, physics commands)
- * occurs here, isolated from the main thread for smooth 60FPS.
+ * and shared state synchronization with the main and physics threads. Its
+ * receives messages from the main thread (ie INIT, FRAME, RESIZE) and
+ * responds with readiness signals. All heavy computation occurs here, isolated
+ * from the main thread for smooth UI performance.
  *
- * Key flows:
- * - INIT: Set up renderer, ECS world, scene, input/metrics, physics (Stage 2).
- * - FRAME: Process input, run systems (animation, transform,
- *   physics commands, camera, render), publish metrics.
- * - RESIZE: Update canvas/viewport and camera aspect.
- * - Shared state: SABs for input (real-time), metrics (UI), engine (editor tweaks),
- *   physics (commands/states).
+ * Key Flows:
+ * - INIT: Sets up the renderer, ECS world, scene, and shared memory contexts.
+ *   It also spawns and initializes the dedicated physics worker.
+ * - FRAME: Executes the main game loop in a critical order:
+ *   1.  Processes user input and updates player/camera controllers.
+ *   2.  Applies the latest physics state snapshot (positions, rotations).
+ *   3.  Runs gameplay systems (weapon firing, projectile updates).
+ *   4.  Processes events from the physics worker (collisions) and applies
+ *       their consequences (damage).
+ *   5.  Updates core ECS state (animations, transforms).
+ *   6.  Generates and enqueues new commands for the physics worker.
+ *   7.  Prepares for rendering by updating camera matrices.
+ *   8.  Renders the scene.
+ *   9.  Publishes performance metrics.
+ * - RESIZE: Updates canvas/viewport dimensions and the camera's aspect ratio.
+ * - SHARED STATE: Uses multiple SharedArrayBuffers for lock-free, real-time
+ *   communication:
+ *   - `input`: Main thread → Worker (keyboard/mouse state).
+ *   - `metrics`: Worker → Main thread (performance data for UI).
+ *   - `engineState`: Main thread ↔ Worker (editor tweaks like fog/sun).
+ *   - `physics`: A multi-buffer channel between this worker and the
+ *     physics worker, including commands, state snapshots, raycast results,
+ *     and collision events.
  *
  * Assumptions:
- * - OffscreenCanvas transferred via postMessage.
- * - COOP/COEP enabled for SABs.
- * - No direct DOM access (all UI via main thread).
+ * - An OffscreenCanvas is transferred from the main thread.
+ * - The hosting page has COOP/COEP headers enabled for SharedArrayBuffer.
+ * - No direct DOM access; all UI is handled by the main thread.
  */
 let engineStateCtx: EngineStateCtx | null = null;
 
@@ -128,6 +145,8 @@ let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
 let playerControllerSystem: PlayerControllerSystem | null = null;
 let damageSystem: DamageSystem | null = null;
+let collisionEventSystem: CollisionEventSystem | null = null;
+let projectileSystem: ProjectileSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -385,6 +404,14 @@ async function initWorker(
   // Damage system for processing all damage events
   damageSystem = new DamageSystem();
 
+  // Create the system for handling physics collision events.
+  collisionEventSystem = new CollisionEventSystem(
+    world,
+    physicsCtx,
+    damageSystem,
+  );
+  projectileSystem = new ProjectileSystem();
+
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
     if ((engineStateCtx.i32.length | 0) >= 4) {
@@ -427,6 +454,8 @@ function frame(now: number): void {
     !actionController ||
     !playerControllerSystem ||
     !damageSystem ||
+    !collisionEventSystem ||
+    !projectileSystem ||
     !actionMap
   ) {
     // If not ready, immediately signal completion to avoid stalling the main thread.
@@ -489,15 +518,20 @@ function frame(now: number): void {
 
   // --- Gameplay Systems ---
   if (physicsCtx && raycastResultsCtx) {
-    weaponSystem(
-      world,
-      actionController,
-      physicsCtx,
-      raycastResultsCtx,
-      damageSystem,
-      dt,
-    );
+    if (resourceManager) {
+      weaponSystem(
+        world,
+        resourceManager,
+        actionController,
+        physicsCtx,
+        raycastResultsCtx,
+        damageSystem,
+        dt,
+      );
+    }
   }
+  projectileSystem.update(world, dt);
+  collisionEventSystem.update();
   damageSystem.update(world);
 
   // --- Core ECS System Execution Order ---

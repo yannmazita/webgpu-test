@@ -8,26 +8,41 @@ import {
   RAYCAST_RESULTS_GEN_OFFSET,
   RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET,
 } from "@/core/sharedPhysicsLayout";
-import { CameraComponent } from "../components/cameraComponent";
-import { HealthComponent } from "../components/healthComponent";
-import { MainCameraTagComponent } from "../components/tagComponents";
-import { TransformComponent } from "../components/transformComponent";
-import { WeaponComponent } from "../components/weaponComponent";
-import { PlayerControllerComponent } from "../components/playerControllerComponent";
+import { CameraComponent } from "@/core/ecs/components/cameraComponent";
+import { HealthComponent } from "@/core/ecs/components/healthComponent";
+import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
+import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
+import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { vec3 } from "wgpu-matrix";
-import { DamageSystem } from "@/core/ecs/systems/damageSystem";
+import { DamageSystem } from "./damageSystem";
+import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
+import {
+  PhysicsBodyComponent,
+  PhysicsColliderComponent,
+} from "@/core/ecs/components/physicsComponents";
+import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
+import { ResourceManager } from "@/core/resources/resourceManager";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();
 const rayDirection = vec3.create();
+const projectileVelocity = vec3.create();
 
 let lastRaycastGen = 0;
 
 /**
- * Handles weapon firing logic, including sending raycast commands to the physics
- * worker and processing hit results.
+ * Handles weapon firing logic.
+ *
+ * Depending on the WeaponComponent's properties, this system will either:
+ * 1.  (Hitscan) Enqueue a raycast command to the physics worker.
+ * 2.  (Projectile) Spawn a new projectile entity with an initial velocity.
+ *
+ * It also processes hit results from hitscan weapons. Projectile hits are
+ * handled by the CollisionEventSystem.
  *
  * @param world The ECS world.
+ * @param resourceManager The manager for loading and creating assets.
  * @param actions The input action controller.
  * @param physCtx The context for the physics command buffer.
  * @param raycastResultsCtx The context for the raycast results buffer.
@@ -36,6 +51,7 @@ let lastRaycastGen = 0;
  */
 export function weaponSystem(
   world: World,
+  resourceManager: ResourceManager,
   actions: IActionController,
   physCtx: PhysicsContext,
   raycastResultsCtx: { i32: Int32Array; f32: Float32Array },
@@ -67,44 +83,109 @@ export function weaponSystem(
       CameraComponent,
       TransformComponent,
     ]);
-    if (cameraQuery.length > 0) {
-      const cameraTransform = world.getComponent(
-        cameraQuery[0],
-        TransformComponent,
-      );
-      if (cameraTransform) {
-        // Ray originates from the camera's world position
-        vec3.set(
-          cameraTransform.worldMatrix[12],
-          cameraTransform.worldMatrix[13],
-          cameraTransform.worldMatrix[14],
-          rayOrigin,
-        );
+    if (cameraQuery.length === 0) return;
 
-        // Ray direction is the camera's forward vector (-Z axis)
-        vec3.set(
-          -cameraTransform.worldMatrix[8],
-          -cameraTransform.worldMatrix[9],
-          -cameraTransform.worldMatrix[10],
-          rayDirection,
-        );
-        vec3.normalize(rayDirection, rayDirection);
+    const cameraTransform = world.getComponent(
+      cameraQuery[0],
+      TransformComponent,
+    );
+    if (!cameraTransform) return;
 
-        // Enqueue raycast command for the physics worker
-        tryEnqueueCommand(physCtx, CMD_WEAPON_RAYCAST, playerEntity, [
-          rayOrigin[0],
-          rayOrigin[1],
-          rayOrigin[2],
-          rayDirection[0],
-          rayDirection[1],
-          rayDirection[2],
-          weapon.range,
-        ]);
+    // Ray originates from the camera's world position
+    vec3.set(
+      cameraTransform.worldMatrix[12],
+      cameraTransform.worldMatrix[13],
+      cameraTransform.worldMatrix[14],
+      rayOrigin,
+    );
+
+    // Ray direction is the camera's forward vector (-Z axis)
+    vec3.set(
+      -cameraTransform.worldMatrix[8],
+      -cameraTransform.worldMatrix[9],
+      -cameraTransform.worldMatrix[10],
+      rayDirection,
+    );
+    vec3.normalize(rayDirection, rayDirection);
+
+    if (weapon.isHitscan) {
+      // --- Hitscan Logic ---
+      tryEnqueueCommand(physCtx, CMD_WEAPON_RAYCAST, playerEntity, [
+        rayOrigin[0],
+        rayOrigin[1],
+        rayOrigin[2],
+        rayDirection[0],
+        rayDirection[1],
+        rayDirection[2],
+        weapon.range,
+      ]);
+    } else {
+      // --- Projectile Spawning Logic ---
+      if (!weapon.projectileMeshHandle || !weapon.projectileMaterialHandle) {
+        console.warn(
+          "[WeaponSystem] Attempted to fire projectile weapon without projectile mesh/material handles.",
+        );
+        return;
       }
+
+      // Use an async IIFE to resolve resources and then spawn the entity.
+      // This is necessary because resource resolution is asynchronous.
+      (async () => {
+        try {
+          const [mesh, material] = await Promise.all([
+            resourceManager.resolveMeshByHandle(weapon.projectileMeshHandle!),
+            resourceManager.resolveMaterialSpec(
+              weapon.projectileMaterialHandle as any,
+            ), // TODO: Fix this type issue later
+          ]);
+
+          const projectileEntity = world.createEntity();
+
+          // Transform: Start at camera position, move slightly forward to avoid self-collision
+          const startPosition = vec3.add(
+            rayOrigin,
+            vec3.scale(rayDirection, 1.0),
+          );
+          const transform = new TransformComponent();
+          transform.setPosition(startPosition);
+          world.addComponent(projectileEntity, transform);
+
+          // Visuals
+          world.addComponent(
+            projectileEntity,
+            new MeshRendererComponent(mesh, material),
+          );
+
+          // Gameplay
+          world.addComponent(
+            projectileEntity,
+            new ProjectileComponent(
+              playerEntity,
+              weapon.damage,
+              weapon.projectileLifetime,
+            ),
+          );
+
+          // Physics
+          vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
+          world.addComponent(
+            projectileEntity,
+            new PhysicsBodyComponent("dynamic", false, projectileVelocity),
+          );
+          const collider = new PhysicsColliderComponent();
+          collider.setSphere(weapon.projectileRadius);
+          world.addComponent(projectileEntity, collider);
+        } catch (error) {
+          console.error(
+            "[WeaponSystem] Failed to resolve projectile resources:",
+            error,
+          );
+        }
+      })();
     }
   }
 
-  // 3. Check for raycast results from the physics worker
+  // 3. Check for raycast results from the physics worker (Hitscan only)
   const currentGen = Atomics.load(
     raycastResultsCtx.i32,
     RAYCAST_RESULTS_GEN_OFFSET >> 2,
@@ -118,11 +199,8 @@ export function weaponSystem(
     );
 
     if (hitEntityId !== 0) {
-      // The physics worker returns the physId, which is the same as the entity ID
       const hitEntity = hitEntityId;
-      // Check if the hit entity can take damage
       if (world.hasComponent(hitEntity, HealthComponent)) {
-        // Enqueue a damage event instead of applying damage directly
         damageSystem.enqueueDamageEvent({
           target: hitEntity,
           amount: weapon.damage,

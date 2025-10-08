@@ -1,18 +1,37 @@
 // src/core/ecs/components/weaponComponent.ts
 import { IComponent } from "@/core/ecs/component";
+import { ResourceHandle } from "@/core/resources/resourceHandle";
+import { MaterialInstance } from "@/core/materials/materialInstance";
+import { Mesh } from "@/core/types/gpu";
 
 /**
  * Component that holds the properties and state for a weapon.
+ * Can be configured for either instant hitscan or projectile-based firing.
  */
 export class WeaponComponent implements IComponent {
   /** How many shots can be fired per second. */
   public fireRate = 10.0;
 
-  /** The effective range of the weapon in world units. */
-  public range = 100.0;
-
   /** The amount of damage inflicted by a single shot. */
   public damage = 10.0;
+
+  // --- Hitscan Properties ---
+  /** If true, the weapon performs an instant raycast. If false, it spawns a projectile. */
+  public isHitscan = true;
+  /** The effective range of the weapon in world units (hitscan only). */
+  public range = 100.0;
+
+  // --- Projectile Properties ---
+  /** The speed of the spawned projectile in world units per second. */
+  public projectileSpeed = 50.0;
+  /** The lifetime of the spawned projectile in seconds. */
+  public projectileLifetime = 2.0;
+  /** A handle to the mesh to use for rendering the projectile. */
+  public projectileMeshHandle?: ResourceHandle<Mesh>;
+  /** A handle to the material to use for rendering the projectile. */
+  public projectileMaterialHandle?: ResourceHandle<MaterialInstance>;
+  /** The radius of the projectile's physics collider. */
+  public projectileRadius = 0.1;
 
   /**
    * A timer to manage the cooldown between shots.

@@ -44,15 +44,24 @@ export class PhysicsBodyComponent implements IComponent {
    */
   public isPlayer = false;
 
+  /** Optional initial linear velocity to apply when the body is created. */
+  public initialVelocity: Vec3 | null = null;
+
   /**
    * Constructs a PhysicsBodyComponent.
    *
    * @param bodyType The body type (default: 'dynamic').
    * @param isPlayer True if player (default: false).
+   * @param initialVelocity Optional initial velocity.
    */
-  constructor(bodyType: PhysicsBodyType = "dynamic", isPlayer = false) {
+  constructor(
+    bodyType: PhysicsBodyType = "dynamic",
+    isPlayer = false,
+    initialVelocity: Vec3 | null = null,
+  ) {
     this.bodyType = bodyType;
     this.isPlayer = isPlayer;
+    this.initialVelocity = initialVelocity;
   }
 }
 

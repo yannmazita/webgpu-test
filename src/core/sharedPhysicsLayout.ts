@@ -60,11 +60,11 @@ export const COMMANDS_HEADER_BYTES = 24;
 /** Commands ring capacity (number of slots). */
 export const COMMANDS_RING_CAPACITY = 256;
 
-/** Bytes per command slot (padded to 80 for alignment and larger commands). */
-export const COMMANDS_SLOT_SIZE = 80;
+/** Bytes per command slot (padded for alignment and larger commands). */
+export const COMMANDS_SLOT_SIZE = 96;
 
-/** Max f32 parameters per command slot. (80 - 8 byte header) / 4 bytes per float */
-export const COMMANDS_MAX_PARAMS_F32 = 18;
+/** Max f32 parameters per command slot. (96 - 8 byte header) / 4 bytes per float */
+export const COMMANDS_MAX_PARAMS_F32 = 22;
 
 /** First slot byte offset (bytes). */
 export const COMMANDS_SLOT_OFFSET = COMMANDS_HEADER_BYTES;

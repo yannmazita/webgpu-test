@@ -246,6 +246,11 @@ function processCommands(): void {
       const isPlayer = paramsView[12] > 0.5;
       const slopeAngle = paramsView[13];
       const maxStepHeight = paramsView[14];
+      const vel = {
+        x: paramsView[17],
+        y: paramsView[18],
+        z: paramsView[19],
+      };
 
       // Select the appropriate Rapier RigidBodyDesc based on the type.
       let bodyDesc: RigidBodyDesc;
@@ -269,6 +274,9 @@ function processCommands(): void {
           bodyDesc = RAPIER.RigidBodyDesc.dynamic();
       }
       bodyDesc.setTranslation(pos.x, pos.y, pos.z).setRotation(rot);
+      if (vel.x !== 0 || vel.y !== 0 || vel.z !== 0) {
+        bodyDesc.setLinvel(vel.x, vel.y, vel.z);
+      }
 
       const body: RigidBody = world.createRigidBody(bodyDesc);
 

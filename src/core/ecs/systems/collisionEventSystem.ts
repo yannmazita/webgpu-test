@@ -11,7 +11,8 @@ import {
   COLLISION_EVENT_FLAG_STARTED,
 } from "@/core/sharedPhysicsLayout";
 import { DamageSystem } from "@/core/ecs/systems/damageSystem";
-// import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
+import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
+import { HealthComponent } from "@/core/ecs/components/healthComponent";
 
 /**
  * Drains the collision event ring buffer from the physics worker and
@@ -78,27 +79,55 @@ export class CollisionEventSystem {
   }
 
   /**
-   * Handles the game logic for a collision between two entities.
+   * Processes a single collision event.
    *
-   * @remarks
-   * This is where game-specific logic is implemented. For example, it checks
-   * if one entity is a projectile and the other is a damageable target.
-   * Future logic could include playing sounds or creating particle effects.
-   *
-   * @param entityA - The first entity involved in the collision.
-   * @param entityB - The second entity involved in the collision.
+   * This function checks if one of the involved entities is a projectile.
+   * If so, it enqueues a damage event for the other entity
+   * (if it's damageable and not the projectile's owner) and then
+   * destroys the projectile.
+   * @param entityA The first entity in the collision.
+   * @param entityB The second entity in the collision.
    */
   private handleCollision(entityA: number, entityB: number): void {
-    // This is where projectile logic will go.
-    // just logging the collision currently
-    console.log(
-      `[CollisionEventSystem] Collision detected between ${entityA} and ${entityB}`,
-    );
-
-    /*
-    // --- Example of future projectile logic ---
     const projA = this.world.getComponent(entityA, ProjectileComponent);
     const projB = this.world.getComponent(entityB, ProjectileComponent);
-    */
+
+    // Ignore projectile-on-projectile collisions
+    if (projA && projB) {
+      return;
+    }
+
+    let projectileEntity: number | null = null;
+    let otherEntity: number | null = null;
+    let projectileComponent: ProjectileComponent | undefined;
+
+    if (projA) {
+      projectileEntity = entityA;
+      otherEntity = entityB;
+      projectileComponent = projA;
+    } else if (projB) {
+      projectileEntity = entityB;
+      otherEntity = entityA;
+      projectileComponent = projB;
+    }
+
+    // If a projectile was involved...
+    if (projectileEntity && otherEntity && projectileComponent) {
+      // Don't let projectiles damage their owner
+      if (otherEntity !== projectileComponent.owner) {
+        // Check if the other entity can take damage
+        if (this.world.hasComponent(otherEntity, HealthComponent)) {
+          this.damageSystem.enqueueDamageEvent({
+            target: otherEntity,
+            amount: projectileComponent.damage,
+            source: projectileComponent.owner,
+          });
+        }
+      }
+
+      // Destroy the projectile on any impact (except with its owner initially,
+      // though this is better handled by physics layers later).
+      this.world.destroyEntity(projectileEntity);
+    }
   }
 }
