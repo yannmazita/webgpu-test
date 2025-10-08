@@ -88,6 +88,7 @@ import { getPickRay, raycast } from "@/core/utils/raycast";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
 import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
+import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 
 /**
  * Main render worker script.
@@ -125,6 +126,7 @@ let inputReader: IInputSource | null = null;
 let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
 let playerControllerSystem: PlayerControllerSystem | null = null;
+let damageSystem: DamageSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -370,6 +372,9 @@ async function initWorker(
     physicsCtx,
   );
 
+  // Damage system for processing all damage events
+  damageSystem = new DamageSystem();
+
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
     if ((engineStateCtx.i32.length | 0) >= 4) {
@@ -408,6 +413,7 @@ function frame(now: number): void {
     !cameraControllerSystem ||
     !actionController ||
     !playerControllerSystem ||
+    !damageSystem ||
     !actionMap
   ) {
     // If not ready, immediately signal completion to avoid stalling the main thread.
@@ -469,7 +475,17 @@ function frame(now: number): void {
   }
 
   // --- Gameplay Systems ---
-  weaponSystem(world, actionController, physicsCtx, raycastResultsCtx, dt);
+  if (physicsCtx && raycastResultsCtx) {
+    weaponSystem(
+      world,
+      actionController,
+      physicsCtx,
+      raycastResultsCtx,
+      damageSystem,
+      dt,
+    );
+  }
+  damageSystem.update(world);
 
   // --- Core ECS System Execution Order ---
   // The order of system execution is critical for correctness.
