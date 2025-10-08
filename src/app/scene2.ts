@@ -1,6 +1,9 @@
 // src/app/scene2.ts
 import { World } from "@/core/ecs/world";
-import { ResourceManager } from "@/core/resources/resourceManager";
+import {
+  PBRMaterialSpec,
+  ResourceManager,
+} from "@/core/resources/resourceManager";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
@@ -24,6 +27,7 @@ import { PlayerControllerComponent } from "@/core/ecs/components/playerControlle
 import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
+import { MaterialInstance } from "@/core/materials/materialInstance";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -135,6 +139,20 @@ export async function createScene(
   // A placeholder transform is added, but it will be overwritten.
   world.addComponent(cameraEntity, new TransformComponent());
 
+  // --- Define projectile assets via handles and specs ---
+  const projectileMeshHandle = ResourceHandle.forMesh(
+    "PRIM:icosphere:r=0.1,sub=1",
+  );
+  const projectileMaterialSpec: PBRMaterialSpec = {
+    type: "PBR",
+    options: {
+      emissive: [1.0, 0.5, 0.1],
+      emissiveStrength: 2.0,
+    },
+  };
+  const projectileMaterialHandle =
+    projectileMaterialSpec as unknown as ResourceHandle<MaterialInstance>;
+
   // --- Player ---
   const playerEntity = world.createEntity("player");
   {
@@ -151,8 +169,18 @@ export async function createScene(
 
     // Controller component to link input and physics.
     world.addComponent(playerEntity, new PlayerControllerComponent());
-    // Weapon component for firing
-    world.addComponent(playerEntity, new WeaponComponent());
+
+    // Weapon component configured for projectile firing.
+    const weapon = new WeaponComponent();
+    weapon.isHitscan = false;
+    weapon.fireRate = 4.0;
+    weapon.damage = 25.0;
+    weapon.projectileSpeed = 75.0;
+    weapon.projectileLifetime = 1.5;
+    weapon.projectileRadius = 0.1;
+    weapon.projectileMeshHandle = projectileMeshHandle;
+    weapon.projectileMaterialHandle = projectileMaterialHandle;
+    world.addComponent(playerEntity, weapon);
   }
 
   // --- Fog ---
