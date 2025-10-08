@@ -644,7 +644,7 @@ export class ResourceManager {
    * @param data The mesh data.
    * @returns The created mesh.
    */
-  private async createMesh(key: string, data: MeshData): Promise<Mesh> {
+  public async createMesh(key: string, data: MeshData): Promise<Mesh> {
     const cachedMesh = this.meshes.get(key);
     if (cachedMesh) {
       return cachedMesh;
