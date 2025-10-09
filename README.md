@@ -1,6 +1,8 @@
-# WebGPU Rendering Engine
+# 'no-name' WebGPU Engine
 
-A modern 3D rendering engine (and game engine) built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts.
+A modern 3D game engine built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts.
+
+**I'll find a name for it.**
 
 [engine_demo_30-09-2025.webm](https://github.com/user-attachments/assets/f4ae8923-2c84-4abb-b5e9-d7e1fd0db251)
 
