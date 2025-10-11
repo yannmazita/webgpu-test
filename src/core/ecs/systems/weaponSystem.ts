@@ -6,6 +6,7 @@ import {
   CMD_WEAPON_RAYCAST,
   RAYCAST_RESULTS_GEN_OFFSET,
   RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET,
+  RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
@@ -196,24 +197,23 @@ export function weaponSystem(
   if (currentGen !== lastRaycastGen) {
     lastRaycastGen = currentGen;
 
+    const sourceEntityId = Atomics.load(
+      raycastResultsCtx.i32,
+      RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET >> 2,
+    );
     const hitEntityId = Atomics.load(
       raycastResultsCtx.i32,
       RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
     );
 
-    if (hitEntityId !== 0) {
-      const hitEntity = hitEntityId;
-      if (world.hasComponent(hitEntity, HealthComponent)) {
-        // HACK: Assuming the first firing entity is the source. This is a limitation
-        // of the current raycast result buffer, which doesn't return the source ID.
-        // Todo: revision needed for multiplayer/AI.
-        const sourceEntity = firingQuery.length > 0 ? firingQuery[0] : 0;
-        const weapon = world.getComponent(sourceEntity, WeaponComponent);
+    if (hitEntityId !== 0 && sourceEntityId !== 0) {
+      if (world.hasComponent(hitEntityId, HealthComponent)) {
+        const weapon = world.getComponent(sourceEntityId, WeaponComponent);
         if (weapon) {
           damageSystem.enqueueDamageEvent({
-            target: hitEntity,
+            target: hitEntityId,
             amount: weapon.damage,
-            source: sourceEntity,
+            source: sourceEntityId,
           });
         }
       }

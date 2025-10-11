@@ -58,6 +58,7 @@ import {
   COLLISION_EVENT_FLAG_STARTED,
   COLLISION_EVENT_FLAG_STOPPED,
   CMD_CREATE_BODY_PARAMS,
+  RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 // Import Rapier physics module
@@ -432,6 +433,12 @@ function processCommands(): void {
             0,
           );
         }
+        // Store the source of the raycast regardless of hit
+        Atomics.store(
+          raycastResultsI32,
+          RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET >> 2,
+          physId, // This is the source entity ID from the command
+        );
         // Signal new result is available
         Atomics.add(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 1);
       }
