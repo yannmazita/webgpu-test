@@ -170,7 +170,7 @@ export async function createScene(
     const weapon = new WeaponComponent();
     weapon.isHitscan = false;
     weapon.fireRate = 4.0;
-    weapon.damage = 25.0;
+    weapon.damage = 5.0;
     weapon.projectileSpeed = 75.0;
     weapon.projectileLifetime = 1.5;
     weapon.projectileRadius = 0.1;
