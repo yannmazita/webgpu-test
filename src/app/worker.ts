@@ -93,6 +93,8 @@ import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
 import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
 import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
 import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
+import { DeathEvent, EventManager } from "@/core/ecs/events";
+import { DeathSystem } from "@/core/ecs/systems/deathSystem";
 
 /**
  * Main render worker script.
@@ -148,12 +150,20 @@ let cameraControllerSystem: CameraControllerSystem | null = null;
 let playerControllerSystem: PlayerControllerSystem | null = null;
 let damageSystem: DamageSystem | null = null;
 let collisionEventSystem: CollisionEventSystem | null = null;
+let deathSystem: DeathSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
 
 let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
+
+// Event Manager
+interface GameEvent {
+  type: "death";
+  payload: DeathEvent;
+}
+let eventManager: EventManager<GameEvent, "death"> | null = null;
 
 // Physics globals
 let physicsCtx: PhysicsContext | null = null;
@@ -303,6 +313,9 @@ async function initWorker(
     isPointerLocked: () => inputReader.isPointerLocked(),
   };
 
+  // Event Manager Setup
+  eventManager = new EventManager();
+
   // Engine editor state: validate buffer before using
   try {
     if (
@@ -403,7 +416,7 @@ async function initWorker(
   );
 
   // Damage system for processing all damage events
-  damageSystem = new DamageSystem();
+  damageSystem = new DamageSystem(eventManager);
 
   // Create the system for handling physics collision events.
   collisionEventSystem = new CollisionEventSystem(
@@ -411,6 +424,9 @@ async function initWorker(
     physicsCtx,
     damageSystem,
   );
+
+  // Create the system for handling death events.
+  deathSystem = new DeathSystem(world, eventManager);
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
@@ -454,6 +470,8 @@ function frame(now: number): void {
     !playerControllerSystem ||
     !damageSystem ||
     !collisionEventSystem ||
+    !deathSystem ||
+    !eventManager ||
     !actionMap
   ) {
     self.postMessage({ type: "FRAME_DONE" });
@@ -518,6 +536,7 @@ function frame(now: number): void {
   lifetimeSystem(world, dt);
   collisionEventSystem.update();
   damageSystem.update(world);
+  eventManager.update(); // Process all queued events (ie DeathEvent)
 
   // --- Core ECS System Execution Order ---
   animationSystem(world, dt);
