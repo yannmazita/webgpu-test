@@ -96,6 +96,7 @@ export class ResourceManager {
     MaterialInstance,
     PBRMaterialSpec
   >();
+  private materialInstances = new Map<string, MaterialInstance>();
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
@@ -246,6 +247,26 @@ export class ResourceManager {
    */
   public getHandleForMesh(mesh: Mesh): ResourceHandle<Mesh> | undefined {
     return this.meshToHandle.get(mesh);
+  }
+
+  /**
+   * Synchronously retrieves a pre-loaded mesh from the cache.
+   * @param handle The handle of the mesh to retrieve.
+   * @returns The Mesh object if it has been loaded and cached, otherwise undefined.
+   */
+  public getMeshByHandleSync(handle: ResourceHandle<Mesh>): Mesh | undefined {
+    return this.meshes.get(handle.key);
+  }
+
+  /**
+   * Synchronously retrieves a pre-loaded material instance from the cache.
+   * @param handle The handle of the material instance to retrieve.
+   * @returns The MaterialInstance if it has been created and cached, otherwise undefined.
+   */
+  public getMaterialInstanceByHandleSync(
+    handle: ResourceHandle<MaterialInstance>,
+  ): MaterialInstance | undefined {
+    return this.materialInstances.get(handle.key);
   }
 
   /**
@@ -422,12 +443,19 @@ export class ResourceManager {
    * final instance for later serialization via `getMaterialSpec`.
    *
    * @param spec The declarative description of the material.
+   * @param cacheKey An optional key to cache the created instance for synchronous retrieval later.
    * @return A promise that resolves to a new`MaterialInstance`.
    * @throws If the specification type is unsupported.
    */
   public async resolveMaterialSpec(
     spec: PBRMaterialSpec,
+    cacheKey?: string,
   ): Promise<MaterialInstance> {
+    if (cacheKey) {
+      const cached = this.materialInstances.get(cacheKey);
+      if (cached) return cached;
+    }
+
     if (!spec || spec.type !== "PBR") {
       throw new Error("Unsupported material spec (expected type 'PBR').");
     }
@@ -439,6 +467,11 @@ export class ResourceManager {
     );
     // Associate the spec with the instance for serialization
     this.materialInstanceToSpec.set(instance, spec);
+
+    if (cacheKey) {
+      this.materialInstances.set(cacheKey, instance);
+    }
+
     return instance;
   }
 

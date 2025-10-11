@@ -128,60 +128,55 @@ export function weaponSystem(
         return;
       }
 
-      // Use an async IIFE to resolve resources and then spawn the entity.
-      // This is necessary because resource resolution is asynchronous.
-      (async () => {
-        try {
-          const [mesh, material] = await Promise.all([
-            resourceManager.resolveMeshByHandle(weapon.projectileMeshHandle!),
-            resourceManager.resolveMaterialSpec(
-              weapon.projectileMaterialHandle as any,
-            ), // TODO: Fix this type issue later
-          ]);
+      // Synchronously get pre-loaded resources. This is fast and non-blocking
+      // because the assets were loaded during the scene setup phase.
+      const mesh = resourceManager.getMeshByHandleSync(
+        weapon.projectileMeshHandle,
+      );
+      const material = resourceManager.getMaterialInstanceByHandleSync(
+        weapon.projectileMaterialHandle,
+      );
 
-          const projectileEntity = world.createEntity();
+      if (!mesh || !material) {
+        console.error(
+          `[WeaponSystem] Projectile resources not pre-loaded for handles: ${weapon.projectileMeshHandle}, ${weapon.projectileMaterialHandle}. Firing aborted. Ensure assets are loaded in scene file.`,
+        );
+        return;
+      }
 
-          // Transform: Start at camera position, move slightly forward to avoid self-collision
-          const startPosition = vec3.add(
-            rayOrigin,
-            vec3.scale(rayDirection, 1.0),
-          );
-          const transform = new TransformComponent();
-          transform.setPosition(startPosition);
-          world.addComponent(projectileEntity, transform);
+      const projectileEntity = world.createEntity();
 
-          // Visuals
-          world.addComponent(
-            projectileEntity,
-            new MeshRendererComponent(mesh, material),
-          );
+      // Transform: Start at camera position, move slightly forward to avoid self-collision
+      const startPosition = vec3.add(rayOrigin, vec3.scale(rayDirection, 1.0));
+      const transform = new TransformComponent();
+      transform.setPosition(startPosition);
+      world.addComponent(projectileEntity, transform);
 
-          // Gameplay
-          world.addComponent(
-            projectileEntity,
-            new ProjectileComponent(
-              playerEntity,
-              weapon.damage,
-              weapon.projectileLifetime,
-            ),
-          );
+      // Visuals
+      world.addComponent(
+        projectileEntity,
+        new MeshRendererComponent(mesh, material),
+      );
 
-          // Physics
-          vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
-          world.addComponent(
-            projectileEntity,
-            new PhysicsBodyComponent("dynamic", false, projectileVelocity),
-          );
-          const collider = new PhysicsColliderComponent();
-          collider.setSphere(weapon.projectileRadius);
-          world.addComponent(projectileEntity, collider);
-        } catch (error) {
-          console.error(
-            "[WeaponSystem] Failed to resolve projectile resources:",
-            error,
-          );
-        }
-      })();
+      // Gameplay
+      world.addComponent(
+        projectileEntity,
+        new ProjectileComponent(
+          playerEntity,
+          weapon.damage,
+          weapon.projectileLifetime,
+        ),
+      );
+
+      // Physics
+      vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
+      world.addComponent(
+        projectileEntity,
+        new PhysicsBodyComponent("dynamic", false, projectileVelocity),
+      );
+      const collider = new PhysicsColliderComponent();
+      collider.setSphere(weapon.projectileRadius);
+      world.addComponent(projectileEntity, collider);
     }
   }
 

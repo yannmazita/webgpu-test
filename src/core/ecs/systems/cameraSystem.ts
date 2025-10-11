@@ -80,7 +80,7 @@ function extractFrustumPlanes(
  * associated `TransformComponent`. It computes the view matrix, the combined
  * view-projection matrix, and extracts the frustum planes. This ensures that
  * all camera data is consistent and ready for the rendering system. It must
- * run after the `transformSystem` has updated all world matrices but after
+ * run after the `transformSystem` has updated all world matrices but before
  * renderSystem.
  *
  * @param world The world containing the entities.

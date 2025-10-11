@@ -3,7 +3,12 @@ import { World } from "../world";
 import { PhysicsBodyComponent } from "../components/physicsComponents";
 import { PhysicsColliderComponent } from "../components/physicsComponents";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
-import { CMD_CREATE_BODY, CMD_DESTROY_BODY } from "@/core/sharedPhysicsLayout";
+import {
+  CMD_CREATE_BODY,
+  CMD_CREATE_BODY_PARAMS,
+  CMD_DESTROY_BODY,
+  COMMANDS_MAX_PARAMS_F32,
+} from "@/core/sharedPhysicsLayout";
 import { TransformComponent } from "../components/transformComponent";
 import { PlayerControllerComponent } from "../components/playerControllerComponent";
 
@@ -83,46 +88,34 @@ export class PhysicsCommandSystem {
       }
     })();
 
-    // Pack params (16 floats)
-    const params: number[] = [
-      colliderComp.type,
-      colliderComp.params[0],
-      colliderComp.params[1],
-      colliderComp.params[2],
-      transformComp ? transformComp.position[0] : 0,
-      transformComp ? transformComp.position[1] : 0,
-      transformComp ? transformComp.position[2] : 0,
-      transformComp ? transformComp.rotation[0] : 0,
-      transformComp ? transformComp.rotation[1] : 0,
-      transformComp ? transformComp.rotation[2] : 0,
-      transformComp ? transformComp.rotation[3] : 1,
-      bodyTypeInt, // bodyType (0-3)
-      bodyComp.isPlayer ? 1.0 : 0.0,
-    ];
+    const P = CMD_CREATE_BODY_PARAMS;
+    const params: number[] = new Array(COMMANDS_MAX_PARAMS_F32).fill(0);
 
-    // If player, set [13-16]: controller params (pad rest if not)
+    params[P.COLLIDER_TYPE] = colliderComp.type;
+    params[P.PARAM_0] = colliderComp.params[0];
+    params[P.PARAM_1] = colliderComp.params[1];
+    params[P.PARAM_2] = colliderComp.params[2];
+    params[P.POS_X] = transformComp ? transformComp.position[0] : 0;
+    params[P.POS_Y] = transformComp ? transformComp.position[1] : 0;
+    params[P.POS_Z] = transformComp ? transformComp.position[2] : 0;
+    params[P.ROT_X] = transformComp ? transformComp.rotation[0] : 0;
+    params[P.ROT_Y] = transformComp ? transformComp.rotation[1] : 0;
+    params[P.ROT_Z] = transformComp ? transformComp.rotation[2] : 0;
+    params[P.ROT_W] = transformComp ? transformComp.rotation[3] : 1;
+    params[P.BODY_TYPE] = bodyTypeInt;
+    params[P.IS_PLAYER] = bodyComp.isPlayer ? 1.0 : 0.0;
+
     if (bodyComp.isPlayer && playerComp) {
-      params[13] = playerComp.slopeAngle;
-      params[14] = playerComp.maxStepHeight;
-      params[15] = playerComp.slideEnabled ? 1.0 : 0.0;
-      params[16] = playerComp.maxSlopeForGround;
-    } else {
-      // Pad [13-16]=0 for non-player
-      params[13] = 0;
-      params[14] = 0;
-      params[15] = 0;
-      params[16] = 0;
+      params[P.SLOPE_ANGLE] = playerComp.slopeAngle;
+      params[P.MAX_STEP_HEIGHT] = playerComp.maxStepHeight;
+      params[P.SLIDE_ENABLED] = playerComp.slideEnabled ? 1.0 : 0.0;
+      params[P.MAX_SLOPE_FOR_GROUND] = playerComp.maxSlopeForGround;
     }
 
-    // Add initial velocity at [17-19]
     if (bodyComp.initialVelocity) {
-      params[17] = bodyComp.initialVelocity[0];
-      params[18] = bodyComp.initialVelocity[1];
-      params[19] = bodyComp.initialVelocity[2];
-    } else {
-      params[17] = 0;
-      params[18] = 0;
-      params[19] = 0;
+      params[P.VEL_X] = bodyComp.initialVelocity[0];
+      params[P.VEL_Y] = bodyComp.initialVelocity[1];
+      params[P.VEL_Z] = bodyComp.initialVelocity[2];
     }
 
     const physId = entity;

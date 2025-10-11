@@ -146,6 +146,36 @@ export const CMD_MOVE_PLAYER = 5;
 /** Command type: Perform a weapon raycast. */
 export const CMD_WEAPON_RAYCAST = 6;
 
+/**
+ * Defines the indices for parameters within the `CMD_CREATE_BODY` command's
+ * floating-point parameter block. Using these constants prevents errors from
+ * mismatched ordering between the command system and the physics worker.
+ */
+export const CMD_CREATE_BODY_PARAMS = {
+  COLLIDER_TYPE: 0,
+  PARAM_0: 1,
+  PARAM_1: 2,
+  PARAM_2: 3,
+  POS_X: 4,
+  POS_Y: 5,
+  POS_Z: 6,
+  ROT_X: 7,
+  ROT_Y: 8,
+  ROT_Z: 9,
+  ROT_W: 10,
+  BODY_TYPE: 11,
+  IS_PLAYER: 12,
+  // Player controller specific
+  SLOPE_ANGLE: 13,
+  MAX_STEP_HEIGHT: 14,
+  SLIDE_ENABLED: 15,
+  MAX_SLOPE_FOR_GROUND: 16,
+  // Initial velocity
+  VEL_X: 17,
+  VEL_Y: 18,
+  VEL_Z: 19,
+};
+
 /* ==========================================================================================
  * Raycast Results SAB (physics → render)
  * A single-slot buffer to return the result of the last weapon raycast.

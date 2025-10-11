@@ -123,6 +123,31 @@ export async function createScene(
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
   world.addResource(envMap.iblComponent);
 
+  // --- Pre-load Projectile Assets ---
+  // Define handles and specs for projectile assets. By resolving them here during
+  // scene setup, they are guaranteed to be in the cache for synchronous use
+  // by the weaponSystem at runtime.
+  const projectileMeshHandle = ResourceHandle.forMesh(
+    "PRIM:icosphere:r=0.1,sub=1",
+  );
+  await resourceManager.resolveMeshByHandle(projectileMeshHandle);
+
+  const projectileMaterialSpec: PBRMaterialSpec = {
+    type: "PBR",
+    options: {
+      emissive: [1.0, 0.5, 0.1],
+      emissiveStrength: 2.0,
+      albedo: [1.0, 0.5, 0.1, 1.0],
+    },
+  };
+  const projectileMaterialHandle = ResourceHandle.forMaterial(
+    "projectile_material",
+  );
+  await resourceManager.resolveMaterialSpec(
+    projectileMaterialSpec,
+    projectileMaterialHandle.key,
+  );
+
   // --- Camera ---
   // The camera entity is created here, but its transform will be managed by
   // the PlayerControllerSystem each frame to follow the player.
@@ -134,20 +159,6 @@ export async function createScene(
   world.addComponent(cameraEntity, new MainCameraTagComponent());
   // A placeholder transform is added, but it will be overwritten.
   world.addComponent(cameraEntity, new TransformComponent());
-
-  // --- Define projectile assets via handles and specs ---
-  const projectileMeshHandle = ResourceHandle.forMesh(
-    "PRIM:icosphere:r=0.1,sub=1",
-  );
-  const projectileMaterialSpec: PBRMaterialSpec = {
-    type: "PBR",
-    options: {
-      emissive: [1.0, 0.5, 0.1],
-      emissiveStrength: 2.0,
-    },
-  };
-  const projectileMaterialHandle =
-    projectileMaterialSpec as unknown as ResourceHandle<MaterialInstance>;
 
   // --- Player ---
   const playerEntity = world.createEntity("player");
