@@ -209,7 +209,7 @@ export async function createScene(
         metallicRoughnessMap:
           "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
         metallic: 0.0, // Snow is not metallic
-        uvScale: [50, 50], // Tile the texture 50 times
+        uvScale: [5, 5], // Tile the texture 10 times
       },
     );
 
