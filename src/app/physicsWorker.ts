@@ -307,6 +307,9 @@ function processCommands(): void {
       }
 
       if (colliderDesc) {
+        // By default, Rapier does not report events for performance. We must opt-in.
+        colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+
         // Don't set collision groups - use default behavior (everything collides)
         // The raycast filtering will handle excluding the player via filterExcludeRigidBody
 
