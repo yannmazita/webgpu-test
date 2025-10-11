@@ -222,7 +222,7 @@ export async function createScene(
     world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
     world.addComponent(
       groundEntity,
-      new PhysicsColliderComponent(1, [100, 0.1, 100]),
+      new PhysicsColliderComponent(1, [100, 0.001, 100]),
     );
   }
 
