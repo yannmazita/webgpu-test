@@ -1,7 +1,6 @@
 // src/core/ecs/systems/weaponSystem.ts
 
 import { World } from "@/core/ecs/world";
-import { IActionController } from "@/core/input/action";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import {
   CMD_WEAPON_RAYCAST,
@@ -10,10 +9,12 @@ import {
 } from "@/core/sharedPhysicsLayout";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
-import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
+import {
+  MainCameraTagComponent,
+  WantsToFireTagComponent,
+} from "@/core/ecs/components/tagComponents";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
-import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { vec3 } from "wgpu-matrix";
 import { DamageSystem } from "./damageSystem";
 import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
@@ -23,6 +24,7 @@ import {
 } from "@/core/ecs/components/physicsComponents";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { ResourceManager } from "@/core/resources/resourceManager";
+import { LifetimeComponent } from "../components/lifetimeComponent";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();
@@ -43,7 +45,6 @@ let lastRaycastGen = 0;
  *
  * @param world The ECS world.
  * @param resourceManager The manager for loading and creating assets.
- * @param actions The input action controller.
  * @param physCtx The context for the physics command buffer.
  * @param raycastResultsCtx The context for the raycast results buffer.
  * @param damageSystem The system responsible for processing damage events.
@@ -52,132 +53,139 @@ let lastRaycastGen = 0;
 export function weaponSystem(
   world: World,
   resourceManager: ResourceManager,
-  actions: IActionController,
   physCtx: PhysicsContext,
   raycastResultsCtx: { i32: Int32Array; f32: Float32Array },
   damageSystem: DamageSystem,
   deltaTime: number,
 ): void {
-  const query = world.query([PlayerControllerComponent, WeaponComponent]);
-  if (query.length === 0) {
-    return;
-  }
-
-  const playerEntity = query[0];
-  const weapon = world.getComponent(playerEntity, WeaponComponent);
-  if (!weapon) {
-    return;
-  }
-
-  // 1. Update cooldown timer
-  if (weapon.cooldown > 0) {
-    weapon.cooldown -= deltaTime;
-  }
-
-  // 2. Check for fire input
-  if (actions.isPressed("fire") && weapon.cooldown <= 0) {
-    weapon.cooldown = 1.0 / weapon.fireRate;
-
-    const cameraQuery = world.query([
-      MainCameraTagComponent,
-      CameraComponent,
-      TransformComponent,
-    ]);
-    if (cameraQuery.length === 0) return;
-
-    const cameraTransform = world.getComponent(
-      cameraQuery[0],
-      TransformComponent,
-    );
-    if (!cameraTransform) return;
-
-    // Ray originates from the camera's world position
-    vec3.set(
-      cameraTransform.worldMatrix[12],
-      cameraTransform.worldMatrix[13],
-      cameraTransform.worldMatrix[14],
-      rayOrigin,
-    );
-
-    // Ray direction is the camera's forward vector (-Z axis)
-    vec3.set(
-      -cameraTransform.worldMatrix[8],
-      -cameraTransform.worldMatrix[9],
-      -cameraTransform.worldMatrix[10],
-      rayDirection,
-    );
-    vec3.normalize(rayDirection, rayDirection);
-
-    if (weapon.isHitscan) {
-      // --- Hitscan Logic ---
-      tryEnqueueCommand(physCtx, CMD_WEAPON_RAYCAST, playerEntity, [
-        rayOrigin[0],
-        rayOrigin[1],
-        rayOrigin[2],
-        rayDirection[0],
-        rayDirection[1],
-        rayDirection[2],
-        weapon.range,
-      ]);
-    } else {
-      // --- Projectile Spawning Logic ---
-      if (!weapon.projectileMeshHandle || !weapon.projectileMaterialHandle) {
-        console.warn(
-          "[WeaponSystem] Attempted to fire projectile weapon without projectile mesh/material handles.",
-        );
-        return;
-      }
-
-      // Synchronously get pre-loaded resources. This is fast and non-blocking
-      // because the assets were loaded during the scene setup phase.
-      const mesh = resourceManager.getMeshByHandleSync(
-        weapon.projectileMeshHandle,
-      );
-      const material = resourceManager.getMaterialInstanceByHandleSync(
-        weapon.projectileMaterialHandle,
-      );
-
-      if (!mesh || !material) {
-        console.error(
-          `[WeaponSystem] Projectile resources not pre-loaded for handles: ${weapon.projectileMeshHandle}, ${weapon.projectileMaterialHandle}. Firing aborted. Ensure assets are loaded in scene file.`,
-        );
-        return;
-      }
-
-      const projectileEntity = world.createEntity();
-
-      // Transform: Start at camera position, move slightly forward to avoid self-collision
-      const startPosition = vec3.add(rayOrigin, vec3.scale(rayDirection, 1.0));
-      const transform = new TransformComponent();
-      transform.setPosition(startPosition);
-      world.addComponent(projectileEntity, transform);
-
-      // Visuals
-      world.addComponent(
-        projectileEntity,
-        new MeshRendererComponent(mesh, material),
-      );
-
-      // Gameplay
-      world.addComponent(
-        projectileEntity,
-        new ProjectileComponent(
-          playerEntity,
-          weapon.damage,
-          weapon.projectileLifetime,
-        ),
-      );
-
-      // Physics
-      vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
-      world.addComponent(
-        projectileEntity,
-        new PhysicsBodyComponent("dynamic", false, projectileVelocity),
-      );
-      const collider = new PhysicsColliderComponent();
-      collider.setSphere(weapon.projectileRadius);
-      world.addComponent(projectileEntity, collider);
+  // 1. Update cooldown timers for all weapons
+  const allWeaponsQuery = world.query([WeaponComponent]);
+  for (const entity of allWeaponsQuery) {
+    const weapon = world.getComponent(entity, WeaponComponent);
+    if (weapon && weapon.cooldown > 0) {
+      weapon.cooldown -= deltaTime;
     }
+  }
+
+  // 2. Query for entities that want to fire
+  const firingQuery = world.query([WeaponComponent, WantsToFireTagComponent]);
+  if (firingQuery.length === 0) {
+    return;
+  }
+
+  // Find the main camera once for all firing entities that might need it
+  const cameraQuery = world.query([
+    MainCameraTagComponent,
+    CameraComponent,
+    TransformComponent,
+  ]);
+  if (cameraQuery.length === 0) return;
+  const cameraTransform = world.getComponent(
+    cameraQuery[0],
+    TransformComponent,
+  );
+  if (!cameraTransform) return;
+
+  for (const firingEntity of firingQuery) {
+    const weapon = world.getComponent(firingEntity, WeaponComponent);
+    if (!weapon) continue;
+
+    // Check cooldown
+    if (weapon.cooldown <= 0) {
+      weapon.cooldown = 1.0 / weapon.fireRate;
+
+      // Ray originates from the camera's world position
+      vec3.set(
+        cameraTransform.worldMatrix[12],
+        cameraTransform.worldMatrix[13],
+        cameraTransform.worldMatrix[14],
+        rayOrigin,
+      );
+
+      // Ray direction is the camera's forward vector (-Z axis)
+      vec3.set(
+        -cameraTransform.worldMatrix[8],
+        -cameraTransform.worldMatrix[9],
+        -cameraTransform.worldMatrix[10],
+        rayDirection,
+      );
+      vec3.normalize(rayDirection, rayDirection);
+
+      if (weapon.isHitscan) {
+        // --- Hitscan Logic ---
+        tryEnqueueCommand(physCtx, CMD_WEAPON_RAYCAST, firingEntity, [
+          rayOrigin[0],
+          rayOrigin[1],
+          rayOrigin[2],
+          rayDirection[0],
+          rayDirection[1],
+          rayDirection[2],
+          weapon.range,
+        ]);
+      } else {
+        // --- Projectile Spawning Logic ---
+        if (!weapon.projectileMeshHandle || !weapon.projectileMaterialHandle) {
+          console.warn(
+            "[WeaponSystem] Attempted to fire projectile weapon without projectile mesh/material handles.",
+          );
+          continue; // Use continue to process other firing entities
+        }
+
+        const mesh = resourceManager.getMeshByHandleSync(
+          weapon.projectileMeshHandle,
+        );
+        const material = resourceManager.getMaterialInstanceByHandleSync(
+          weapon.projectileMaterialHandle,
+        );
+
+        if (!mesh || !material) {
+          console.error(
+            `[WeaponSystem] Projectile resources not pre-loaded for handles: ${weapon.projectileMeshHandle}, ${weapon.projectileMaterialHandle}. Firing aborted. Ensure assets are loaded in scene file.`,
+          );
+          continue;
+        }
+
+        const projectileEntity = world.createEntity();
+
+        const startPosition = vec3.add(
+          rayOrigin,
+          vec3.scale(rayDirection, 1.0),
+        );
+        const transform = new TransformComponent();
+        transform.setPosition(startPosition);
+        world.addComponent(projectileEntity, transform);
+
+        world.addComponent(
+          projectileEntity,
+          new MeshRendererComponent(mesh, material),
+        );
+
+        // Gameplay
+        world.addComponent(
+          projectileEntity,
+          new ProjectileComponent(firingEntity, weapon.damage),
+        );
+
+        // Lifetime
+        world.addComponent(
+          projectileEntity,
+          new LifetimeComponent(weapon.projectileLifetime),
+        );
+
+        // Physics
+        vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
+        world.addComponent(
+          projectileEntity,
+          new PhysicsBodyComponent("dynamic", false, projectileVelocity),
+        );
+        const collider = new PhysicsColliderComponent();
+        collider.setSphere(weapon.projectileRadius);
+        world.addComponent(projectileEntity, collider);
+      }
+    }
+
+    // IMPORTANT: Remove the intent tag after processing.
+    world.removeComponent(firingEntity, WantsToFireTagComponent);
   }
 
   // 3. Check for raycast results from the physics worker (Hitscan only)
@@ -196,11 +204,18 @@ export function weaponSystem(
     if (hitEntityId !== 0) {
       const hitEntity = hitEntityId;
       if (world.hasComponent(hitEntity, HealthComponent)) {
-        damageSystem.enqueueDamageEvent({
-          target: hitEntity,
-          amount: weapon.damage,
-          source: playerEntity,
-        });
+        // HACK: Assuming the first firing entity is the source. This is a limitation
+        // of the current raycast result buffer, which doesn't return the source ID.
+        // Todo: revision needed for multiplayer/AI.
+        const sourceEntity = firingQuery.length > 0 ? firingQuery[0] : 0;
+        const weapon = world.getComponent(sourceEntity, WeaponComponent);
+        if (weapon) {
+          damageSystem.enqueueDamageEvent({
+            target: hitEntity,
+            amount: weapon.damage,
+            source: sourceEntity,
+          });
+        }
       }
     }
   }

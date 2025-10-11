@@ -5,7 +5,6 @@ import { PhysicsBodyComponent } from "../components/physicsComponents";
 import { TransformComponent } from "../components/transformComponent";
 import { World } from "../world";
 import { quat, vec3 } from "wgpu-matrix";
-import { MainCameraTagComponent } from "../components/tagComponents";
 import { PhysicsContext, tryEnqueueCommand } from "@/core/physicsState";
 import { CMD_MOVE_PLAYER } from "@/core/sharedPhysicsLayout";
 
@@ -18,8 +17,6 @@ export class PlayerControllerSystem {
   private tmpRight = vec3.create();
   private tmpHorizontalMovement = vec3.create();
   private tmpDesiredDisplacement = vec3.create();
-  private tmpCameraOffset = vec3.fromValues(0, 1.6, 0); // Head height
-  private tmpCameraPos = vec3.create();
 
   constructor(
     private actions: IActionController,
@@ -30,22 +27,30 @@ export class PlayerControllerSystem {
    * Updates the player's state based on user input and physics feedback.
    *
    * This method is the core of the player controller, executed every frame. It
-   * orchestrates several key behaviors:
-   * 1.  **Mouse Look**: Rotates the player's body (yaw) and camera (pitch)
-   *     based on mouse movement.
-   * 2.  **Jumping**: Processes jump input, allowing the player to jump only
-   *     when they are on the ground.
-   * 3.  **Velocity Calculation**: Manages vertical velocity by applying gravity
-   *     continuously. When the player is grounded, it clamps downward
-   *     velocity to ensure stability.
-   * 4.  **Movement Calculation**: Determines the desired horizontal movement
+   * translates user input into a desired movement vector and sends it to the
+   * physics worker for execution.
+   *
+   * @remarks
+   * This system orchestrates several key behaviors:
+   * 1.  **Mouse Look**: It reads mouse movement to update the `pitch` and `yaw`
+   *     properties on the {@link PlayerControllerComponent}. Crucially, it only
+   *     applies the `yaw` (horizontal rotation) to the player's body
+   *     transform. The `pitch` (vertical rotation) is used by the
+   *     `cameraFollowSystem` to orient the first-person camera.
+   * 2.  **Jumping**: It processes the "jump" action, applying an upward
+   *     velocity impulse only when the character controller reports being on
+   *     the ground.
+   * 3.  **Velocity Calculation**: It manages vertical velocity by applying
+   *     gravity each frame. When the player is grounded, it clamps downward
+   *     velocity to ensure stability and prevent gravity from accumulating.
+   * 4.  **Movement Calculation**: It determines the desired horizontal movement
    *     direction from keyboard input (WASD) relative to the player's
-   *     current orientation.
-   * 5.  **Physics Command**: Assembles a final displacement vector for the
+   *     current yaw.
+   * 5.  **Physics Command**: It assembles a final displacement vector for the
    *     frame (combining horizontal movement and vertical velocity) and
-   *     enqueues it as a `CMD_MOVE_PLAYER` command to the physics worker.
-   * 6.  **Camera Follow**: Updates the main camera's transform to follow the
-   *     player's body, applying both pitch and yaw for a first-person view.
+   *     enqueues it as a `CMD_MOVE_PLAYER` command. The physics worker is
+   *     responsible for executing this movement, handling all collisions,
+   *     sliding, and step-climbing logic.
    *
    * @param world The ECS world instance, used to query for the player
    *     entity and its components.
@@ -71,21 +76,20 @@ export class PlayerControllerSystem {
     if (!controller || !body || !transform) return;
 
     // --- Mouse Look ---
-    // Updates camera pitch and player body yaw based on mouse input.
+    // Updates internal pitch state and player body's yaw transform.
     if (this.actions.isPointerLocked()) {
       const mouseDelta = this.actions.getMouseDelta();
       controller.yaw -= mouseDelta.x * controller.sensitivity;
       controller.pitch -= mouseDelta.y * controller.sensitivity;
 
-      // Clamp pitch to prevent the camera from flipping over.
       const pitchLimit = Math.PI / 2 - 0.01;
       controller.pitch = Math.max(
         -pitchLimit,
         Math.min(pitchLimit, controller.pitch),
       );
 
-      // Apply yaw rotation to the player's body transform. Pitch is handled
-      // separately by the camera follow logic.
+      // Apply yaw rotation to the player's body transform. Pitch is only
+      // stored on the component for the cameraFollowSystem to use.
       const bodyRotation = quat.fromEuler(0, controller.yaw, 0, "yxz");
       transform.setRotation(bodyRotation);
     }
@@ -162,35 +166,6 @@ export class PlayerControllerSystem {
         this.tmpDesiredDisplacement[1],
         this.tmpDesiredDisplacement[2],
       ]);
-    }
-
-    // --- Camera follow logic ---
-    // Updates the main camera's transform to match the player's position and
-    // orientation, creating the first-person view.
-    const cameraQuery = world.query([
-      MainCameraTagComponent,
-      TransformComponent,
-    ]);
-    if (cameraQuery.length > 0) {
-      const cameraEntity = cameraQuery[0];
-      const cameraTransform = world.getComponent(
-        cameraEntity,
-        TransformComponent,
-      );
-      if (cameraTransform) {
-        // Position the camera at head height relative to the player body.
-        vec3.add(transform.position, this.tmpCameraOffset, this.tmpCameraPos);
-        cameraTransform.setPosition(this.tmpCameraPos);
-
-        // Apply both pitch and yaw to the camera's rotation.
-        const cameraRotation = quat.fromEuler(
-          controller.pitch,
-          controller.yaw,
-          0,
-          "yxz",
-        );
-        cameraTransform.setRotation(cameraRotation);
-      }
     }
   }
 }
