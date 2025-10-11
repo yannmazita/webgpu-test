@@ -481,6 +481,9 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
     var color = ambient + Lo;
 
+    // Add emissive color before fog is applied
+    color += emissive * material.emissive.w;
+
     // ===== Volumetric Fog =====
     if (scene.miscParams.x > 0.5) { // Check fogEnabled flag
         let view_dir = normalize(fi.worldPosition - scene.cameraPos.xyz);
@@ -519,9 +522,6 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
 
         color = mix(total_inscattering, color, extinction);
     }
-
-    // Add emissive color after fog so it cuts through, scaled by emissiveStrength
-    color += emissive * material.emissive.w;
 
     // Conditionally apply tone mapping based on scene.miscParams.y
     var final_color = color;

@@ -197,8 +197,8 @@ export async function createScene(
 
   // --- Fog ---
   const fog = new FogComponent();
-  fog.color.set([0.1, 0.1, 0.12, 1.0]);
-  fog.density = 0.02;
+  fog.color.set([1, 1, 1, 1.0]);
+  fog.density = 0.5;
   fog.height = -5.0;
   fog.heightFalloff = 0.01;
   fog.inscatteringIntensity = 4.0;
