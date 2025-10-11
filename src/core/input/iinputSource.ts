@@ -9,6 +9,13 @@ export interface IInputSource {
   isKeyDown(code: string): boolean;
 
   /**
+   * Checks if a specific mouse button is currently held down.
+   * @param button The button index (0=left, 1=middle, 2=right).
+   * @returns True if the button is down, false otherwise.
+   */
+  isMouseButtonDown(button: number): boolean;
+
+  /**
    * Gets the mouse movement since the last frame.
    * @returns An object with x and y deltas.
    */

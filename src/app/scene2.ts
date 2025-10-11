@@ -1,16 +1,13 @@
 // src/app/scene2.ts
 import { World } from "@/core/ecs/world";
-import { ResourceManager } from "@/core/resources/resourceManager";
+import {
+  PBRMaterialSpec,
+  ResourceManager,
+} from "@/core/resources/resourceManager";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
-import { LightComponent } from "@/core/ecs/components/lightComponent";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
-import {
-  createCubeMeshData,
-  createIcosphereMeshData,
-  createPlaneMeshData,
-} from "@/core/utils/primitives";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
   SceneSunComponent,
@@ -23,6 +20,10 @@ import {
 } from "@/core/ecs/components/physicsComponents";
 import { PRNG } from "@/core/utils/prng";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
+import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
+import { HealthComponent } from "@/core/ecs/components/healthComponent";
+import { ResourceHandle } from "@/core/resources/resourceHandle";
+import { MaterialInstance } from "@/core/materials/materialInstance";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -39,10 +40,10 @@ async function createPillarForest(
   console.log(`[Scene] Creating ${count} pillars...`);
 
   // Create a single shared mesh and material for efficiency.
-  const boxMesh = await resourceManager.createMesh(
-    "pillar_mesh",
-    createCubeMeshData(1),
+  const boxMesh = await resourceManager.resolveMeshByHandle(
+    ResourceHandle.forMesh("PRIM:cube:size=1"),
   );
+
   const boxMaterial = await resourceManager.createPBRMaterialInstance(
     await resourceManager.createPBRMaterialTemplate({
       albedo: [0.4, 0.45, 0.5, 1],
@@ -106,9 +107,6 @@ export async function createScene(
 ): Promise<{
   cameraEntity: number;
   playerEntity: number;
-  keyLightEntity: number;
-  fillLightEntity: number;
-  rimLightEntity: number;
 }>;
 export async function createScene(
   world: World,
@@ -116,9 +114,6 @@ export async function createScene(
 ): Promise<{
   cameraEntity: number;
   playerEntity: number;
-  keyLightEntity: number;
-  fillLightEntity: number;
-  rimLightEntity: number;
 }> {
   // --- Environment & Skybox ---
   const envMap = await resourceManager.createEnvironmentMap(
@@ -140,6 +135,20 @@ export async function createScene(
   // A placeholder transform is added, but it will be overwritten.
   world.addComponent(cameraEntity, new TransformComponent());
 
+  // --- Define projectile assets via handles and specs ---
+  const projectileMeshHandle = ResourceHandle.forMesh(
+    "PRIM:icosphere:r=0.1,sub=1",
+  );
+  const projectileMaterialSpec: PBRMaterialSpec = {
+    type: "PBR",
+    options: {
+      emissive: [1.0, 0.5, 0.1],
+      emissiveStrength: 2.0,
+    },
+  };
+  const projectileMaterialHandle =
+    projectileMaterialSpec as unknown as ResourceHandle<MaterialInstance>;
+
   // --- Player ---
   const playerEntity = world.createEntity("player");
   {
@@ -156,6 +165,18 @@ export async function createScene(
 
     // Controller component to link input and physics.
     world.addComponent(playerEntity, new PlayerControllerComponent());
+
+    // Weapon component configured for projectile firing.
+    const weapon = new WeaponComponent();
+    weapon.isHitscan = false;
+    weapon.fireRate = 4.0;
+    weapon.damage = 5.0;
+    weapon.projectileSpeed = 75.0;
+    weapon.projectileLifetime = 1.5;
+    weapon.projectileRadius = 0.1;
+    weapon.projectileMeshHandle = projectileMeshHandle;
+    weapon.projectileMaterialHandle = projectileMaterialHandle;
+    world.addComponent(playerEntity, weapon);
   }
 
   // --- Fog ---
@@ -174,10 +195,9 @@ export async function createScene(
     groundTransform.setPosition(0, 0, 0);
     world.addComponent(groundEntity, groundTransform);
 
-    // Create a 200x200 plane mesh
-    const groundMesh = await resourceManager.createMesh(
-      "ground_plane_mesh",
-      createPlaneMeshData(200),
+    // creating the plane mesh
+    const groundMesh = await resourceManager.resolveMeshByHandle(
+      ResourceHandle.forMesh("PRIM:plane:size=200"),
     );
 
     // Create a material instance with UV tiling
@@ -189,7 +209,7 @@ export async function createScene(
         metallicRoughnessMap:
           "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
         metallic: 0.0, // Snow is not metallic
-        uvScale: [100, 100], // Tile the texture 100 times across the 200-unit plane
+        uvScale: [5, 5], // Tile the texture 10 times
       },
     );
 
@@ -202,19 +222,34 @@ export async function createScene(
     world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
     world.addComponent(
       groundEntity,
-      new PhysicsColliderComponent(1, [100, 0.5, 100]), // Half-extents for a 200x1x200 collider box
+      new PhysicsColliderComponent(1, [100, 0.001, 100]),
     );
   }
 
+  // --- Texture Ball ---
+  {
+    const textureBallEntity = await resourceManager.loadSceneFromGLTF(
+      world,
+      "/assets/textures/snow_02_4k/snow_02_4k.gltf",
+    );
+    const textureBallTransform = new TransformComponent();
+    textureBallTransform.setPosition(0, 2, 0);
+    world.addComponent(textureBallEntity, textureBallTransform);
+
+    world.addComponent(textureBallEntity, textureBallTransform);
+
+    world.addComponent(textureBallEntity, new PhysicsBodyComponent("fixed"));
+    world.addComponent(textureBallEntity, new PhysicsColliderComponent(0));
+  }
+
   // --- Pillar Forest ---
-  await createPillarForest(world, resourceManager, 200);
+  //await createPillarForest(world, resourceManager, 200);
 
   // --- Dynamic Physics Objects ---
   // Create a stack of cubes for the player to interact with.
   {
-    const cubeMesh = await resourceManager.createMesh(
-      "interactive_cube",
-      createCubeMeshData(1),
+    const cubeMesh = await resourceManager.resolveMeshByHandle(
+      ResourceHandle.forMesh("PRIM:cube:size=1"),
     );
     const cubeMat = await resourceManager.createPBRMaterialInstance(
       await resourceManager.createPBRMaterialTemplate({
@@ -228,7 +263,7 @@ export async function createScene(
       const cube = world.createEntity(`dynamic_cube_${i}`);
       const t = new TransformComponent();
       // Stack them vertically with a slight offset for stability.
-      t.setPosition(5, 0.5 + i * 1.01, 5);
+      t.setPosition(5, 0.5 + i * 10.01, 5);
       world.addComponent(cube, t);
       world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
       // Physics: Dynamic body with a 1x1x1 box collider.
@@ -237,64 +272,9 @@ export async function createScene(
         cube,
         new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
       );
+      // Health component to make it a target
+      world.addComponent(cube, new HealthComponent(50));
     }
-  }
-
-  // --- Lighting ---
-  const lightMesh = await resourceManager.createMesh(
-    "light_indicator",
-    createIcosphereMeshData(0.2, 1),
-  );
-  const warmMat = await resourceManager.createPBRMaterialInstance(
-    await resourceManager.createPBRMaterialTemplate({
-      emissive: [1, 0.8, 0.6],
-    }),
-  );
-  const coolMat = await resourceManager.createPBRMaterialInstance(
-    await resourceManager.createPBRMaterialTemplate({
-      emissive: [0.6, 0.8, 1],
-    }),
-  );
-
-  const keyLightEntity = world.createEntity("key_light");
-  {
-    const t = new TransformComponent();
-    t.setPosition(40, 50, 40);
-    world.addComponent(keyLightEntity, t);
-    world.addComponent(
-      keyLightEntity,
-      new LightComponent([1, 0.95, 0.8, 1], [0, 0, 0, 1], 80.0, 30.0),
-    );
-    world.addComponent(
-      keyLightEntity,
-      new MeshRendererComponent(lightMesh, warmMat),
-    );
-  }
-
-  const fillLightEntity = world.createEntity("fill_light");
-  {
-    const t = new TransformComponent();
-    t.setPosition(-30, 20, 30);
-    world.addComponent(fillLightEntity, t);
-    world.addComponent(
-      fillLightEntity,
-      new LightComponent([0.8, 0.9, 1, 1], [0, 0, 0, 1], 60.0, 15.0),
-    );
-    world.addComponent(
-      fillLightEntity,
-      new MeshRendererComponent(lightMesh, coolMat),
-    );
-  }
-
-  const rimLightEntity = world.createEntity("rim_light");
-  {
-    const t = new TransformComponent();
-    t.setPosition(0, 30, -50);
-    world.addComponent(rimLightEntity, t);
-    world.addComponent(
-      rimLightEntity,
-      new LightComponent([1, 1, 1, 1], [0, 0, 0, 1], 50.0, 20.0),
-    );
   }
 
   // --- Global Sun and Shadow Settings ---
@@ -304,8 +284,5 @@ export async function createScene(
   return {
     cameraEntity,
     playerEntity,
-    keyLightEntity,
-    fillLightEntity,
-    rimLightEntity,
   };
 }

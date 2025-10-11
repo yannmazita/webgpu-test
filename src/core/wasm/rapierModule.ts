@@ -21,6 +21,7 @@ export type IntegrationParameters =
   import("@dimforge/rapier3d").IntegrationParameters;
 export type KinematicCharacterController =
   import("@dimforge/rapier3d").KinematicCharacterController;
+export type EventQueue = import("@dimforge/rapier3d").EventQueue;
 
 let RAPIER: RAPIER | null = null;
 let rapierPromise: Promise<void> | null = null;

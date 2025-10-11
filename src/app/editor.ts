@@ -10,6 +10,7 @@ import {
   updateKeyState,
   accumulateMouseDelta,
   updateMousePosition,
+  updateMouseButtonState,
   updatePointerLock,
 } from "@/core/input/manager";
 
@@ -90,6 +91,7 @@ export function init(
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
   document.addEventListener("mousedown", handleMouseDown);
+  document.addEventListener("mouseup", handleMouseUp);
   document.addEventListener("mousemove", handleMouseMove);
   document.addEventListener("pointerlockchange", handlePointerLockChange);
   canvas.addEventListener("click", handleCanvasClick);
@@ -144,6 +146,10 @@ function handleKeyDown(e: KeyboardEvent): void {
 
 function handleKeyUp(e: KeyboardEvent): void {
   updateKeyState(inputContext, e.code, false);
+}
+
+function handleMouseUp(e: MouseEvent): void {
+  updateMouseButtonState(inputContext, e.button, false);
 }
 
 async function handleCanvasClick(e: MouseEvent): Promise<void> {
@@ -205,6 +211,13 @@ function handleMouseMove(e: MouseEvent): void {
 }
 
 function handleMouseDown(e: MouseEvent): void {
+  // If pointer is locked, this is a "fire" action for the gameplay systems.
+  if (isPointerLockedState) {
+    updateMouseButtonState(inputContext, e.button, true);
+    return;
+  }
+
+  // If pointer is not locked, this is an editor picking action.
   const io = ImGui.GetIO();
   // Don't raycast if clicking on UI or if it's not the left mouse button (0)
   if (io.WantCaptureMouse || e.button !== 0) {
@@ -218,24 +231,9 @@ function handleMouseDown(e: MouseEvent): void {
 
   if (!engineReady) return;
 
-  let x: number, y: number;
-
-  if (isPointerLockedState) {
-    // When locked, raycast from the center of the screen
-    x = canvas.clientWidth / 2;
-    y = canvas.clientHeight / 2;
-    console.log(
-      `[Editor] Mousedown while locked. Raycasting from center (${x}, ${y}).`,
-    );
-  } else {
-    // When not locked, raycast from the mouse position
-    const rect = canvas.getBoundingClientRect();
-    x = e.clientX - rect.left;
-    y = e.clientY - rect.top;
-    console.log(
-      `[Editor] Mousedown while unlocked. Raycasting from cursor (${x}, ${y}).`,
-    );
-  }
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
 
   const request: RaycastRequestMsg = {
     type: MSG_RAYCAST_REQUEST,

@@ -11,6 +11,7 @@ import {
   POINTER_LOCK_OFFSET,
   MOUSE_X_OFFSET,
   MOUSE_Y_OFFSET,
+  MOUSE_BUTTONS_OFFSET,
 } from "@/core/sharedInputLayout";
 
 /** The context object holding views for the input buffer. */
@@ -111,6 +112,25 @@ export function updatePointerLock(ctx: InputContext, isLocked: boolean): void {
   Atomics.store(ctx.uint8View, POINTER_LOCK_OFFSET, isLocked ? 1 : 0);
 }
 
+/**
+ * Updates the state of a mouse button in the shared buffer.
+ * @param ctx The input context.
+ * @param button The mouse button index (e.g., 0 for left, 1 for middle, 2 for right).
+ * @param isDown Whether the button is pressed.
+ */
+export function updateMouseButtonState(
+  ctx: InputContext,
+  button: number,
+  isDown: boolean,
+): void {
+  const buttonMask = 1 << button;
+  if (isDown) {
+    Atomics.or(ctx.int32View, MOUSE_BUTTONS_OFFSET >> 2, buttonMask);
+  } else {
+    Atomics.and(ctx.int32View, MOUSE_BUTTONS_OFFSET >> 2, ~buttonMask);
+  }
+}
+
 // --- Reader Functions (for Worker Thread) ---
 
 /**
@@ -125,6 +145,19 @@ export function isKeyDown(ctx: InputContext, code: string): boolean {
     return Atomics.load(ctx.uint8View, KEY_STATE_OFFSET + keyIndex) === 1;
   }
   return false;
+}
+
+/**
+ * Checks if a mouse button is down.
+ * @param ctx The input context.
+ * @param button The mouse button index.
+ * @returns True if the button is down, false otherwise.
+ */
+export function isMouseButtonDown(ctx: InputContext, button: number): boolean {
+  const buttonMask = 1 << button;
+  return (
+    (Atomics.load(ctx.int32View, MOUSE_BUTTONS_OFFSET >> 2) & buttonMask) !== 0
+  );
 }
 
 /**

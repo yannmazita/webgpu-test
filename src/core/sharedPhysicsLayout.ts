@@ -60,11 +60,11 @@ export const COMMANDS_HEADER_BYTES = 24;
 /** Commands ring capacity (number of slots). */
 export const COMMANDS_RING_CAPACITY = 256;
 
-/** Bytes per command slot (padded to 80 for alignment and larger commands). */
-export const COMMANDS_SLOT_SIZE = 80;
+/** Bytes per command slot (padded for alignment and larger commands). */
+export const COMMANDS_SLOT_SIZE = 96;
 
-/** Max f32 parameters per command slot. (80 - 8 byte header) / 4 bytes per float */
-export const COMMANDS_MAX_PARAMS_F32 = 18;
+/** Max f32 parameters per command slot. (96 - 8 byte header) / 4 bytes per float */
+export const COMMANDS_MAX_PARAMS_F32 = 22;
 
 /** First slot byte offset (bytes). */
 export const COMMANDS_SLOT_OFFSET = COMMANDS_HEADER_BYTES;
@@ -143,11 +143,86 @@ export const CMD_SET_TRANSFORM = 3;
 export const CMD_SET_GRAVITY = 4;
 /** Command type: Move a player. */
 export const CMD_MOVE_PLAYER = 5;
+/** Command type: Perform a weapon raycast. */
+export const CMD_WEAPON_RAYCAST = 6;
+
+/* ==========================================================================================
+ * Raycast Results SAB (physics → render)
+ * A single-slot buffer to return the result of the last weapon raycast.
+ * Layout (bytes):
+ *   [0]   MAGIC (u32) - 'RSLT'
+ *   [4]   VERSION (u32)
+ *   [8]   GEN (u32) - Generation counter. Incremented by physics on write.
+ *   [12]  (pad)
+ *   [16]  HIT_ENTITY_ID (u32) - 0 if no hit, otherwise the physId of the hit body.
+ *   [20]  HIT_DISTANCE (f32)
+ *   [24]  HIT_POINT_X (f32)
+ *   [28]  HIT_POINT_Y (f32)
+ *   [32]  HIT_POINT_Z (f32)
+ * ======================================================================================== */
+
+/** Magic number for raycast results SAB validation ('RSLT'). */
+export const RAYCAST_RESULTS_MAGIC = 0x52534c54; // 'RSLT'
+/** Current schema version for raycast results. */
+export const RAYCAST_RESULTS_VERSION = 1;
+
+export const RAYCAST_RESULTS_MAGIC_OFFSET = 0;
+export const RAYCAST_RESULTS_VERSION_OFFSET = 4;
+export const RAYCAST_RESULTS_GEN_OFFSET = 8;
+export const RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET = 16;
+export const RAYCAST_RESULTS_HIT_DISTANCE_OFFSET = 20;
+export const RAYCAST_RESULTS_HIT_POINT_OFFSET = 24;
+
+/** Total raycast results SAB size (bytes), padded to a multiple of 16. */
+export const RAYCAST_RESULTS_BUFFER_SIZE = 48;
+
+/* ==========================================================================================
+ * Collision Events SAB (physics → render)
+ * A ring buffer to return collision events (e.g., projectile hits).
+ * Layout is similar to the commands buffer.
+ *
+ * This buffer is written to by the `physicsWorker` after it drains the Rapier
+ * `EventQueue`. It is consumed by the `CollisionEventSystem` in the main
+ * worker (`worker.ts`) to translate physics interactions into gameplay logic.
+ *
+ * Slot layout (per slot, bytes):
+ *   [0]   PHYS_ID_A (u32)
+ *   [4]   PHYS_ID_B (u32)
+ *   [8]   FLAGS (u32) - e.g., 1 for STARTED, 0 for STOPPED
+ *   [12]  (pad)
+ * ======================================================================================== */
+
+/** Magic number for collision events SAB validation ('COLL'). */
+export const COLLISION_EVENTS_MAGIC = 0x434f4c4c; // 'COLL'
+/** Current schema version for collision events. */
+export const COLLISION_EVENTS_VERSION = 1;
+
+export const COLLISION_EVENTS_MAGIC_OFFSET = 0;
+export const COLLISION_EVENTS_VERSION_OFFSET = 4;
+export const COLLISION_EVENTS_HEAD_OFFSET = 8; // Write head (physics worker advances)
+export const COLLISION_EVENTS_TAIL_OFFSET = 12; // Read tail (render worker advances)
+export const COLLISION_EVENTS_GEN_OFFSET = 16;
+
+export const COLLISION_EVENTS_HEADER_BYTES = 24;
+export const COLLISION_EVENTS_RING_CAPACITY = 256;
+export const COLLISION_EVENTS_SLOT_SIZE = 16; // 3x u32 + 1x pad
+
+export const COLLISION_EVENTS_SLOT_OFFSET = COLLISION_EVENTS_HEADER_BYTES;
+export const COLLISION_EVENTS_BUFFER_SIZE =
+  COLLISION_EVENTS_HEADER_BYTES +
+  COLLISION_EVENTS_RING_CAPACITY * COLLISION_EVENTS_SLOT_SIZE;
+
+// Flags for collision events
+export const COLLISION_EVENT_FLAG_STARTED = 1;
+export const COLLISION_EVENT_FLAG_STOPPED = 0;
 
 /* ==========================================================================================
  * Usage Notes:
  * - All offsets are BYTES; when indexing Int32Array/Float32Array, convert with >> 2.
- * - States SAB is written by physics worker only; render worker reads latest slot.
- * - Commands SAB is written by render worker only; physics worker drains it.
- * - Tune COMMANDS_RING_CAPACITY and STATES_MAX_BODIES as needed for scale.
+ * - Data flow:
+ *   - Commands SAB: written by render worker, drained by physics worker.
+ *   - States SAB: written by physics worker, read by render worker.
+ *   - Collision Events SAB: written by physics worker, drained by render worker.
+ * - Tune ring capacities (COMMANDS_*, COLLISION_EVENTS_*) and STATES_MAX_BODIES
+ *   as needed for scene complexity and interaction frequency.
  * ======================================================================================== */

@@ -17,6 +17,7 @@ import {
   getAndResetMouseDelta,
   getMousePosition,
   isPointerLocked,
+  isMouseButtonDown,
 } from "@/core/input/manager";
 import {
   createMetricsContext,
@@ -86,28 +87,48 @@ import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 import { getPickRay, raycast } from "@/core/utils/raycast";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
+import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
+import { DamageSystem } from "@/core/ecs/systems/damageSystem";
+import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
+import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 
 /**
  * Main render worker script.
  *
  * This worker handles the core rendering loop, ECS systems, input processing,
- * and shared state synchronization with the main thread. It receives messages
- * from the main thread (e.g., INIT, FRAME, RESIZE) and responds with readiness
- * signals (READY, FRAME_DONE). All heavy computation (rendering, physics commands)
- * occurs here, isolated from the main thread for smooth 60FPS.
+ * and shared state synchronization with the main and physics threads. Its
+ * receives messages from the main thread (ie INIT, FRAME, RESIZE) and
+ * responds with readiness signals. All heavy computation occurs here, isolated
+ * from the main thread for smooth UI performance.
  *
- * Key flows:
- * - INIT: Set up renderer, ECS world, scene, input/metrics, physics (Stage 2).
- * - FRAME: Process input, run systems (animation, transform,
- *   physics commands, camera, render), publish metrics.
- * - RESIZE: Update canvas/viewport and camera aspect.
- * - Shared state: SABs for input (real-time), metrics (UI), engine (editor tweaks),
- *   physics (commands/states).
+ * Key Flows:
+ * - INIT: Sets up the renderer, ECS world, scene, and shared memory contexts.
+ *   It also spawns and initializes the dedicated physics worker.
+ * - FRAME: Executes the main game loop in a critical order:
+ *   1.  Processes user input and updates player/camera controllers.
+ *   2.  Applies the latest physics state snapshot (positions, rotations).
+ *   3.  Runs gameplay systems (weapon firing, projectile updates).
+ *   4.  Processes events from the physics worker (collisions) and applies
+ *       their consequences (damage).
+ *   5.  Updates core ECS state (animations, transforms).
+ *   6.  Generates and enqueues new commands for the physics worker.
+ *   7.  Prepares for rendering by updating camera matrices.
+ *   8.  Renders the scene.
+ *   9.  Publishes performance metrics.
+ * - RESIZE: Updates canvas/viewport dimensions and the camera's aspect ratio.
+ * - SHARED STATE: Uses multiple SharedArrayBuffers for lock-free, real-time
+ *   communication:
+ *   - `input`: Main thread → Worker (keyboard/mouse state).
+ *   - `metrics`: Worker → Main thread (performance data for UI).
+ *   - `engineState`: Main thread ↔ Worker (editor tweaks like fog/sun).
+ *   - `physics`: A multi-buffer channel between this worker and the
+ *     physics worker, including commands, state snapshots, raycast results,
+ *     and collision events.
  *
  * Assumptions:
- * - OffscreenCanvas transferred via postMessage.
- * - COOP/COEP enabled for SABs.
- * - No direct DOM access (all UI via main thread).
+ * - An OffscreenCanvas is transferred from the main thread.
+ * - The hosting page has COOP/COEP headers enabled for SharedArrayBuffer.
+ * - No direct DOM access; all UI is handled by the main thread.
  */
 let engineStateCtx: EngineStateCtx | null = null;
 
@@ -123,6 +144,9 @@ let inputReader: IInputSource | null = null;
 let actionController: IActionController | null = null;
 let cameraControllerSystem: CameraControllerSystem | null = null;
 let playerControllerSystem: PlayerControllerSystem | null = null;
+let damageSystem: DamageSystem | null = null;
+let collisionEventSystem: CollisionEventSystem | null = null;
+let projectileSystem: ProjectileSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -132,6 +156,7 @@ let metricsFrameId = 0;
 
 // Physics globals
 let physicsCtx: PhysicsContext | null = null;
+let raycastResultsCtx: { i32: Int32Array; f32: Float32Array } | null = null;
 let physicsCommandSystem: PhysicsCommandSystem | null = null;
 let physicsWorker: Worker | null = null;
 let lastSnapshotGen = 0; // track last applied physics snapshot generation
@@ -139,6 +164,7 @@ let lastSnapshotGen = 0; // track last applied physics snapshot generation
 // State for raycast
 let lastViewportWidth = 0;
 let lastViewportHeight = 0;
+let lastRaycastGen = 0;
 
 // State for dt
 let lastFrameTime = 0;
@@ -208,22 +234,27 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
 /**
  * Initializes the render worker.
  *
- * Sets up the GPU renderer, shared contexts (input, metrics, engine state),
- * input action mapping, camera controller, resource manager, ECS world, and scene.
- * Creates the physics worker and posts INIT to it (Stage 2). Publishes an initial
- * engine state snapshot for the main thread UI. Posts READY to signal completion.
+ * @remarks
+ * This function orchestrates the entire setup process for the render worker.
+ * It initializes the WebGPU renderer, sets up all shared memory contexts
+ * (input, metrics, engine state, physics), creates the ECS world and systems
+ * and spawns the physics worker, passing it the necessary shared buffers.
  *
- * @param offscreen OffscreenCanvas for WebGPU rendering (transferred from main).
- * @param sharedInputBuffer SharedArrayBuffer for input state (keyboard/mouse).
- * @param sharedMetricsBuffer SharedArrayBuffer for performance metrics.
- * @param sharedEngineStateBuffer SharedArrayBuffer for editor state sync.
- * @returns Promise that resolves when initialization completes.
+ * @param offscreen - OffscreenCanvas for WebGPU rendering.
+ * @param sharedInputBuffer - SharedArrayBuffer for input state.
+ * @param sharedMetricsBuffer - SharedArrayBuffer for performance metrics.
+ * @param sharedEngineStateBuffer - SharedArrayBuffer for editor state sync.
+ * @param sharedRaycastResultsBuffer - SharedArrayBuffer for weapon raycast results.
+ * @param sharedCollisionEventsBuffer - SharedArrayBuffer for physics collision events.
+ * @returns A promise that resolves when initialization is complete.
  */
 async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
+  sharedRaycastResultsBuffer: SharedArrayBuffer,
+  sharedCollisionEventsBuffer: SharedArrayBuffer,
 ): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -239,6 +270,8 @@ async function initWorker(
   inputContext = createInputContext(sharedInputBuffer, false);
   inputReader = {
     isKeyDown: (code: string) => isKeyDown(inputContext!, code),
+    isMouseButtonDown: (button: number) =>
+      isMouseButtonDown(inputContext!, button),
     getMouseDelta: () => getAndResetMouseDelta(inputContext!),
     getMousePosition: () => getMousePosition(inputContext!),
     isPointerLocked: () => isPointerLocked(inputContext!),
@@ -257,6 +290,7 @@ async function initWorker(
     },
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
     jump: { type: "button", keys: ["Space"] },
+    fire: { type: "button", mouseButtons: [0] }, // 0 = Left Mouse Button
   };
 
   actionController = {
@@ -309,12 +343,22 @@ async function initWorker(
     throw error;
   }
 
-  // --- Physics Setup (Stage 2) ---
+  // --- Physics Setup ---
   console.log("[Worker] Setting up physics...");
   const commandsBuffer = new SharedArrayBuffer(COMMANDS_BUFFER_SIZE);
   const statesBuffer = new SharedArrayBuffer(STATES_BUFFER_SIZE);
-  physicsCtx = createPhysicsContext(commandsBuffer, statesBuffer);
+  physicsCtx = createPhysicsContext(
+    commandsBuffer,
+    statesBuffer,
+    sharedCollisionEventsBuffer,
+  );
   initializePhysicsHeaders(physicsCtx);
+
+  // Create context for raycast results
+  raycastResultsCtx = {
+    i32: new Int32Array(sharedRaycastResultsBuffer),
+    f32: new Float32Array(sharedRaycastResultsBuffer),
+  };
 
   // Create physics worker
   physicsWorker = new Worker(new URL("./physicsWorker.ts", import.meta.url), {
@@ -343,6 +387,8 @@ async function initWorker(
     type: "INIT",
     commandsBuffer,
     statesBuffer,
+    raycastResultsBuffer: sharedRaycastResultsBuffer,
+    collisionEventsBuffer: sharedCollisionEventsBuffer,
   };
   physicsWorker.postMessage(initMsg);
 
@@ -354,6 +400,17 @@ async function initWorker(
     actionController,
     physicsCtx,
   );
+
+  // Damage system for processing all damage events
+  damageSystem = new DamageSystem();
+
+  // Create the system for handling physics collision events.
+  collisionEventSystem = new CollisionEventSystem(
+    world,
+    physicsCtx,
+    damageSystem,
+  );
+  projectileSystem = new ProjectileSystem();
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
@@ -373,15 +430,18 @@ async function initWorker(
 /**
  * Main frame update loop for the render worker.
  *
- * This function orchestrates all per-frame activity. It processes user input,
- * applies state changes from the editor and physics worker, runs all ECS
- * systems in a specific order, renders the scene, and publishes performance
- * metrics. The execution order is critical for data consistency: input is
- * processed, simulations are run, transforms are finalized, and then rendering
- * occurs.
+ * @remarks
+ * This function orchestrates all per-frame activity. The execution order is
+ * critical for data consistency:
+ * 1. Sync state from editor and physics (snapshots).
+ * 2. Process physics collision events via `CollisionEventSystem`.
+ * 3. Run input-driven controllers.
+ * 4. Run gameplay systems (`weaponSystem`, `damageSystem`).
+ * 5. Run core ECS systems (`animation`, `transform`, `physicsCommands`, `camera`).
+ * 6. Render the scene.
+ * 7. Publish metrics.
  *
- * @param {number} now The current high-resolution timestamp from
- *     `requestAnimationFrame`, in milliseconds.
+ * @param now - The current high-resolution timestamp from `requestAnimationFrame`.
  */
 function frame(now: number): void {
   // --- Guard Clause ---
@@ -393,6 +453,9 @@ function frame(now: number): void {
     !cameraControllerSystem ||
     !actionController ||
     !playerControllerSystem ||
+    !damageSystem ||
+    !collisionEventSystem ||
+    !projectileSystem ||
     !actionMap
   ) {
     // If not ready, immediately signal completion to avoid stalling the main thread.
@@ -452,6 +515,24 @@ function frame(now: number): void {
   if (physicsCtx) {
     applyPhysicsSnapshot(world, physicsCtx);
   }
+
+  // --- Gameplay Systems ---
+  if (physicsCtx && raycastResultsCtx) {
+    if (resourceManager) {
+      weaponSystem(
+        world,
+        resourceManager,
+        actionController,
+        physicsCtx,
+        raycastResultsCtx,
+        damageSystem,
+        dt,
+      );
+    }
+  }
+  projectileSystem.update(world, dt);
+  collisionEventSystem.update();
+  damageSystem.update(world);
 
   // --- Core ECS System Execution Order ---
   // The order of system execution is critical for correctness.
@@ -535,6 +616,8 @@ self.onmessage = async (
       msg.sharedInputBuffer,
       msg.sharedMetricsBuffer,
       msg.sharedEngineStateBuffer,
+      msg.sharedRaycastResultsBuffer,
+      msg.sharedCollisionEventsBuffer,
     );
     return;
   }

@@ -114,6 +114,17 @@ export class PhysicsCommandSystem {
       params[16] = 0;
     }
 
+    // Add initial velocity at [17-19]
+    if (bodyComp.initialVelocity) {
+      params[17] = bodyComp.initialVelocity[0];
+      params[18] = bodyComp.initialVelocity[1];
+      params[19] = bodyComp.initialVelocity[2];
+    } else {
+      params[17] = 0;
+      params[18] = 0;
+      params[19] = 0;
+    }
+
     const physId = entity;
     bodyComp.physId = physId;
 

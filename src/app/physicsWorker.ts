@@ -36,7 +36,27 @@ import {
   CMD_DESTROY_BODY,
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   CMD_MOVE_PLAYER,
+  CMD_WEAPON_RAYCAST,
   COMMANDS_MAX_PARAMS_F32,
+  RAYCAST_RESULTS_MAGIC,
+  RAYCAST_RESULTS_VERSION,
+  RAYCAST_RESULTS_MAGIC_OFFSET,
+  RAYCAST_RESULTS_VERSION_OFFSET,
+  RAYCAST_RESULTS_GEN_OFFSET,
+  RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET,
+  RAYCAST_RESULTS_HIT_DISTANCE_OFFSET,
+  COLLISION_EVENTS_MAGIC,
+  COLLISION_EVENTS_VERSION,
+  COLLISION_EVENTS_MAGIC_OFFSET,
+  COLLISION_EVENTS_VERSION_OFFSET,
+  COLLISION_EVENTS_HEAD_OFFSET,
+  COLLISION_EVENTS_TAIL_OFFSET,
+  COLLISION_EVENTS_GEN_OFFSET,
+  COLLISION_EVENTS_RING_CAPACITY,
+  COLLISION_EVENTS_SLOT_OFFSET,
+  COLLISION_EVENTS_SLOT_SIZE,
+  COLLISION_EVENT_FLAG_STARTED,
+  COLLISION_EVENT_FLAG_STOPPED,
 } from "@/core/sharedPhysicsLayout";
 
 // Import Rapier physics module
@@ -50,6 +70,7 @@ import {
   RigidBody,
   ColliderDesc,
   KinematicCharacterController,
+  EventQueue,
 } from "@/core/wasm/rapierModule";
 
 /**
@@ -65,8 +86,12 @@ let world: World | null = null;
 let commandsView: Int32Array | null = null; // Int32 view (header + slots)
 let statesI32: Int32Array | null = null; // Int32 view for states (header + count/id)
 let statesF32: Float32Array | null = null; // Float32 view for states (pos/rot payload)
+let raycastResultsI32: Int32Array | null = null;
+let raycastResultsF32: Float32Array | null = null;
+let collisionEventsI32: Int32Array | null = null;
 
 let stepInterval: number | null = null;
+let eventQueue: EventQueue | null = null;
 
 const entityToBody = new Map<number, RigidBody>(); // PHYS_ID → RigidBody
 const entityToController = new Map<number, KinematicCharacterController>(); // For player
@@ -104,13 +129,20 @@ function validateHeader(
 /**
  * Initializes Rapier and creates the physics world.
  *
- * Uses the centralized rapierModule for WASM loading, then creates
- * a world instance owned by this worker.
+ * @remarks
+ * This function uses the centralized `rapierModule` for WASM loading. It
+ * creates a `World` instance owned by this worker and also instantiates a
+ * Rapier `EventQueue` to capture collision events, which are essential for
+ * gameplay logic.
+ *
+ * @returns A promise that resolves on successful initialization or rejects on
+ *     failure.
  */
 async function initializePhysics(): Promise<void> {
   try {
     // Initialize the Rapier WASM module
     await initRapier();
+    const rapierModule = getRapierModule();
 
     if (!isRapierReady()) {
       throw new Error("Rapier module failed to initialize");
@@ -118,6 +150,10 @@ async function initializePhysics(): Promise<void> {
 
     // Create the physics world owned by this worker
     world = createWorld(GRAVITY, FIXED_DT);
+    if (rapierModule) {
+      // Create the event queue
+      eventQueue = new rapierModule.EventQueue(true);
+    }
 
     console.log("[PhysicsWorker] Physics initialized successfully");
   } catch (error) {
@@ -210,6 +246,11 @@ function processCommands(): void {
       const isPlayer = paramsView[12] > 0.5;
       const slopeAngle = paramsView[13];
       const maxStepHeight = paramsView[14];
+      const vel = {
+        x: paramsView[17],
+        y: paramsView[18],
+        z: paramsView[19],
+      };
 
       // Select the appropriate Rapier RigidBodyDesc based on the type.
       let bodyDesc: RigidBodyDesc;
@@ -233,6 +274,9 @@ function processCommands(): void {
           bodyDesc = RAPIER.RigidBodyDesc.dynamic();
       }
       bodyDesc.setTranslation(pos.x, pos.y, pos.z).setRotation(rot);
+      if (vel.x !== 0 || vel.y !== 0 || vel.z !== 0) {
+        bodyDesc.setLinvel(vel.x, vel.y, vel.z);
+      }
 
       const body: RigidBody = world.createRigidBody(bodyDesc);
 
@@ -263,7 +307,14 @@ function processCommands(): void {
       }
 
       if (colliderDesc) {
+        // By default, Rapier does not report events for performance. We must opt-in.
+        colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+
+        // Don't set collision groups - use default behavior (everything collides)
+        // The raycast filtering will handle excluding the player via filterExcludeRigidBody
+
         world.createCollider(colliderDesc, body);
+
         // If this is the player, create and configure a character controller.
         if (isPlayer) {
           const controller = world.createCharacterController(0.1); // Small collision offset.
@@ -326,6 +377,59 @@ function processCommands(): void {
         playerOnGround.set(physId, isOnGround ? 1.0 : 0.0);
       }
       processedAny = true;
+    } else if (type === CMD_WEAPON_RAYCAST) {
+      if (raycastResultsI32 && raycastResultsF32) {
+        const origin = {
+          x: paramsView[0],
+          y: paramsView[1],
+          z: paramsView[2],
+        };
+        const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
+        const maxToi = paramsView[6];
+        const ray = new RAPIER.Ray(origin, dir);
+
+        // Get the player's rigid body to exclude it from the raycast
+        const playerBody = entityToBody.get(physId);
+
+        // Cast ray with proper parameters:
+        // castRayAndGetNormal(ray, maxToi, solid, filterFlags?, filterGroups?,
+        //                     filterExcludeCollider?, filterExcludeRigidBody?, filterPredicate?)
+        const hit = world.castRayAndGetNormal(
+          ray,
+          maxToi,
+          true, // solid
+          undefined, // filterFlags - use default (no filtering by type)
+          undefined, // filterGroups - use default (hit everything)
+          undefined, // filterExcludeCollider - not needed
+          playerBody, // filterExcludeRigidBody - exclude the player's rigid body
+        );
+
+        if (hit) {
+          const hitPoint = ray.pointAt(hit.timeOfImpact);
+          const hitBody = hit.collider.parent();
+          const hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
+
+          Atomics.store(
+            raycastResultsI32,
+            RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
+            hitEntityId,
+          );
+          raycastResultsF32.set(
+            [hit.timeOfImpact, hitPoint.x, hitPoint.y, hitPoint.z],
+            RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
+          );
+        } else {
+          // No hit, store 0
+          Atomics.store(
+            raycastResultsI32,
+            RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
+            0,
+          );
+        }
+        // Signal new result is available
+        Atomics.add(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 1);
+      }
+      processedAny = true;
     }
 
     // --- Advance Tail ---
@@ -341,19 +445,26 @@ function processCommands(): void {
   }
 }
 
-/* ---------------------------------------------
-   Step + Snapshot
-----------------------------------------------*/
-
+/**
+ * Advances the physics simulation by a fixed time step (`FIXED_DT`).
+ *
+ * @remarks
+ * This function manages a time accumulator to ensure the simulation runs at a
+ * consistent rate, independent of the main loop's frame rate. For each fixed
+ * step, it first processes all pending commands from the render worker, then
+ * steps the Rapier `World` along with its `EventQueue`.
+ *
+ * @param dt - The delta time in seconds since the last call.
+ */
 function stepWorld(dt: number): void {
-  if (!world) return;
+  if (!world || !eventQueue) return;
 
   accumulator += dt;
   const stepStart = performance.now();
 
   while (accumulator >= FIXED_DT) {
     processCommands();
-    world.step();
+    world.step(eventQueue);
     accumulator -= FIXED_DT;
     stepCounter++;
   }
@@ -476,10 +587,89 @@ function publishSnapshot(): void {
   );
 }
 
+/**
+ * Drains Rapier's event queue and publishes collision events to the shared buffer.
+ *
+ * @remarks
+ * This function implements the producer side of a single-producer/single-consumer
+ * ring buffer for collision events. It iterates through all collision events
+ * generated by the last `world.step()`, translates collider handles into
+ * entity IDs, and writes them into the shared buffer for the `CollisionEventSystem`
+ * to consume. The `head` pointer is advanced atomically after writing.
+ */
+function publishCollisionEvents(): void {
+  if (!world || !eventQueue || !collisionEventsI32) {
+    return;
+  }
+
+  // SPSC Ring Buffer producer logic
+  let head = Atomics.load(
+    collisionEventsI32,
+    COLLISION_EVENTS_HEAD_OFFSET >> 2,
+  );
+  const tail = Atomics.load(
+    collisionEventsI32,
+    COLLISION_EVENTS_TAIL_OFFSET >> 2,
+  );
+
+  let eventsPublished = 0;
+
+  eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+    const nextHead = (head + 1) % COLLISION_EVENTS_RING_CAPACITY;
+    if (nextHead === tail) {
+      // Buffer is full, drop event.
+      // In a real game, you might want to prioritize or log this.
+      return;
+    }
+
+    const collider1 = world?.colliders.get(handle1);
+    const collider2 = world?.colliders.get(handle2);
+    if (!collider1 || !collider2) return;
+
+    const body1 = collider1.parent();
+    const body2 = collider2.parent();
+    if (!body1 || !body2) return;
+
+    const physIdA = bodyToEntity.get(body1);
+    const physIdB = bodyToEntity.get(body2);
+    if (!physIdA || !physIdB) return;
+
+    const slotIndex = head % COLLISION_EVENTS_RING_CAPACITY;
+    const slotBaseI32 =
+      (COLLISION_EVENTS_SLOT_OFFSET >> 2) +
+      slotIndex * (COLLISION_EVENTS_SLOT_SIZE >> 2);
+
+    Atomics.store(collisionEventsI32, slotBaseI32 + 0, physIdA);
+    Atomics.store(collisionEventsI32, slotBaseI32 + 1, physIdB);
+    Atomics.store(
+      collisionEventsI32,
+      slotBaseI32 + 2,
+      started ? COLLISION_EVENT_FLAG_STARTED : COLLISION_EVENT_FLAG_STOPPED,
+    );
+
+    head = nextHead;
+    eventsPublished++;
+  });
+
+  if (eventsPublished > 0) {
+    Atomics.store(collisionEventsI32, COLLISION_EVENTS_HEAD_OFFSET >> 2, head);
+    Atomics.add(collisionEventsI32, COLLISION_EVENTS_GEN_OFFSET >> 2, 1);
+  }
+}
+
 /* ---------------------------------------------
    Loop control
 ----------------------------------------------*/
 
+/**
+ * Starts the main physics simulation loop.
+ *
+ * @remarks
+ * This function sets up a `setInterval` to run at a fixed rate (60Hz). In each
+ * tick, it calculates delta time, steps the world, and then publishes the
+ * resulting state snapshots and collision events to their respective shared
+ * buffers.
+ */
 function startPhysicsLoop(): void {
   let lastTime = performance.now();
   stepInterval = setInterval(() => {
@@ -488,6 +678,7 @@ function startPhysicsLoop(): void {
     lastTime = now;
     stepWorld(dt);
     publishSnapshot();
+    publishCollisionEvents(); // Publish events after stepping
   }, 1000 / 60);
   console.log("[PhysicsWorker] Fixed-step loop started (60Hz).");
 }
@@ -570,6 +761,35 @@ self.onmessage = async (
         Atomics.store(statesI32, STATES_READ_GEN_OFFSET >> 2, 0);
         Atomics.store(statesI32, STATES_GEN_OFFSET >> 2, 0);
       }
+
+      raycastResultsI32 = new Int32Array(msg.raycastResultsBuffer);
+      raycastResultsF32 = new Float32Array(msg.raycastResultsBuffer);
+      Atomics.store(
+        raycastResultsI32,
+        RAYCAST_RESULTS_MAGIC_OFFSET >> 2,
+        RAYCAST_RESULTS_MAGIC,
+      );
+      Atomics.store(
+        raycastResultsI32,
+        RAYCAST_RESULTS_VERSION_OFFSET >> 2,
+        RAYCAST_RESULTS_VERSION,
+      );
+      Atomics.store(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 0);
+
+      collisionEventsI32 = new Int32Array(msg.collisionEventsBuffer);
+      Atomics.store(
+        collisionEventsI32,
+        COLLISION_EVENTS_MAGIC_OFFSET >> 2,
+        COLLISION_EVENTS_MAGIC,
+      );
+      Atomics.store(
+        collisionEventsI32,
+        COLLISION_EVENTS_VERSION_OFFSET >> 2,
+        COLLISION_EVENTS_VERSION,
+      );
+      Atomics.store(collisionEventsI32, COLLISION_EVENTS_HEAD_OFFSET >> 2, 0);
+      Atomics.store(collisionEventsI32, COLLISION_EVENTS_TAIL_OFFSET >> 2, 0);
+      Atomics.store(collisionEventsI32, COLLISION_EVENTS_GEN_OFFSET >> 2, 0);
 
       startPhysicsLoop();
       postMessage({ type: "READY" } as PhysicsReadyMsg);
