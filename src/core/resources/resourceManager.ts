@@ -13,8 +13,13 @@ import { loadSTL } from "@/loaders/stlLoader";
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
 import {
+  createConeMeshData,
   createCubeMeshData,
+  createCylinderMeshData,
   createIcosphereMeshData,
+  createPlaneMeshData,
+  createTorusMeshData,
+  createUvSphereMeshData,
 } from "@/core/utils/primitives";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import { getSupportedCompressedFormats } from "@/core/utils/webgpu";
@@ -45,6 +50,28 @@ export interface PBRMaterialSpec {
 export interface EnvironmentMap {
   skyboxMaterial: MaterialInstance;
   iblComponent: IBLComponent;
+}
+
+/**
+ * Parses parameters from a primitive handle key.
+ * Example: "size=2.5,sub=3" -> Map { "size": 2.5, "sub": 3 }
+ * @param key The part of the handle key after the primitive name and colon.
+ * @returns A map of parameter names to their numeric values.
+ */
+function parsePrimParams(key: string): Map<string, number> {
+  const params = new Map<string, number>();
+  if (!key) return params;
+
+  key.split(",").forEach((part) => {
+    const [name, value] = part.split("=");
+    if (name && value) {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        params.set(name.trim(), numValue);
+      }
+    }
+  });
+  return params;
 }
 
 /**
@@ -426,7 +453,12 @@ export class ResourceManager {
    *
    * Supported handle key formats:
    * - `"PRIM:cube:size=2.5"`
+   * - `"PRIM:plane:size=10"`
    * - `"PRIM:icosphere:r=1.0,sub=3"`
+   * - `"PRIM:uvsphere:r=1.0,sub=32"`
+   * - `"PRIM:cylinder:r=0.5,h=2,sub=32"`
+   * - `"PRIM:cone:r=0.5,h=2,sub=32"`
+   * - `"PRIM:torus:r=1,tube=0.4,rseg=16,tseg=32"`
    * - `"OBJ:path/to/model.obj"`
    * - `"STL:path/to/model.stl"`
    * - `"GLTF:path/to/model.gltf#meshName"`
@@ -442,22 +474,67 @@ export class ResourceManager {
     const cached = this.meshes.get(key);
     if (cached) return cached;
 
+    let meshData: MeshData | null = null;
+    const [type, ...rest] = key.split(":");
+    const paramString = rest.join(":");
+
+    if (type === "PRIM") {
+      const name = paramString.substring(0, paramString.indexOf(":"));
+      const params = parsePrimParams(
+        paramString.substring(paramString.indexOf(":") + 1),
+      );
+
+      switch (name) {
+        case "cube": {
+          const size = params.get("size") ?? 1.0;
+          meshData = createCubeMeshData(size);
+          break;
+        }
+        case "plane": {
+          const size = params.get("size") ?? 1.0;
+          meshData = createPlaneMeshData(size);
+          break;
+        }
+        case "icosphere": {
+          const r = params.get("r") ?? 0.5;
+          const sub = params.get("sub") ?? 2;
+          meshData = createIcosphereMeshData(r, sub);
+          break;
+        }
+        case "uvsphere": {
+          const r = params.get("r") ?? 0.5;
+          const sub = params.get("sub") ?? 16;
+          meshData = createUvSphereMeshData(r, sub);
+          break;
+        }
+        case "cylinder": {
+          const r = params.get("r") ?? 0.5;
+          const h = params.get("h") ?? 1.0;
+          const sub = params.get("sub") ?? 32;
+          meshData = createCylinderMeshData(r, h, sub);
+          break;
+        }
+        case "cone": {
+          const r = params.get("r") ?? 0.5;
+          const h = params.get("h") ?? 1.0;
+          const sub = params.get("sub") ?? 32;
+          meshData = createConeMeshData(r, h, sub);
+          break;
+        }
+        case "torus": {
+          const r = params.get("r") ?? 0.5;
+          const tube = params.get("tube") ?? 0.2;
+          const rseg = params.get("rseg") ?? 16;
+          const tseg = params.get("tseg") ?? 32;
+          meshData = createTorusMeshData(r, tube, rseg, tseg);
+          break;
+        }
+      }
+    }
+
     let mesh: Mesh;
-    if (key.startsWith("PRIM:cube")) {
-      let size = 1.0;
-      const m = /size=([0-9]*\.?[0-9]+)/.exec(key);
-      if (m) size = parseFloat(m[1]);
-      const data = createCubeMeshData(size);
-      mesh = await this.createMesh(key, data);
-    } else if (key.startsWith("PRIM:icosphere")) {
-      let r = 0.5,
-        sub = 2;
-      const rm = /r=([0-9]*\.?[0-9]+)/.exec(key);
-      const sm = /sub=([0-9]+)/.exec(key);
-      if (rm) r = parseFloat(rm[1]);
-      if (sm) sub = parseInt(sm[1], 10);
-      const data = createIcosphereMeshData(r, sub);
-      mesh = await this.createMesh(key, data);
+    if (meshData) {
+      mesh = await this.createMesh(key, meshData);
     } else if (key.startsWith("OBJ:")) {
       const url = key.substring(4);
       mesh = await this.loadMeshFromOBJ(url);

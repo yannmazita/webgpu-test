@@ -8,10 +8,6 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
-import {
-  createCubeMeshData,
-  createPlaneMeshData,
-} from "@/core/utils/primitives";
 import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
   SceneSunComponent,
@@ -44,10 +40,10 @@ async function createPillarForest(
   console.log(`[Scene] Creating ${count} pillars...`);
 
   // Create a single shared mesh and material for efficiency.
-  const boxMesh = await resourceManager.createMesh(
-    "pillar_mesh",
-    createCubeMeshData(1),
+  const boxMesh = await resourceManager.resolveMeshByHandle(
+    ResourceHandle.forMesh("PRIM:cube:size=1"),
   );
+
   const boxMaterial = await resourceManager.createPBRMaterialInstance(
     await resourceManager.createPBRMaterialTemplate({
       albedo: [0.4, 0.45, 0.5, 1],
@@ -199,10 +195,9 @@ export async function createScene(
     groundTransform.setPosition(0, 0, 0);
     world.addComponent(groundEntity, groundTransform);
 
-    // Create a 200x200 plane mesh directly from the primitive data.
-    const groundMesh = await resourceManager.createMesh(
-      "PRIM:plane:size=200",
-      createPlaneMeshData(200),
+    // creating the plane mesh
+    const groundMesh = await resourceManager.resolveMeshByHandle(
+      ResourceHandle.forMesh("PRIM:plane:size=200"),
     );
 
     // Create a material instance with UV tiling
@@ -227,7 +222,7 @@ export async function createScene(
     world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
     world.addComponent(
       groundEntity,
-      new PhysicsColliderComponent(1, [100, 0.001, 100]), // Box collider with a small thickness
+      new PhysicsColliderComponent(1, [100, 0.1, 100]),
     );
   }
 
