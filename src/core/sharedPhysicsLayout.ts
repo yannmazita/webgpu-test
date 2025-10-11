@@ -183,7 +183,7 @@ export const CMD_CREATE_BODY_PARAMS = {
  *   [0]   MAGIC (u32) - 'RSLT'
  *   [4]   VERSION (u32)
  *   [8]   GEN (u32) - Generation counter. Incremented by physics on write.
- *   [12]  (pad)
+ *   [12]  SOURCE_ENTITY_ID (u32) - The physId of the entity that fired the ray.
  *   [16]  HIT_ENTITY_ID (u32) - 0 if no hit, otherwise the physId of the hit body.
  *   [20]  HIT_DISTANCE (f32)
  *   [24]  HIT_POINT_X (f32)
@@ -199,6 +199,7 @@ export const RAYCAST_RESULTS_VERSION = 1;
 export const RAYCAST_RESULTS_MAGIC_OFFSET = 0;
 export const RAYCAST_RESULTS_VERSION_OFFSET = 4;
 export const RAYCAST_RESULTS_GEN_OFFSET = 8;
+export const RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET = 12;
 export const RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET = 16;
 export const RAYCAST_RESULTS_HIT_DISTANCE_OFFSET = 20;
 export const RAYCAST_RESULTS_HIT_POINT_OFFSET = 24;

@@ -23,7 +23,8 @@ import { PlayerControllerComponent } from "@/core/ecs/components/playerControlle
 import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
-import { MaterialInstance } from "@/core/materials/materialInstance";
+import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowComponent";
+import { vec3 } from "wgpu-matrix";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -148,19 +149,8 @@ export async function createScene(
     projectileMaterialHandle.key,
   );
 
-  // --- Camera ---
-  // The camera entity is created here, but its transform will be managed by
-  // the PlayerControllerSystem each frame to follow the player.
-  const cameraEntity = world.createEntity("main_camera");
-  world.addComponent(
-    cameraEntity,
-    new CameraComponent(45, 16 / 9, 0.1, 1000.0),
-  );
-  world.addComponent(cameraEntity, new MainCameraTagComponent());
-  // A placeholder transform is added, but it will be overwritten.
-  world.addComponent(cameraEntity, new TransformComponent());
-
   // --- Player ---
+  // Create player first so we can get its entity ID for the camera to follow.
   const playerEntity = world.createEntity("player");
   {
     const t = new TransformComponent();
@@ -189,6 +179,21 @@ export async function createScene(
     weapon.projectileMaterialHandle = projectileMaterialHandle;
     world.addComponent(playerEntity, weapon);
   }
+
+  // --- Camera ---
+  // The camera entity now follows the player entity.
+  const cameraEntity = world.createEntity("main_camera");
+  world.addComponent(
+    cameraEntity,
+    new CameraComponent(45, 16 / 9, 0.1, 1000.0),
+  );
+  world.addComponent(cameraEntity, new MainCameraTagComponent());
+  world.addComponent(cameraEntity, new TransformComponent());
+  // Add the follow component
+  world.addComponent(
+    cameraEntity,
+    new CameraFollowComponent(playerEntity, vec3.create(0, 1.6, 0)), // Target player, offset to head height
+  );
 
   // --- Fog ---
   const fog = new FogComponent();

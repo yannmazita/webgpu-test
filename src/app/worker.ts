@@ -90,7 +90,9 @@ import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSyste
 import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
 import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
-import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
+import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
+import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
+import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
 
 /**
  * Main render worker script.
@@ -146,7 +148,6 @@ let cameraControllerSystem: CameraControllerSystem | null = null;
 let playerControllerSystem: PlayerControllerSystem | null = null;
 let damageSystem: DamageSystem | null = null;
 let collisionEventSystem: CollisionEventSystem | null = null;
-let projectileSystem: ProjectileSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -410,7 +411,6 @@ async function initWorker(
     physicsCtx,
     damageSystem,
   );
-  projectileSystem = new ProjectileSystem();
 
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
@@ -445,7 +445,6 @@ async function initWorker(
  */
 function frame(now: number): void {
   // --- Guard Clause ---
-  // Ensure all required modules and contexts are initialized before proceeding.
   if (
     !renderer ||
     !world ||
@@ -455,24 +454,18 @@ function frame(now: number): void {
     !playerControllerSystem ||
     !damageSystem ||
     !collisionEventSystem ||
-    !projectileSystem ||
     !actionMap
   ) {
-    // If not ready, immediately signal completion to avoid stalling the main thread.
     self.postMessage({ type: "FRAME_DONE" });
     return;
   }
 
   // --- State Synchronization (Editor -> Worker) ---
-  // Apply any pending state changes from the main thread's editor UI (e.g.,
-  // fog, sun, shadow settings) by reading from the shared engine state buffer.
   if (engineStateCtx) {
     syncEngineState(world, engineStateCtx);
   }
 
   // --- Delta Time Calculation ---
-  // Calculate frame-rate independent delta time. Clamp the value to prevent
-  // large simulation jumps after a pause (e.g., tab-out, breakpoint).
   const MAX_PAUSE_SECONDS = 0.5;
   let dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0;
   lastFrameTime = now;
@@ -481,12 +474,8 @@ function frame(now: number): void {
   }
 
   // --- Input Processing & Camera Mode ---
-  // Check for actions that toggle state, like switching camera modes.
-  // This uses `wasPressed` which requires the previous frame's input state.
   if (actionController.wasPressed("toggle_camera_mode")) {
     isFreeCameraActive = !isFreeCameraActive;
-    // If switching to free-camera, synchronize its orientation with the
-    // current player camera to prevent a jarring snap.
     if (isFreeCameraActive) {
       const cameraTransform = world.getComponent(
         cameraEntity,
@@ -499,19 +488,16 @@ function frame(now: number): void {
   }
 
   // --- Controller Updates ---
-  // Run the appropriate controller system based on the current camera mode.
   if (isFreeCameraActive) {
-    // Free-fly camera for debugging and scene exploration.
     cameraControllerSystem.update(world, dt);
   } else {
-    // Player controller, which manages both player body movement and the
-    // first-person camera attached to it.
     playerControllerSystem.update(world, dt);
   }
 
+  // --- Input to Intent System ---
+  playerInputSystem(world, actionController);
+
   // --- State Synchronization (Physics -> Worker) ---
-  // Apply the latest physics simulation results (positions, rotations) from
-  // the physics worker's snapshot buffer to the corresponding ECS transforms.
   if (physicsCtx) {
     applyPhysicsSnapshot(world, physicsCtx);
   }
@@ -522,7 +508,6 @@ function frame(now: number): void {
       weaponSystem(
         world,
         resourceManager,
-        actionController,
         physicsCtx,
         raycastResultsCtx,
         damageSystem,
@@ -530,23 +515,19 @@ function frame(now: number): void {
       );
     }
   }
-  projectileSystem.update(world, dt);
+  lifetimeSystem(world, dt);
   collisionEventSystem.update();
   damageSystem.update(world);
 
   // --- Core ECS System Execution Order ---
-  // The order of system execution is critical for correctness.
-  // 1. Animation: Updates bone matrices and local transforms.
-  // 2. Transform: Propagates transform changes through the hierarchy,
-  //    calculating final world matrices. This consumes updates from physics,
-  //    controllers, and animations.
-  // 3. Physics Commands: Enqueues commands for the *next* physics step based
-  //    on the current frame's state (e.g., creating new bodies).
-  // 4. Camera: Computes the final view/projection matrices using the now-final
-  //    camera transform for this frame.
-  // 5. Render: Draws the scene using the final state of all components.
   animationSystem(world, dt);
   transformSystem(world);
+
+  // Only run the camera follow system when not in free camera mode.
+  if (!isFreeCameraActive) {
+    cameraFollowSystem(world);
+  }
+
   if (physicsCommandSystem) {
     physicsCommandSystem.update(world);
   }
@@ -554,17 +535,12 @@ function frame(now: number): void {
   renderSystem(world, renderer, sceneRenderData);
 
   // --- Input State Update (for next frame's input) ---
-  // Record the current input state so that `wasPressed` actions can be
-  // correctly detected on the next frame. This must be done at the end.
   updatePreviousActionState(actionController, previousActionState, actionMap);
 
   // --- Performance Metrics ---
-  // Collect and publish performance data (e.g., render times, physics step
-  // duration) to the main thread for display in the UI.
   if (metricsContext && renderer) {
     let physicsTimeUs = 0;
     if (physicsCtx) {
-      // Non-atomically read the metric. Minor tearing is acceptable for display.
       const physicsTimeMs =
         physicsCtx.statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2];
       physicsTimeUs = Math.round(physicsTimeMs * 1000);
@@ -579,8 +555,6 @@ function frame(now: number): void {
   }
 
   // --- Signal to Main Thread ---
-  // Notify the main thread that this frame is complete, allowing it to
-  // schedule the next frame update.
   self.postMessage({ type: "FRAME_DONE" });
 }
 
