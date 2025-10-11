@@ -57,6 +57,7 @@ import {
   COLLISION_EVENTS_SLOT_SIZE,
   COLLISION_EVENT_FLAG_STARTED,
   COLLISION_EVENT_FLAG_STOPPED,
+  CMD_CREATE_BODY_PARAMS,
 } from "@/core/sharedPhysicsLayout";
 
 // Import Rapier physics module
@@ -231,25 +232,30 @@ function processCommands(): void {
     if (type === CMD_CREATE_BODY) {
       // --- Create Body Logic ---
       // Unpack parameters for body and collider creation.
-      const colliderType = Math.floor(paramsView[0]);
-      const p0 = paramsView[1],
-        p1 = paramsView[2],
-        p2 = paramsView[3];
-      const pos = { x: paramsView[4], y: paramsView[5], z: paramsView[6] };
-      const rot = {
-        x: paramsView[7],
-        y: paramsView[8],
-        z: paramsView[9],
-        w: paramsView[10],
+      const P = CMD_CREATE_BODY_PARAMS;
+      const colliderType = Math.floor(paramsView[P.COLLIDER_TYPE]);
+      const p0 = paramsView[P.PARAM_0],
+        p1 = paramsView[P.PARAM_1],
+        p2 = paramsView[P.PARAM_2];
+      const pos = {
+        x: paramsView[P.POS_X],
+        y: paramsView[P.POS_Y],
+        z: paramsView[P.POS_Z],
       };
-      const bodyTypeInt = Math.floor(paramsView[11]);
-      const isPlayer = paramsView[12] > 0.5;
-      const slopeAngle = paramsView[13];
-      const maxStepHeight = paramsView[14];
+      const rot = {
+        x: paramsView[P.ROT_X],
+        y: paramsView[P.ROT_Y],
+        z: paramsView[P.ROT_Z],
+        w: paramsView[P.ROT_W],
+      };
+      const bodyTypeInt = Math.floor(paramsView[P.BODY_TYPE]);
+      const isPlayer = paramsView[P.IS_PLAYER] > 0.5;
+      const slopeAngle = paramsView[P.SLOPE_ANGLE];
+      const maxStepHeight = paramsView[P.MAX_STEP_HEIGHT];
       const vel = {
-        x: paramsView[17],
-        y: paramsView[18],
-        z: paramsView[19],
+        x: paramsView[P.VEL_X],
+        y: paramsView[P.VEL_Y],
+        z: paramsView[P.VEL_Z],
       };
 
       // Select the appropriate Rapier RigidBodyDesc based on the type.
