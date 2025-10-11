@@ -512,7 +512,8 @@ fn fs_main(fi: FragmentInput, @builtin(position) fragPos: vec4<f32>) -> @locatio
         let g = 0.76;
         let phase = (1.0 - g*g) / (4.0 * PI * pow(1.0 + g*g - 2.0*g*cos_angle, 1.5));
 
-        let sun_inscattering = shadow.lightColor.rgb * sun_inscatter_intensity * phase * shadowFactor;
+        let sun_intensity = shadow.params0.x;
+        let sun_inscattering = shadow.lightColor.rgb * sun_intensity * sun_inscatter_intensity * phase * shadowFactor;
         let ambient_inscattering = scene.fogColor.rgb;
         let total_inscattering = sun_inscattering + ambient_inscattering;
 
