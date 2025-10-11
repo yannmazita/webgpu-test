@@ -3,6 +3,7 @@
 import { World } from "@/core/ecs/world";
 import { Entity } from "@/core/ecs/entity";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
+import { DeathEvent, EventManager } from "../events";
 
 /**
  * Represents a single instance of damage to be processed.
@@ -13,13 +14,27 @@ export interface DamageEvent {
   source?: Entity;
 }
 
+/** Defines all possible game events. */
+interface GameEvent {
+  type: "death";
+  payload: DeathEvent;
+}
+
 /**
  * A system that processes a queue of damage events each frame.
+ * @remarks
  * This decouples damage-dealing systems (like weapons, projectiles, physics
- * collisions) from the health component logic.
+ * collisions) from the health component logic. When an entity's health
+ * reaches zero, it publishes a `DeathEvent` to the global event manager
+ * instead of destroying the entity directly.
  */
 export class DamageSystem {
   private eventQueue: DamageEvent[] = [];
+
+  /**
+   * @param eventManager The global event manager to publish death events to.
+   */
+  constructor(private eventManager: EventManager<GameEvent, "death">) {}
 
   /**
    * Adds a damage event to the queue to be processed on the next update.
@@ -31,7 +46,10 @@ export class DamageSystem {
 
   /**
    * Processes all queued damage events for the current frame.
-   * It applies damage to entities with a HealthComponent and handles death.
+   * @remarks
+   * It applies damage to entities with a HealthComponent. If an entity's
+   * health is depleted, it publishes a `DeathEvent` and takes no further
+   * action.
    * @param world The ECS world.
    */
   public update(world: World): void {
@@ -56,11 +74,16 @@ export class DamageSystem {
       );
 
       if (health.isDead()) {
-        // TODO: Emit a "death" event or destroy the entity.
-        // For now, we just log it.
-        console.log(`[DamageSystem] Entity ${event.target} has been defeated!`);
-        // Example of what could be done here:
-        // world.destroyEntity(event.target);
+        console.log(
+          `[DamageSystem] Entity ${event.target} has been defeated! Publishing DeathEvent.`,
+        );
+        this.eventManager.publish({
+          type: "death",
+          payload: {
+            victim: event.target,
+            killer: event.source,
+          },
+        });
       }
     }
 
