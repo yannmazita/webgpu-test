@@ -84,15 +84,9 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
 - **Build for production:** `npm run build`
 - **Run linter:** `npm run lint`
 
-### Browser crashing bugs
-
-- Resizing is extremely finicky and inefficient (destruction and creationg of several resources), the engine will start at canvas default 300x150, change tabs or resize _slightly_ or open the developper console to trigger a resize. Continously resizing (via window handles for example) _will_ crash the engine.
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
 
 # WebGPU Engine - Compatibility Guide
 
@@ -105,3 +99,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 Tested working: Firefox Nightly + Wayland + ( Nvidia | Intel )
 Tested not working: Firefox (not supported), Blink-based browsers + Wayland + Nvidia (falls back to CPU renderer)
+
+# Known bugs
+
+- Resizing the canvas on Firefox based browsers _may_ induce severe slowdown/crash.
