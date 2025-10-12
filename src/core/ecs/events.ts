@@ -20,6 +20,33 @@ export interface DeathEvent {
 }
 
 /**
+ * Represents the data payload for a fire weapon event.
+ * @remarks
+ * This event is published when an entity intends to fire its equipped weapon.
+ */
+export interface FireWeaponEvent {
+  /** The entity that is firing the weapon. */
+  shooter: Entity;
+}
+
+/**
+ * A union of all possible event payloads.
+ */
+export type GameEventPayload = DeathEvent | FireWeaponEvent;
+
+/**
+ * A discriminated union of all possible game events, using a 'type' property.
+ */
+export type GameEvent =
+  | { type: "death"; payload: DeathEvent }
+  | { type: "fire-weapon"; payload: FireWeaponEvent };
+
+/**
+ * A union of all possible event type strings.
+ */
+export type GameEventType = GameEvent["type"];
+
+/**
  * A generic type for a function that listens for events.
  * @param event The event data payload.
  */
@@ -34,23 +61,21 @@ export type EventListener<T> = (event: T) => void;
  * It uses a double-buffered queue to allow events to be published during an
  * update loop without affecting the set of events being processed in that same
  * loop.
- *
- * @template T A union type of all possible event objects (ie DeathEvent |
- * DamageEvent).
- * @template K A union type of all possible event type strings (ie 'death'
- * | 'damage').
  */
-export class EventManager<T extends { type: K }, K extends string> {
-  private listeners = new Map<K, Set<EventListener<T>>>();
-  private eventQueue: T[] = [];
-  private processingQueue: T[] = [];
+export class EventManager {
+  private listeners = new Map<GameEventType, Set<EventListener<GameEvent>>>();
+  private eventQueue: GameEvent[] = [];
+  private processingQueue: GameEvent[] = [];
 
   /**
    * Subscribes a listener function to a specific event type.
    * @param type The string identifier of the event type to listen for.
    * @param listener The function to be called when the event is published.
    */
-  public subscribe(type: K, listener: EventListener<T>): void {
+  public subscribe(
+    type: GameEventType,
+    listener: EventListener<GameEvent>,
+  ): void {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, new Set());
     }
@@ -62,7 +87,10 @@ export class EventManager<T extends { type: K }, K extends string> {
    * @param type The string identifier of the event type.
    * @param listener The listener function to remove.
    */
-  public unsubscribe(type: K, listener: EventListener<T>): void {
+  public unsubscribe(
+    type: GameEventType,
+    listener: EventListener<GameEvent>,
+  ): void {
     this.listeners.get(type)?.delete(listener);
   }
 
@@ -70,7 +98,7 @@ export class EventManager<T extends { type: K }, K extends string> {
    * Adds an event to the queue to be processed on the next update.
    * @param event The event object to publish. It must have a 'type' property.
    */
-  public publish(event: T): void {
+  public publish(event: GameEvent): void {
     this.eventQueue.push(event);
   }
 
