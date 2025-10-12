@@ -30,16 +30,65 @@ export interface FireWeaponEvent {
 }
 
 /**
+ * Payload for when the player's interaction target changes.
+ * Used to update UI prompts.
+ */
+export interface InteractionTargetChangedEvent {
+  newTarget: Entity | null;
+  prompt: string | null;
+}
+
+/**
+ * Payload for when the player actively interacts with a target.
+ */
+export interface InteractEvent {
+  interactor: Entity;
+  target: Entity;
+}
+
+/**
+ * Payload to request adding an item to an inventory.
+ * Processed by the InventorySystem.
+ */
+export interface AddToInventoryEvent {
+  /** The entity whose inventory should be modified. */
+  entity: Entity;
+  itemId: string;
+  quantity: number;
+}
+
+/**
+ * Payload for when an inventory has been updated.
+ * Used to update UI.
+ */
+export interface InventoryUpdatedEvent {
+  owner: Entity;
+}
+
+/**
  * A union of all possible event payloads.
  */
-export type GameEventPayload = DeathEvent | FireWeaponEvent;
+export type GameEventPayload =
+  | DeathEvent
+  | FireWeaponEvent
+  | InteractionTargetChangedEvent
+  | InteractEvent
+  | AddToInventoryEvent
+  | InventoryUpdatedEvent;
 
 /**
  * A discriminated union of all possible game events, using a 'type' property.
  */
 export type GameEvent =
   | { type: "death"; payload: DeathEvent }
-  | { type: "fire-weapon"; payload: FireWeaponEvent };
+  | { type: "fire-weapon"; payload: FireWeaponEvent }
+  | {
+      type: "interaction-target-changed";
+      payload: InteractionTargetChangedEvent;
+    }
+  | { type: "interact"; payload: InteractEvent }
+  | { type: "add-to-inventory"; payload: AddToInventoryEvent }
+  | { type: "inventory-updated"; payload: InventoryUpdatedEvent };
 
 /**
  * A union of all possible event type strings.
