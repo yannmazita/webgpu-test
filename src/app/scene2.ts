@@ -326,7 +326,7 @@ export async function createScene(
     // Add interaction and pickup components to make it a health pack
     world.addComponent(
       pickupCube,
-      new InteractableComponent("Press [E] to pick up Health Pack", 3.0),
+      new InteractableComponent("Press [E] to pick up Health Pack", 8.0),
     );
     world.addComponent(pickupCube, new PickupComponent("health_pack", 25));
   }
