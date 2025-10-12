@@ -1,4 +1,6 @@
 // src/core/types/worker.ts
+import { Vec3 } from "wgpu-matrix";
+import { Entity } from "@/core/ecs/entity";
 
 /**
  * Message type constant for worker initialization.
@@ -46,6 +48,8 @@ export interface InitMsg {
   sharedRaycastResultsBuffer: SharedArrayBuffer;
   /** The `SharedArrayBuffer` for collision events */
   sharedCollisionEventsBuffer: SharedArrayBuffer;
+  /** The `SharedArrayBuffer` for receiving interaction raycast hit results from the physics worker. */
+  sharedInteractionRaycastResultsBuffer: SharedArrayBuffer;
 }
 
 /**
