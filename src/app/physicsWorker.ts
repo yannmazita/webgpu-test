@@ -37,6 +37,7 @@ import {
   STATES_PHYSICS_STEP_TIME_MS_OFFSET,
   CMD_MOVE_PLAYER,
   CMD_WEAPON_RAYCAST,
+  CMD_INTERACTION_RAYCAST,
   COMMANDS_MAX_PARAMS_F32,
   RAYCAST_RESULTS_MAGIC,
   RAYCAST_RESULTS_VERSION,
@@ -59,6 +60,14 @@ import {
   COLLISION_EVENT_FLAG_STOPPED,
   CMD_CREATE_BODY_PARAMS,
   RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_MAGIC,
+  INTERACTION_RAYCAST_RESULTS_VERSION,
+  INTERACTION_RAYCAST_RESULTS_MAGIC_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_VERSION_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_GEN_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_HIT_DISTANCE_OFFSET,
+  INTERACTION_RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 // Import Rapier physics module
@@ -90,6 +99,7 @@ let statesI32: Int32Array | null = null; // Int32 view for states (header + coun
 let statesF32: Float32Array | null = null; // Float32 view for states (pos/rot payload)
 let raycastResultsI32: Int32Array | null = null;
 let raycastResultsF32: Float32Array | null = null;
+let interactionRaycastResultsI32: Int32Array | null = null;
 let collisionEventsI32: Int32Array | null = null;
 
 let stepInterval: number | null = null;
@@ -443,6 +453,60 @@ function processCommands(): void {
         Atomics.add(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 1);
       }
       processedAny = true;
+    } else if (type === CMD_INTERACTION_RAYCAST) {
+      if (interactionRaycastResultsI32) {
+        const origin = {
+          x: paramsView[0],
+          y: paramsView[1],
+          z: paramsView[2],
+        };
+        const dir = { x: paramsView[3], y: paramsView[4], z: paramsView[5] };
+        const maxToi = paramsView[6];
+        const ray = new RAPIER.Ray(origin, dir);
+        const sourceBody = entityToBody.get(physId);
+
+        const hit = world.castRay(
+          ray,
+          maxToi,
+          true, // solid
+          undefined,
+          undefined,
+          undefined,
+          sourceBody,
+        );
+
+        let hitEntityId = 0;
+        let hitDistance = -1.0;
+
+        if (hit) {
+          const hitBody = hit.collider.parent();
+          hitEntityId = hitBody ? (bodyToEntity.get(hitBody) ?? 0) : 0;
+          hitDistance = hit.timeOfImpact;
+        }
+
+        Atomics.store(
+          interactionRaycastResultsI32,
+          INTERACTION_RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET >> 2,
+          hitEntityId,
+        );
+        Atomics.store(
+          interactionRaycastResultsI32,
+          INTERACTION_RAYCAST_RESULTS_HIT_DISTANCE_OFFSET >> 2,
+          // Reinterpreting the bits of the float as an integer for atomic store.
+          new Int32Array(new Float32Array([hitDistance]).buffer)[0],
+        );
+        Atomics.store(
+          interactionRaycastResultsI32,
+          INTERACTION_RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET >> 2,
+          physId,
+        );
+        Atomics.add(
+          interactionRaycastResultsI32,
+          INTERACTION_RAYCAST_RESULTS_GEN_OFFSET >> 2,
+          1,
+        );
+      }
+      processedAny = true;
     }
 
     // --- Advance Tail ---
@@ -788,6 +852,25 @@ self.onmessage = async (
         RAYCAST_RESULTS_VERSION,
       );
       Atomics.store(raycastResultsI32, RAYCAST_RESULTS_GEN_OFFSET >> 2, 0);
+
+      interactionRaycastResultsI32 = new Int32Array(
+        msg.interactionRaycastResultsBuffer,
+      );
+      Atomics.store(
+        interactionRaycastResultsI32,
+        INTERACTION_RAYCAST_RESULTS_MAGIC_OFFSET >> 2,
+        INTERACTION_RAYCAST_RESULTS_MAGIC,
+      );
+      Atomics.store(
+        interactionRaycastResultsI32,
+        INTERACTION_RAYCAST_RESULTS_VERSION_OFFSET >> 2,
+        INTERACTION_RAYCAST_RESULTS_VERSION,
+      );
+      Atomics.store(
+        interactionRaycastResultsI32,
+        INTERACTION_RAYCAST_RESULTS_GEN_OFFSET >> 2,
+        0,
+      );
 
       collisionEventsI32 = new Int32Array(msg.collisionEventsBuffer);
       Atomics.store(
