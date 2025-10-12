@@ -87,13 +87,13 @@ import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
 import { getPickRay, raycast } from "@/core/utils/raycast";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
 import { PlayerControllerSystem } from "@/core/ecs/systems/playerControllerSystem";
-import { weaponSystem } from "@/core/ecs/systems/weaponSystem";
+import { WeaponSystem } from "@/core/ecs/systems/weaponSystem";
 import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 import { CollisionEventSystem } from "@/core/ecs/systems/collisionEventSystem";
 import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
 import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
 import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
-import { DeathEvent, EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events";
 import { DeathSystem } from "@/core/ecs/systems/deathSystem";
 
 /**
@@ -151,6 +151,7 @@ let playerControllerSystem: PlayerControllerSystem | null = null;
 let damageSystem: DamageSystem | null = null;
 let collisionEventSystem: CollisionEventSystem | null = null;
 let deathSystem: DeathSystem | null = null;
+let weaponSystem: WeaponSystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -159,11 +160,7 @@ let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
 
 // Event Manager
-interface GameEvent {
-  type: "death";
-  payload: DeathEvent;
-}
-let eventManager: EventManager<GameEvent, "death"> | null = null;
+let eventManager: EventManager | null = null;
 
 // Physics globals
 let physicsCtx: PhysicsContext | null = null;
@@ -418,6 +415,18 @@ async function initWorker(
   // Damage system for processing all damage events
   damageSystem = new DamageSystem(eventManager);
 
+  // Weapon System
+  if (resourceManager) {
+    weaponSystem = new WeaponSystem(
+      world,
+      resourceManager,
+      physicsCtx,
+      raycastResultsCtx,
+      damageSystem,
+      eventManager,
+    );
+  }
+
   // Create the system for handling physics collision events.
   collisionEventSystem = new CollisionEventSystem(
     world,
@@ -449,13 +458,14 @@ async function initWorker(
  * @remarks
  * This function orchestrates all per-frame activity. The execution order is
  * critical for data consistency:
- * 1. Sync state from editor and physics (snapshots).
- * 2. Process physics collision events via `CollisionEventSystem`.
- * 3. Run input-driven controllers.
- * 4. Run gameplay systems (`weaponSystem`, `damageSystem`).
- * 5. Run core ECS systems (`animation`, `transform`, `physicsCommands`, `camera`).
- * 6. Render the scene.
- * 7. Publish metrics.
+ * 1.  Sync state from editor and apply the latest physics snapshot.
+ * 2.  Run input-driven controllers and the input-to-event system.
+ * 3.  Run gameplay systems (`weaponSystem` cooldowns, `damageSystem` queue).
+ * 4.  Process all queued events via `eventManager.update()`. This triggers
+ *     reactive logic like firing weapons and handling deaths.
+ * 5.  Run core ECS systems (`animation`, `transform`, `physicsCommands`, `camera`).
+ * 6.  Render the scene.
+ * 7.  Publish metrics.
  *
  * @param now - The current high-resolution timestamp from `requestAnimationFrame`.
  */
@@ -513,7 +523,7 @@ function frame(now: number): void {
   }
 
   // --- Input to Intent System ---
-  playerInputSystem(world, actionController);
+  playerInputSystem(world, actionController, eventManager);
 
   // --- State Synchronization (Physics -> Worker) ---
   if (physicsCtx) {
@@ -521,22 +531,13 @@ function frame(now: number): void {
   }
 
   // --- Gameplay Systems ---
-  if (physicsCtx && raycastResultsCtx) {
-    if (resourceManager) {
-      weaponSystem(
-        world,
-        resourceManager,
-        physicsCtx,
-        raycastResultsCtx,
-        damageSystem,
-        dt,
-      );
-    }
-  }
+  weaponSystem?.update(dt);
   lifetimeSystem(world, dt);
   collisionEventSystem.update();
   damageSystem.update(world);
-  eventManager.update(); // Process all queued events (ie DeathEvent)
+
+  // Process all queued events (e.g., DeathEvent, FireWeaponEvent)
+  eventManager.update();
 
   // --- Core ECS System Execution Order ---
   animationSystem(world, dt);

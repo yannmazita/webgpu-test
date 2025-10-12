@@ -1,24 +1,24 @@
 // src/core/ecs/systems/playerInputSystem.ts
-
 import { IActionController } from "@/core/input/action";
 import { World } from "@/core/ecs/world";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
-import { WantsToFireTagComponent } from "@/core/ecs/components/tagComponents";
+import { EventManager } from "@/core/ecs/events";
 
 /**
- * Translates raw player input actions into gameplay intent components.
- * This system decouples input handling from the systems that act on those intents.
- *
+ * Translates raw player input actions into gameplay intent events.
  * @remarks
- * It checks for the "fire" action and adds a `WantsToFireTagComponent`
- * to the player entity, which is then processed by the `weaponSystem`.
+ * This system decouples input handling from the systems that act on those
+ * intents. It checks for the "fire" action and publishes a `FireWeaponEvent`,
+ * which is then processed by the `WeaponSystem`.
  *
  * @param world The ECS world.
  * @param actions The input action controller.
+ * @param eventManager The global event manager to publish events to.
  */
 export function playerInputSystem(
   world: World,
   actions: IActionController,
+  eventManager: EventManager,
 ): void {
   const query = world.query([PlayerControllerComponent]);
   if (query.length === 0) {
@@ -28,9 +28,9 @@ export function playerInputSystem(
 
   // Check for firing intent
   if (actions.isPressed("fire")) {
-    // Add the tag if it doesn't already exist to avoid redundant adds.
-    if (!world.hasComponent(playerEntity, WantsToFireTagComponent)) {
-      world.addComponent(playerEntity, new WantsToFireTagComponent());
-    }
+    eventManager.publish({
+      type: "fire-weapon",
+      payload: { shooter: playerEntity },
+    });
   }
 }

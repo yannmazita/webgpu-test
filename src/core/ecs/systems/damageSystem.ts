@@ -3,7 +3,7 @@
 import { World } from "@/core/ecs/world";
 import { Entity } from "@/core/ecs/entity";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
-import { DeathEvent, EventManager } from "../events";
+import { EventManager } from "../events";
 
 /**
  * Represents a single instance of damage to be processed.
@@ -12,12 +12,6 @@ export interface DamageEvent {
   target: Entity;
   amount: number;
   source?: Entity;
-}
-
-/** Defines all possible game events. */
-interface GameEvent {
-  type: "death";
-  payload: DeathEvent;
 }
 
 /**
@@ -34,7 +28,7 @@ export class DamageSystem {
   /**
    * @param eventManager The global event manager to publish death events to.
    */
-  constructor(private eventManager: EventManager<GameEvent, "death">) {}
+  constructor(private eventManager: EventManager) {}
 
   /**
    * Adds a damage event to the queue to be processed on the next update.
