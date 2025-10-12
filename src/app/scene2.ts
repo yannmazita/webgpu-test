@@ -25,6 +25,8 @@ import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowComponent";
 import { vec3 } from "wgpu-matrix";
+import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
+import { PickupComponent } from "@/core/ecs/components/pickupComponent";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -291,6 +293,34 @@ export async function createScene(
       // Health component to make it a target
       world.addComponent(cube, new HealthComponent(50));
     }
+
+    // Create a special "pickup" cube
+    const pickupCube = world.createEntity("pickup_cube_health");
+    const pickupCubeMat = await resourceManager.createPBRMaterialInstance(
+      await resourceManager.createPBRMaterialTemplate({
+        albedo: [0.1, 0.8, 0.2, 1.0],
+      }),
+    );
+
+    const t = new TransformComponent();
+    t.setPosition(-3, 0.5, 2);
+    world.addComponent(pickupCube, t);
+    world.addComponent(
+      pickupCube,
+      new MeshRendererComponent(cubeMesh, pickupCubeMat),
+    );
+    world.addComponent(pickupCube, new PhysicsBodyComponent("dynamic"));
+    world.addComponent(
+      pickupCube,
+      new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
+    );
+
+    // Add interaction and pickup components to make it a health pack
+    world.addComponent(
+      pickupCube,
+      new InteractableComponent("Press [E] to pick up Health Pack", 3.0),
+    );
+    world.addComponent(pickupCube, new PickupComponent("health_pack", 25));
   }
 
   // --- Global Sun and Shadow Settings ---

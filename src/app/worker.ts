@@ -95,6 +95,9 @@ import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
 import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
 import { EventManager } from "@/core/ecs/events";
 import { DeathSystem } from "@/core/ecs/systems/deathSystem";
+import { InteractionSystem } from "@/core/ecs/systems/interactionSystem";
+import { PickupSystem } from "@/core/ecs/systems/pickupSystem";
+import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
 
 /**
  * Main render worker script.
@@ -152,6 +155,9 @@ let damageSystem: DamageSystem | null = null;
 let collisionEventSystem: CollisionEventSystem | null = null;
 let deathSystem: DeathSystem | null = null;
 let weaponSystem: WeaponSystem | null = null;
+let interactionSystem: InteractionSystem | null = null;
+let pickupSystem: PickupSystem | null = null;
+let inventorySystem: InventorySystem | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
@@ -165,6 +171,7 @@ let eventManager: EventManager | null = null;
 // Physics globals
 let physicsCtx: PhysicsContext | null = null;
 let raycastResultsCtx: { i32: Int32Array; f32: Float32Array } | null = null;
+let interactionRaycastResultsCtx: { i32: Int32Array } | null = null;
 let physicsCommandSystem: PhysicsCommandSystem | null = null;
 let physicsWorker: Worker | null = null;
 let lastSnapshotGen = 0; // track last applied physics snapshot generation
@@ -172,7 +179,6 @@ let lastSnapshotGen = 0; // track last applied physics snapshot generation
 // State for raycast
 let lastViewportWidth = 0;
 let lastViewportHeight = 0;
-let lastRaycastGen = 0;
 
 // State for dt
 let lastFrameTime = 0;
@@ -263,6 +269,7 @@ async function initWorker(
   sharedEngineStateBuffer: SharedArrayBuffer,
   sharedRaycastResultsBuffer: SharedArrayBuffer,
   sharedCollisionEventsBuffer: SharedArrayBuffer,
+  sharedInteractionRaycastResultsBuffer: SharedArrayBuffer,
 ): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -299,6 +306,7 @@ async function initWorker(
     toggle_camera_mode: { type: "button", keys: ["KeyC"] },
     jump: { type: "button", keys: ["Space"] },
     fire: { type: "button", mouseButtons: [0] }, // 0 = Left Mouse Button
+    interact: { type: "button", keys: ["KeyE"] },
   };
 
   actionController = {
@@ -365,10 +373,15 @@ async function initWorker(
   );
   initializePhysicsHeaders(physicsCtx);
 
-  // Create context for raycast results
+  // Create context for weapon raycast results (managed separately)
   raycastResultsCtx = {
     i32: new Int32Array(sharedRaycastResultsBuffer),
     f32: new Float32Array(sharedRaycastResultsBuffer),
+  };
+
+  // Create context for interaction raycast results (managed separately)
+  interactionRaycastResultsCtx = {
+    i32: new Int32Array(sharedInteractionRaycastResultsBuffer),
   };
 
   // Create physics worker
@@ -400,6 +413,7 @@ async function initWorker(
     statesBuffer,
     raycastResultsBuffer: sharedRaycastResultsBuffer,
     collisionEventsBuffer: sharedCollisionEventsBuffer,
+    interactionRaycastResultsBuffer: sharedInteractionRaycastResultsBuffer,
   };
   physicsWorker.postMessage(initMsg);
 
@@ -414,6 +428,21 @@ async function initWorker(
 
   // Damage system for processing all damage events
   damageSystem = new DamageSystem(eventManager);
+
+  // Interaction System
+  interactionSystem = new InteractionSystem(
+    world,
+    actionController,
+    eventManager,
+    physicsCtx,
+    interactionRaycastResultsCtx,
+  );
+
+  // Pickup System
+  pickupSystem = new PickupSystem(world, eventManager);
+
+  // Inventory System
+  inventorySystem = new InventorySystem(world, eventManager);
 
   // Weapon System
   if (resourceManager) {
@@ -482,7 +511,10 @@ function frame(now: number): void {
     !collisionEventSystem ||
     !deathSystem ||
     !eventManager ||
-    !actionMap
+    !actionMap ||
+    !interactionSystem ||
+    !pickupSystem ||
+    !inventorySystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -531,12 +563,13 @@ function frame(now: number): void {
   }
 
   // --- Gameplay Systems ---
+  interactionSystem.update(); // Must run before event manager
   weaponSystem?.update(dt);
   lifetimeSystem(world, dt);
   collisionEventSystem.update();
   damageSystem.update(world);
 
-  // Process all queued events (e.g., DeathEvent, FireWeaponEvent)
+  // Process all queued events (ie DeathEvent, FireWeaponEvent, InteractEvent)
   eventManager.update();
 
   // --- Core ECS System Execution Order ---
@@ -612,6 +645,7 @@ self.onmessage = async (
       msg.sharedEngineStateBuffer,
       msg.sharedRaycastResultsBuffer,
       msg.sharedCollisionEventsBuffer,
+      msg.sharedInteractionRaycastResultsBuffer,
     );
     return;
   }
