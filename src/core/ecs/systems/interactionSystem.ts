@@ -114,7 +114,12 @@ export class InteractionSystem {
           hitEntityId,
           InteractableComponent,
         );
-        if (interactable && hitDistance <= interactable.interactionDistance) {
+        // Also check that hitDistance is valid (>= 0)
+        if (
+          interactable &&
+          hitDistance >= 0 &&
+          hitDistance <= interactable.interactionDistance
+        ) {
           newTarget = hitEntityId;
         }
       }
