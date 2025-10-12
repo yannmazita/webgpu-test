@@ -27,6 +27,7 @@ import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowCompone
 import { vec3 } from "wgpu-matrix";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
 import { PickupComponent } from "@/core/ecs/components/pickupComponent";
+import { PBRMaterialOptions } from "@/core/types/gpu";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -269,18 +270,21 @@ export async function createScene(
     const cubeMesh = await resourceManager.resolveMeshByHandle(
       ResourceHandle.forMesh("PRIM:cube:size=1"),
     );
+    const whiteMaterialOptions: PBRMaterialOptions = {
+      albedo: [0.9, 0.8, 0.9, 1],
+      metallic: 0,
+      roughness: 0.8,
+    };
     const cubeMat = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate({
-        albedo: [0.9, 0.5, 0.2, 1],
-        metallic: 0.8,
-        roughness: 0.2,
-      }),
+      await resourceManager.createPBRMaterialTemplate(whiteMaterialOptions),
+      whiteMaterialOptions,
     );
+
     const CUBE_COUNT = 8;
     for (let i = 0; i < CUBE_COUNT; i++) {
       const cube = world.createEntity(`dynamic_cube_${i}`);
       const t = new TransformComponent();
-      // Stack them vertically with a slight offset for stability.
+      // Stack them vertically with a slight offset so that they fall
       t.setPosition(5, 0.5 + i * 10.01, 5);
       world.addComponent(cube, t);
       world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
@@ -296,10 +300,14 @@ export async function createScene(
 
     // Create a special "pickup" cube
     const pickupCube = world.createEntity("pickup_cube_health");
+    const greenMaterialOptions: PBRMaterialOptions = {
+      albedo: [0.1, 0.8, 0.2, 1.0],
+      emissive: [0.1, 0.8, 0.2],
+      emissiveStrength: 5,
+    };
     const pickupCubeMat = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate({
-        albedo: [0.1, 0.8, 0.2, 1.0],
-      }),
+      await resourceManager.createPBRMaterialTemplate(greenMaterialOptions),
+      greenMaterialOptions,
     );
 
     const t = new TransformComponent();
