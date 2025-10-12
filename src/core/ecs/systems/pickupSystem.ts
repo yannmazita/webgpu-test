@@ -21,6 +21,7 @@ export class PickupSystem {
 
   private onInteract(event: GameEvent): void {
     if (event.type !== "interact") return;
+    console.log("[PickupSystem] Received 'interact' event.", event.payload);
 
     const { interactor, target } = event.payload;
 
@@ -29,6 +30,13 @@ export class PickupSystem {
       InteractableComponent,
     );
     const pickup = this.world.getComponent(target, PickupComponent);
+
+    console.log(
+      `[PickupSystem] Target ${target} has InteractableComponent: ${isInteractable}`,
+    );
+    console.log(
+      `[PickupSystem] Target ${target} has PickupComponent: ${!!pickup}`,
+    );
 
     if (isInteractable && pickup) {
       console.log(
@@ -46,6 +54,7 @@ export class PickupSystem {
       });
 
       if (pickup.destroyOnPickup) {
+        console.log(`[PickupSystem] Destroying entity ${target}.`);
         this.world.destroyEntity(target);
       }
     }
