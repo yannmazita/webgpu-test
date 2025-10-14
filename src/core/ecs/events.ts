@@ -66,6 +66,22 @@ export interface InventoryUpdatedEvent {
 }
 
 /**
+ * Represents the data payload to request that an entity be respawned.
+ * @remarks
+ * This event is published by the `DeathSystem` when an entity with a
+ * `RespawnComponent` is destroyed. It is consumed by the `RespawnSystem`,
+ * which then manages the respawn timer and subsequent entity creation.
+ */
+export interface RequestRespawnEvent {
+  /** The identifier for the prefab used to recreate the entity. */
+  prefabId: string;
+  /** The time in seconds to wait before respawning. */
+  respawnTime: number;
+  /** An optional tag for selecting a specific group of spawn points. */
+  spawnPointTag?: string;
+}
+
+/**
  * A union of all possible event payloads.
  */
 export type GameEventPayload =
@@ -74,7 +90,8 @@ export type GameEventPayload =
   | InteractionTargetChangedEvent
   | InteractEvent
   | AddToInventoryEvent
-  | InventoryUpdatedEvent;
+  | InventoryUpdatedEvent
+  | RequestRespawnEvent;
 
 /**
  * A discriminated union of all possible game events, using a 'type' property.
@@ -88,7 +105,8 @@ export type GameEvent =
     }
   | { type: "interact"; payload: InteractEvent }
   | { type: "add-to-inventory"; payload: AddToInventoryEvent }
-  | { type: "inventory-updated"; payload: InventoryUpdatedEvent };
+  | { type: "inventory-updated"; payload: InventoryUpdatedEvent }
+  | { type: "request-respawn"; payload: RequestRespawnEvent };
 
 /**
  * A union of all possible event type strings.
