@@ -98,6 +98,8 @@ import { DeathSystem } from "@/core/ecs/systems/deathSystem";
 import { InteractionSystem } from "@/core/ecs/systems/interactionSystem";
 import { PickupSystem } from "@/core/ecs/systems/pickupSystem";
 import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
+import { RespawnSystem } from "@/core/ecs/systems/respawnSystem";
+import { PrefabFactory, registerPrefabs } from "@/app/prefabs";
 
 /**
  * Main render worker script.
@@ -114,7 +116,7 @@ import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
  * - FRAME: Executes the main game loop in a critical order:
  *   1.  Processes user input and updates player/camera controllers.
  *   2.  Applies the latest physics state snapshot (positions, rotations).
- *   3.  Runs gameplay systems (weapon firing, projectile updates).
+ *   3.  Runs gameplay systems (weapon firing, projectile updates etc).
  *   4.  Processes events from the physics worker (collisions) and applies
  *       their consequences (damage).
  *   5.  Updates core ECS state (animations, transforms).
@@ -158,10 +160,11 @@ let weaponSystem: WeaponSystem | null = null;
 let interactionSystem: InteractionSystem | null = null;
 let pickupSystem: PickupSystem | null = null;
 let inventorySystem: InventorySystem | null = null;
+let respawnSystem: RespawnSystem | null = null;
+let prefabFactory: PrefabFactory | null = null;
 let isFreeCameraActive = false;
 let actionMap: ActionMapConfig | null = null;
 const previousActionState: ActionStateMap = new Map();
-
 let metricsContext: MetricsContext | null = null;
 let metricsFrameId = 0;
 
@@ -351,6 +354,11 @@ async function initWorker(
   world = new World();
   sceneRenderData = new SceneRenderData();
 
+  // --- Prefab Factory Setup ---
+  // Must be created AFTER world and resourceManager
+  prefabFactory = new PrefabFactory(world, resourceManager);
+  registerPrefabs(prefabFactory);
+
   // --- Scene Setup ---
   try {
     console.log("[Worker] Creating default scene...");
@@ -466,6 +474,9 @@ async function initWorker(
   // Create the system for handling death events.
   deathSystem = new DeathSystem(world, eventManager);
 
+  // Create the respawn system
+  respawnSystem = new RespawnSystem(world, eventManager, prefabFactory);
+
   if (engineStateCtx) {
     // Only publish if the buffer looks large enough to hold header+flags
     if ((engineStateCtx.i32.length | 0) >= 4) {
@@ -514,7 +525,8 @@ function frame(now: number): void {
     !actionMap ||
     !interactionSystem ||
     !pickupSystem ||
-    !inventorySystem
+    !inventorySystem ||
+    !respawnSystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -568,6 +580,7 @@ function frame(now: number): void {
   lifetimeSystem(world, dt);
   collisionEventSystem.update();
   damageSystem.update(world);
+  respawnSystem.update(now);
 
   // Process all queued events (ie DeathEvent, FireWeaponEvent, InteractEvent)
   eventManager.update();
