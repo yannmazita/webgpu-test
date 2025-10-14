@@ -1,12 +1,6 @@
 // src/core/ecs/systems/deathSystem.ts
 import { World } from "@/core/ecs/world";
-import { DeathEvent, EventManager } from "@/core/ecs/events";
-
-/** Defines all possible game events. */
-interface GameEvent {
-  type: "death";
-  payload: DeathEvent;
-}
+import { DeathEvent, EventManager, GameEvent } from "@/core/ecs/events";
 
 /**
  * A system that handles the consequences of an entity's death.
@@ -23,7 +17,7 @@ export class DeathSystem {
    */
   constructor(
     private world: World,
-    private eventManager: EventManager<GameEvent, "death">,
+    private eventManager: EventManager,
   ) {
     // The system subscribes to the 'death' event type upon construction.
     // The listener is bound to this instance to maintain the correct `this` context.
