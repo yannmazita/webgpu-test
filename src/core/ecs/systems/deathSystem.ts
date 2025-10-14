@@ -1,12 +1,7 @@
 // src/core/ecs/systems/deathSystem.ts
 import { World } from "@/core/ecs/world";
-import { DeathEvent, EventManager } from "@/core/ecs/events";
-
-/** Defines all possible game events. */
-interface GameEvent {
-  type: "death";
-  payload: DeathEvent;
-}
+import { EventManager, GameEvent } from "@/core/ecs/events";
+import { RespawnComponent } from "@/core/ecs/components/respawnComponent";
 
 /**
  * A system that handles the consequences of an entity's death.
@@ -18,12 +13,13 @@ interface GameEvent {
  */
 export class DeathSystem {
   /**
-   * @param world The ECS world, used to destroy entities.
-   * @param eventManager The global event manager to subscribe to.
+   * Creates an instance of DeathSystem.
+   * @param world The ECS world, used to access and destroy entities.
+   * @param eventManager The global event manager to subscribe to and publish from.
    */
   constructor(
     private world: World,
-    private eventManager: EventManager<GameEvent, "death">,
+    private eventManager: EventManager,
   ) {
     // The system subscribes to the 'death' event type upon construction.
     // The listener is bound to this instance to maintain the correct `this` context.
@@ -32,15 +28,34 @@ export class DeathSystem {
 
   /**
    * The listener function that is called when a `DeathEvent` is processed.
-   * @param event The event containing the death payload.
+   * @param event The game event, which must be of type 'death'.
    */
-  private onDeath(event: { type: "death"; payload: DeathEvent }): void {
-    console.log(
-      `[DeathSystem] Received DeathEvent for entity ${event.payload.victim}. Destroying entity.`,
-    );
-    // For now, we just destroy the entity.
+  private onDeath(event: GameEvent): void {
+    if (event.type !== "death") return;
+
+    const victim = event.payload.victim;
+    console.log(`[DeathSystem] Received DeathEvent for entity ${victim}.`);
+
+    // Check for a respawn component before destroying the entity.
+    const respawn = this.world.getComponent(victim, RespawnComponent);
+    if (respawn) {
+      console.log(
+        `[DeathSystem] Entity ${victim} has RespawnComponent. Publishing RequestRespawnEvent.`,
+      );
+      // Publish an event to request a respawn, passing the necessary data.
+      this.eventManager.publish({
+        type: "request-respawn",
+        payload: {
+          prefabId: respawn.prefabId,
+          respawnTime: respawn.respawnTime,
+          spawnPointTag: respawn.spawnPointTag,
+        },
+      });
+    }
+
+    // The entity is always destroyed, regardless of whether it will respawn.
     // TODO: Add logic for ragdolls, particle effects, etc
-    this.world.destroyEntity(event.payload.victim);
+    this.world.destroyEntity(victim);
   }
 
   /**

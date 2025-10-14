@@ -25,6 +25,12 @@ import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowComponent";
 import { vec3 } from "wgpu-matrix";
+import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
+import { PickupComponent } from "@/core/ecs/components/pickupComponent";
+import { PBRMaterialOptions } from "@/core/types/gpu";
+import { Entity } from "@/core/ecs/entity";
+import { RespawnComponent } from "@/core/ecs/components/respawnComponent";
+import { SpawnPointComponent } from "@/core/ecs/components/spawnPointComponent";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -82,6 +88,67 @@ async function createPillarForest(
       new PhysicsColliderComponent(1, [scaleX / 2, scaleY / 2, scaleZ / 2]),
     );
   }
+}
+
+/**
+ * Creates a player entity with all necessary components.
+ * @remarks
+ * This function acts as a "prefab" for the player. It is registered with the
+ * `PrefabFactory` and can be called to instantiate a new player at any time,
+ * for example, at the start of the game or upon respawning.
+ * @param world The ECS world.
+ * @param resourceManager The resource manager.
+ * @param transform The initial transform for the player.
+ * @returns A promise that resolves to the created player entity ID.
+ */
+export async function createPlayerPrefab(
+  world: World,
+  resourceManager: ResourceManager,
+  transform: TransformComponent,
+): Promise<Entity> {
+  const playerEntity = world.createEntity("player");
+
+  // Use the provided transform for position/rotation
+  world.addComponent(playerEntity, transform);
+
+  // Physics: kinematic capsule, marked as the player.
+  const bodyComp = new PhysicsBodyComponent("kinematicPosition", true);
+  world.addComponent(playerEntity, bodyComp);
+  const colliderComp = new PhysicsColliderComponent();
+  colliderComp.setCapsule(0.4, 0.9); // Standard FPS capsule.
+  world.addComponent(playerEntity, colliderComp);
+
+  // Controller component to link input and physics.
+  world.addComponent(playerEntity, new PlayerControllerComponent());
+
+  // Health and Respawn
+  world.addComponent(playerEntity, new HealthComponent(100));
+  world.addComponent(
+    playerEntity,
+    new RespawnComponent("player", 5.0, "player_spawn"),
+  );
+
+  // Weapon component configured for projectile firing.
+  // Pre-loading projectile assets
+  const projectileMeshHandle = ResourceHandle.forMesh(
+    "PRIM:icosphere:r=0.1,sub=1",
+  );
+  const projectileMaterialHandle = ResourceHandle.forMaterial(
+    "projectile_material",
+  );
+
+  const weapon = new WeaponComponent();
+  weapon.isHitscan = false;
+  weapon.fireRate = 4.0;
+  weapon.damage = 25.0; // Increased damage for testing
+  weapon.projectileSpeed = 75.0;
+  weapon.projectileLifetime = 1.5;
+  weapon.projectileRadius = 0.1;
+  weapon.projectileMeshHandle = projectileMeshHandle;
+  weapon.projectileMaterialHandle = projectileMaterialHandle;
+  world.addComponent(playerEntity, weapon);
+
+  return playerEntity;
 }
 
 /**
@@ -150,38 +217,17 @@ export async function createScene(
   );
 
   // --- Player ---
-  // Create player first so we can get its entity ID for the camera to follow.
-  const playerEntity = world.createEntity("player");
-  {
-    const t = new TransformComponent();
-    t.setPosition(0, 1, 10); // Start above ground.
-    world.addComponent(playerEntity, t);
-
-    // Physics: kinematic capsule, marked as the player.
-    const bodyComp = new PhysicsBodyComponent("kinematicPosition", true);
-    world.addComponent(playerEntity, bodyComp);
-    const colliderComp = new PhysicsColliderComponent();
-    colliderComp.setCapsule(0.4, 0.9); // Standard FPS capsule.
-    world.addComponent(playerEntity, colliderComp);
-
-    // Controller component to link input and physics.
-    world.addComponent(playerEntity, new PlayerControllerComponent());
-
-    // Weapon component configured for projectile firing.
-    const weapon = new WeaponComponent();
-    weapon.isHitscan = false;
-    weapon.fireRate = 4.0;
-    weapon.damage = 5.0;
-    weapon.projectileSpeed = 75.0;
-    weapon.projectileLifetime = 1.5;
-    weapon.projectileRadius = 0.1;
-    weapon.projectileMeshHandle = projectileMeshHandle;
-    weapon.projectileMaterialHandle = projectileMaterialHandle;
-    world.addComponent(playerEntity, weapon);
-  }
+  // Create the initial player instance
+  const initialPlayerTransform = new TransformComponent();
+  initialPlayerTransform.setPosition(0, 1, 10); // Start above ground
+  const playerEntity = await createPlayerPrefab(
+    world,
+    resourceManager,
+    initialPlayerTransform,
+  );
 
   // --- Camera ---
-  // The camera entity now follows the player entity.
+  // The camera entity follows the player entity.
   const cameraEntity = world.createEntity("main_camera");
   world.addComponent(
     cameraEntity,
@@ -189,11 +235,29 @@ export async function createScene(
   );
   world.addComponent(cameraEntity, new MainCameraTagComponent());
   world.addComponent(cameraEntity, new TransformComponent());
-  // Add the follow component
   world.addComponent(
     cameraEntity,
     new CameraFollowComponent(playerEntity, vec3.create(0, 1.6, 0)), // Target player, offset to head height
   );
+
+  // --- Spawn Points ---
+  const spawnPoint1 = world.createEntity("spawn_point_1");
+  const t1 = new TransformComponent();
+  t1.setPosition(0, 1, 10);
+  world.addComponent(spawnPoint1, t1);
+  world.addComponent(spawnPoint1, new SpawnPointComponent("player_spawn"));
+
+  const spawnPoint2 = world.createEntity("spawn_point_2");
+  const t2 = new TransformComponent();
+  t2.setPosition(15, 1, 15);
+  world.addComponent(spawnPoint2, t2);
+  world.addComponent(spawnPoint2, new SpawnPointComponent("player_spawn"));
+
+  const spawnPoint3 = world.createEntity("spawn_point_3");
+  const t3 = new TransformComponent();
+  t3.setPosition(-15, 1, -15);
+  world.addComponent(spawnPoint3, t3);
+  world.addComponent(spawnPoint3, new SpawnPointComponent("player_spawn"));
 
   // --- Fog ---
   const fog = new FogComponent();
@@ -267,18 +331,21 @@ export async function createScene(
     const cubeMesh = await resourceManager.resolveMeshByHandle(
       ResourceHandle.forMesh("PRIM:cube:size=1"),
     );
+    const whiteMaterialOptions: PBRMaterialOptions = {
+      albedo: [0.9, 0.8, 0.9, 1],
+      metallic: 0,
+      roughness: 0.8,
+    };
     const cubeMat = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate({
-        albedo: [0.9, 0.5, 0.2, 1],
-        metallic: 0.8,
-        roughness: 0.2,
-      }),
+      await resourceManager.createPBRMaterialTemplate(whiteMaterialOptions),
+      whiteMaterialOptions,
     );
+
     const CUBE_COUNT = 8;
     for (let i = 0; i < CUBE_COUNT; i++) {
       const cube = world.createEntity(`dynamic_cube_${i}`);
       const t = new TransformComponent();
-      // Stack them vertically with a slight offset for stability.
+      // Stack them vertically with a slight offset so that they fall
       t.setPosition(5, 0.5 + i * 10.01, 5);
       world.addComponent(cube, t);
       world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
@@ -291,6 +358,38 @@ export async function createScene(
       // Health component to make it a target
       world.addComponent(cube, new HealthComponent(50));
     }
+
+    // Create a special "pickup" cube
+    const pickupCube = world.createEntity("pickup_cube_health");
+    const greenMaterialOptions: PBRMaterialOptions = {
+      albedo: [0.1, 0.8, 0.2, 1.0],
+      emissive: [0.1, 0.8, 0.2],
+      emissiveStrength: 5,
+    };
+    const pickupCubeMat = await resourceManager.createPBRMaterialInstance(
+      await resourceManager.createPBRMaterialTemplate(greenMaterialOptions),
+      greenMaterialOptions,
+    );
+
+    const t = new TransformComponent();
+    t.setPosition(-3, 0.5, 2);
+    world.addComponent(pickupCube, t);
+    world.addComponent(
+      pickupCube,
+      new MeshRendererComponent(cubeMesh, pickupCubeMat),
+    );
+    world.addComponent(pickupCube, new PhysicsBodyComponent("dynamic"));
+    world.addComponent(
+      pickupCube,
+      new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
+    );
+
+    // Add interaction and pickup components to make it a health pack
+    world.addComponent(
+      pickupCube,
+      new InteractableComponent("Press [E] to pick up Health Pack", 8.0),
+    );
+    world.addComponent(pickupCube, new PickupComponent("health_pack", 25));
   }
 
   // --- Global Sun and Shadow Settings ---

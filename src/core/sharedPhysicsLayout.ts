@@ -145,6 +145,8 @@ export const CMD_SET_GRAVITY = 4;
 export const CMD_MOVE_PLAYER = 5;
 /** Command type: Perform a weapon raycast. */
 export const CMD_WEAPON_RAYCAST = 6;
+/** Command type: Perform an interaction raycast. */
+export const CMD_INTERACTION_RAYCAST = 7;
 
 /**
  * Defines the indices for parameters within the `CMD_CREATE_BODY` command's
@@ -206,6 +208,34 @@ export const RAYCAST_RESULTS_HIT_POINT_OFFSET = 24;
 
 /** Total raycast results SAB size (bytes), padded to a multiple of 16. */
 export const RAYCAST_RESULTS_BUFFER_SIZE = 48;
+
+/* ==========================================================================================
+ * Interaction Raycast Results SAB (physics → render)
+ * A single-slot buffer to return the result of the last interaction raycast.
+ * This is kept separate from weapon raycasts to avoid race conditions.
+ * Layout (bytes):
+ *   [0]   MAGIC (u32) - 'IRAY'
+ *   [4]   VERSION (u32)
+ *   [8]   GEN (u32) - Generation counter. Incremented by physics on write.
+ *   [12]  SOURCE_ENTITY_ID (u32) - The physId of the entity that fired the ray.
+ *   [16]  HIT_ENTITY_ID (u32) - 0 if no hit, otherwise the physId of the hit body.
+ *   [20]  HIT_DISTANCE (f32)
+ * ======================================================================================== */
+
+/** Magic number for interaction raycast results SAB validation ('IRAY'). */
+export const INTERACTION_RAYCAST_RESULTS_MAGIC = 0x49524159; // 'IRAY'
+/** Current schema version for interaction raycast results. */
+export const INTERACTION_RAYCAST_RESULTS_VERSION = 1;
+
+export const INTERACTION_RAYCAST_RESULTS_MAGIC_OFFSET = 0;
+export const INTERACTION_RAYCAST_RESULTS_VERSION_OFFSET = 4;
+export const INTERACTION_RAYCAST_RESULTS_GEN_OFFSET = 8;
+export const INTERACTION_RAYCAST_RESULTS_SOURCE_ENTITY_ID_OFFSET = 12;
+export const INTERACTION_RAYCAST_RESULTS_HIT_ENTITY_ID_OFFSET = 16;
+export const INTERACTION_RAYCAST_RESULTS_HIT_DISTANCE_OFFSET = 20;
+
+/** Total interaction raycast results SAB size (bytes), padded to a multiple of 16. */
+export const INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE = 32;
 
 /* ==========================================================================================
  * Collision Events SAB (physics → render)

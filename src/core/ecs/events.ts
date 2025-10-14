@@ -30,16 +30,83 @@ export interface FireWeaponEvent {
 }
 
 /**
+ * Payload for when the player's interaction target changes.
+ * Used to update UI prompts.
+ */
+export interface InteractionTargetChangedEvent {
+  newTarget: Entity | null;
+  prompt: string | null;
+}
+
+/**
+ * Payload for when the player actively interacts with a target.
+ */
+export interface InteractEvent {
+  interactor: Entity;
+  target: Entity;
+}
+
+/**
+ * Payload to request adding an item to an inventory.
+ * Processed by the InventorySystem.
+ */
+export interface AddToInventoryEvent {
+  /** The entity whose inventory should be modified. */
+  entity: Entity;
+  itemId: string;
+  quantity: number;
+}
+
+/**
+ * Payload for when an inventory has been updated.
+ * Used to update UI.
+ */
+export interface InventoryUpdatedEvent {
+  owner: Entity;
+}
+
+/**
+ * Represents the data payload to request that an entity be respawned.
+ * @remarks
+ * This event is published by the `DeathSystem` when an entity with a
+ * `RespawnComponent` is destroyed. It is consumed by the `RespawnSystem`,
+ * which then manages the respawn timer and subsequent entity creation.
+ */
+export interface RequestRespawnEvent {
+  /** The identifier for the prefab used to recreate the entity. */
+  prefabId: string;
+  /** The time in seconds to wait before respawning. */
+  respawnTime: number;
+  /** An optional tag for selecting a specific group of spawn points. */
+  spawnPointTag?: string;
+}
+
+/**
  * A union of all possible event payloads.
  */
-export type GameEventPayload = DeathEvent | FireWeaponEvent;
+export type GameEventPayload =
+  | DeathEvent
+  | FireWeaponEvent
+  | InteractionTargetChangedEvent
+  | InteractEvent
+  | AddToInventoryEvent
+  | InventoryUpdatedEvent
+  | RequestRespawnEvent;
 
 /**
  * A discriminated union of all possible game events, using a 'type' property.
  */
 export type GameEvent =
   | { type: "death"; payload: DeathEvent }
-  | { type: "fire-weapon"; payload: FireWeaponEvent };
+  | { type: "fire-weapon"; payload: FireWeaponEvent }
+  | {
+      type: "interaction-target-changed";
+      payload: InteractionTargetChangedEvent;
+    }
+  | { type: "interact"; payload: InteractEvent }
+  | { type: "add-to-inventory"; payload: AddToInventoryEvent }
+  | { type: "inventory-updated"; payload: InventoryUpdatedEvent }
+  | { type: "request-respawn"; payload: RequestRespawnEvent };
 
 /**
  * A union of all possible event type strings.
