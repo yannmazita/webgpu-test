@@ -170,6 +170,9 @@ export async function createScene(
     // Controller component to link input and physics.
     world.addComponent(playerEntity, new PlayerControllerComponent());
 
+    // Player health
+    world.addComponent(playerEntity, new HealthComponent(100));
+
     // Weapon component configured for projectile firing.
     const weapon = new WeaponComponent();
     weapon.isHitscan = false;
@@ -184,7 +187,7 @@ export async function createScene(
   }
 
   // --- Camera ---
-  // The camera entity now follows the player entity.
+  // The camera entity follows the player entity.
   const cameraEntity = world.createEntity("main_camera");
   world.addComponent(
     cameraEntity,
