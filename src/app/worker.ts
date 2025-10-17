@@ -263,6 +263,7 @@ function applyPhysicsSnapshot(world: World, physCtx: PhysicsContext): void {
  * @param sharedEngineStateBuffer - SharedArrayBuffer for editor state sync.
  * @param sharedRaycastResultsBuffer - SharedArrayBuffer for weapon raycast results.
  * @param sharedCollisionEventsBuffer - SharedArrayBuffer for physics collision events.
+ * @param sharedCharControllerEventsBuffer - SharedArrayBuffer for character controller events.
  * @returns A promise that resolves when initialization is complete.
  */
 async function initWorker(
@@ -271,8 +272,9 @@ async function initWorker(
   sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
   sharedRaycastResultsBuffer: SharedArrayBuffer,
-  sharedCollisionEventsBuffer: SharedArrayBuffer,
   sharedInteractionRaycastResultsBuffer: SharedArrayBuffer,
+  sharedCollisionEventsBuffer: SharedArrayBuffer,
+  sharedCharControllerEventsBuffer: SharedArrayBuffer,
 ): Promise<void> {
   console.log("[Worker] Initializing...");
   renderer = new Renderer(offscreen);
@@ -378,6 +380,7 @@ async function initWorker(
     commandsBuffer,
     statesBuffer,
     sharedCollisionEventsBuffer,
+    sharedCharControllerEventsBuffer,
   );
   initializePhysicsHeaders(physicsCtx);
 
@@ -393,9 +396,12 @@ async function initWorker(
   };
 
   // Create physics worker
-  physicsWorker = new Worker(new URL("./physicsWorker.ts", import.meta.url), {
-    type: "module",
-  });
+  physicsWorker = new Worker(
+    new URL("./physicsWorker/physicsWorker.ts", import.meta.url),
+    {
+      type: "module",
+    },
+  );
 
   // Listen for physics worker messages
   physicsWorker.addEventListener(
@@ -422,6 +428,7 @@ async function initWorker(
     raycastResultsBuffer: sharedRaycastResultsBuffer,
     collisionEventsBuffer: sharedCollisionEventsBuffer,
     interactionRaycastResultsBuffer: sharedInteractionRaycastResultsBuffer,
+    charControllerEventsBuffer: sharedCharControllerEventsBuffer,
   };
   physicsWorker.postMessage(initMsg);
 
@@ -468,6 +475,7 @@ async function initWorker(
   collisionEventSystem = new CollisionEventSystem(
     world,
     physicsCtx,
+    eventManager,
     damageSystem,
   );
 
@@ -657,8 +665,9 @@ self.onmessage = async (
       msg.sharedMetricsBuffer,
       msg.sharedEngineStateBuffer,
       msg.sharedRaycastResultsBuffer,
-      msg.sharedCollisionEventsBuffer,
       msg.sharedInteractionRaycastResultsBuffer,
+      msg.sharedCollisionEventsBuffer,
+      msg.sharedCharControllerEventsBuffer,
     );
     return;
   }

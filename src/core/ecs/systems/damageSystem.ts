@@ -1,29 +1,26 @@
 // src/core/ecs/systems/damageSystem.ts
-
 import { World } from "@/core/ecs/world";
-import { Entity } from "@/core/ecs/entity";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
-import { EventManager } from "../events";
+import { EventManager } from "@/core/ecs/events";
+import { Vec3 } from "wgpu-matrix";
 
 /**
  * Represents a single instance of damage to be processed.
  */
 export interface DamageEvent {
-  target: Entity;
+  target: number;
   amount: number;
-  source?: Entity;
+  source?: number;
+  damagePoint?: Vec3;
 }
 
 /**
  * A system that processes a queue of damage events each frame.
  * @remarks
- * This decouples damage-dealing systems (like weapons, projectiles, physics
- * collisions) from the health component logic. When an entity's health
- * reaches zero, it publishes a `DeathEvent` to the global event manager
- * instead of destroying the entity directly.
+ * It publishes damage-taken, damage-dealt, and death events.
  */
 export class DamageSystem {
-  private eventQueue: DamageEvent[] = [];
+  private damageQueue: DamageEvent[] = [];
 
   /**
    * @param eventManager The global event manager to publish death events to.
@@ -35,53 +32,88 @@ export class DamageSystem {
    * @param event The damage event to enqueue.
    */
   public enqueueDamageEvent(event: DamageEvent): void {
-    this.eventQueue.push(event);
+    this.damageQueue.push(event);
   }
 
   /**
-   * Processes all queued damage events for the current frame.
-   * @remarks
-   * It applies damage to entities with a HealthComponent. If an entity's
-   * health is depleted, it publishes a `DeathEvent` and takes no further
-   * action.
-   * @param world The ECS world.
+   * Processes all queued damage events.
+   * Should be called once per frame.
    */
   public update(world: World): void {
-    if (this.eventQueue.length === 0) {
-      return;
+    for (const damageEvent of this.damageQueue) {
+      this.processDamageEvent(world, damageEvent);
+    }
+    this.damageQueue.length = 0;
+  }
+  /**
+   * Processes a single damage event.
+   */
+  private processDamageEvent(world: World, event: DamageEvent): void {
+    const { target, amount, source, damagePoint } = event;
+
+    const healthComp = world.getComponent(target, HealthComponent);
+    if (!healthComp) {
+      return; // Entity doesn't have health
     }
 
-    for (const event of this.eventQueue) {
-      const health = world.getComponent(event.target, HealthComponent);
-      if (!health) {
-        continue; // Target has no health component, ignore.
-      }
+    // Publish damage-taken event BEFORE reducing health
+    this.eventManager.publish({
+      type: "damage-taken",
+      payload: {
+        target,
+        amount,
+        source,
+        damagePoint,
+      },
+    });
 
-      // Skip if already dead
-      if (health.isDead()) {
-        continue;
-      }
+    // Apply damage
+    healthComp.takeDamage(event.amount);
 
-      health.takeDamage(event.amount);
-      console.log(
-        `[DamageSystem] Entity ${event.target} took ${event.amount} damage. Health remaining: ${health.currentHealth}`,
-      );
-
-      if (health.isDead()) {
-        console.log(
-          `[DamageSystem] Entity ${event.target} has been defeated! Publishing DeathEvent.`,
-        );
-        this.eventManager.publish({
-          type: "death",
-          payload: {
-            victim: event.target,
-            killer: event.source,
-          },
-        });
-      }
+    // Publish damage-dealt event if there's a source
+    if (source !== undefined) {
+      this.eventManager.publish({
+        type: "damage-dealt",
+        payload: {
+          source,
+          target,
+          amount,
+        },
+      });
     }
 
-    // Clear the queue for the next frame
-    this.eventQueue.length = 0;
+    // Check for death
+    if (healthComp.isDead()) {
+      this.eventManager.publish({
+        type: "death",
+        payload: {
+          victim: target,
+          killer: source,
+        },
+      });
+    }
+  }
+
+  /**
+   * Immediately applies damage without queueing (use sparingly).
+   */
+  public applyDamageImmediate(
+    world: World,
+    target: number,
+    amount: number,
+    source?: number,
+    damagePoint?: Vec3,
+  ): void {
+    this.processDamageEvent(world, { target, amount, source, damagePoint });
+  }
+
+  /**
+   * Heals an entity (negative damage).
+   */
+  public enqueueHealEvent(world: World, target: number, amount: number): void {
+    const healthComp = world.getComponent(target, HealthComponent);
+    if (!healthComp) return;
+
+    healthComp.heal(amount);
   }
 }

@@ -10,7 +10,10 @@ import {
   initializeEngineStateHeader,
 } from "@/core/engineState";
 import { init as initUIElements, initUI, tickUI } from "./ui";
-import { INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE } from "@/core/sharedPhysicsLayout";
+import {
+  CHAR_CONTROLLER_EVENTS_BUFFER_SIZE,
+  INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE,
+} from "@/core/sharedPhysicsLayout";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Canvas element not found");
@@ -44,6 +47,9 @@ const collisionEventsBuffer = new SharedArrayBuffer(
 const interactionRaycastResultsBuffer = new SharedArrayBuffer(
   INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE,
 );
+const charControllerEventsBuffer = new SharedArrayBuffer(
+  CHAR_CONTROLLER_EVENTS_BUFFER_SIZE,
+);
 
 // --- Render Worker Setup ---
 const worker = new Worker(new URL("./worker.ts", import.meta.url), {
@@ -71,6 +77,7 @@ worker.postMessage(
     sharedRaycastResultsBuffer: raycastResultsBuffer,
     sharedCollisionEventsBuffer: collisionEventsBuffer,
     sharedInteractionRaycastResultsBuffer: interactionRaycastResultsBuffer,
+    sharedCharControllerEventsBuffer: charControllerEventsBuffer,
   },
   [offscreen],
 );
