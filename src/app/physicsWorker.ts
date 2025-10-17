@@ -712,24 +712,6 @@ function publishSnapshot(): void {
   );
 }
 
-function checkWallContact(
-  controller: KinematicCharacterController,
-  body: RigidBody,
-): boolean {
-  // Check if character is moving horizontally but not vertically while not grounded
-  const velocity = body.linvel();
-  const isMovingHorizontally =
-    Math.abs(velocity.x) > 0.1 || Math.abs(velocity.z) > 0.1;
-  const isMovingVertically = Math.abs(velocity.y) > 0.1;
-
-  // If moving horizontally but not vertically and not grounded, likely against a wall
-  return (
-    isMovingHorizontally &&
-    !isMovingVertically &&
-    !controller.computedGrounded()
-  );
-}
-
 function getWallNormal(
   controller: KinematicCharacterController,
   body: RigidBody,
@@ -757,7 +739,6 @@ function checkStepClimbed(
   body: RigidBody,
 ): number {
   // We need to track previous position to detect step climbing
-  // Store previous position in userData or a separate map
   const physId = bodyToEntity.get(body);
   if (!physId) return 0;
 
@@ -784,48 +765,6 @@ function checkStepClimbed(
   return 0;
 }
 
-function checkCeilingHit(
-  controller: KinematicCharacterController,
-  body: RigidBody,
-): boolean {
-  // Check if character is trying to move up but velocity is being limited
-  const velocity = body.linvel();
-  const isTryingToMoveUp = velocity.y > 0.1;
-
-  // Check if the character is actually moving upward
-  // We can check the next kinematic translation if this is a kinematic body
-  const currPos = body.translation();
-  let nextPos = currPos;
-
-  if (body.isKinematic()) {
-    // For kinematic bodies, check next translation
-    nextPos = body.nextTranslation();
-  }
-
-  const actualVerticalMovement = nextPos.y - currPos.y;
-
-  // If trying to move up but not actually moving upward significantly, likely hitting ceiling
-  return isTryingToMoveUp && actualVerticalMovement < 0.01;
-}
-
-function checkSlidingState(
-  controller: KinematicCharacterController,
-  body: RigidBody,
-): boolean {
-  // Check if on steep slope or moving too fast on ground
-  if (!controller.computedGrounded()) return false;
-
-  const velocity = body.linvel();
-  const horizontalSpeed = Math.sqrt(
-    velocity.x * velocity.x + velocity.z * velocity.z,
-  );
-
-  // Also check if on steep slope by examining the ground normal
-  // This would require raycasting down to get ground normal
-  // For now, use speed as a simple indicator
-  return horizontalSpeed > 5.0; // Adjust threshold based on your game
-}
-
 function getSlideData(
   controller: KinematicCharacterController,
   body: RigidBody,
@@ -849,8 +788,7 @@ function getSlideData(
   return { x: 0, y: 0, z: 0, w: 0 };
 }
 
-// Enhanced version with better wall detection using raycasts:
-function checkWallContactEnhanced(
+function checkWallContact(
   controller: KinematicCharacterController,
   body: RigidBody,
 ): { isContact: boolean; normal: { x: number; y: number; z: number } } {
@@ -916,8 +854,7 @@ function checkWallContactEnhanced(
   return { isContact: false, normal: { x: 1, y: 0, z: 0 } };
 }
 
-// Enhanced ceiling detection using raycast:
-function checkCeilingHitEnhanced(
+function checkCeilingHit(
   controller: KinematicCharacterController,
   body: RigidBody,
 ): boolean {
@@ -946,8 +883,7 @@ function checkCeilingHitEnhanced(
   return hit !== null && hit.timeOfImpact < 0.3; // Ceiling within 30cm
 }
 
-// Enhanced sliding detection with ground normal:
-function checkSlidingStateEnhanced(
+function checkSlidingState(
   controller: KinematicCharacterController,
   body: RigidBody,
 ): { isSliding: boolean; slopeNormal?: { x: number; y: number; z: number } } {
@@ -971,7 +907,7 @@ function checkSlidingStateEnhanced(
 
   if (hit) {
     // Calculate ground normal from the hit
-    // This is simplified - in practice you'd get the normal from the contact
+    // simple, should get the normal from the contact
     const groundNormal = { x: 0, y: 1, z: 0 }; // Default to up
 
     // Check slope angle (dot product with up vector)
@@ -1069,7 +1005,7 @@ function publishCharacterControllerEvents(): void {
       eventsPublished++;
     }
 
-    const wallContact = checkWallContactEnhanced(controller, body);
+    const wallContact = checkWallContact(controller, body);
     if (wallContact.isContact) {
       const nextHead = (head + 1) % CHAR_CONTROLLER_EVENTS_RING_CAPACITY;
       if (nextHead === tail) return;
@@ -1158,7 +1094,7 @@ function publishCharacterControllerEvents(): void {
       eventsPublished++;
     }
 
-    if (checkCeilingHitEnhanced(controller, body)) {
+    if (checkCeilingHit(controller, body)) {
       const nextHead = (head + 1) % CHAR_CONTROLLER_EVENTS_RING_CAPACITY;
       if (nextHead === tail) return;
 
@@ -1199,7 +1135,7 @@ function publishCharacterControllerEvents(): void {
       eventsPublished++;
     }
 
-    const slidingState = checkSlidingStateEnhanced(controller, body);
+    const slidingState = checkSlidingState(controller, body);
     const prevSliding = playerSliding.get(physId) ?? false;
     const currSliding = slidingState.isSliding;
 
