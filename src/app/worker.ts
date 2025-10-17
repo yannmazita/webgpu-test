@@ -396,9 +396,12 @@ async function initWorker(
   };
 
   // Create physics worker
-  physicsWorker = new Worker(new URL("./physicsWorker.ts", import.meta.url), {
-    type: "module",
-  });
+  physicsWorker = new Worker(
+    new URL("./physicsWorker/physicsWorker.ts", import.meta.url),
+    {
+      type: "module",
+    },
+  );
 
   // Listen for physics worker messages
   physicsWorker.addEventListener(
