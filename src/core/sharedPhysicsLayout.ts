@@ -239,18 +239,22 @@ export const INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE = 32;
 
 /* ==========================================================================================
  * Collision Events SAB (physics → render)
- * A ring buffer to return collision events (e.g., projectile hits).
- * Layout is similar to the commands buffer.
+ * A ring buffer to return collision events (ie projectile hits).
  *
  * This buffer is written to by the `physicsWorker` after it drains the Rapier
  * `EventQueue`. It is consumed by the `CollisionEventSystem` in the main
  * worker (`worker.ts`) to translate physics interactions into gameplay logic.
  *
  * Slot layout (per slot, bytes):
- *   [0]   PHYS_ID_A (u32)
- *   [4]   PHYS_ID_B (u32)
- *   [8]   FLAGS (u32) - e.g., 1 for STARTED, 0 for STOPPED
- *   [12]  (pad)
+ *  [0-3]   physIdA (i32)
+ *  [4-7]   physIdB (i32)
+ *  [8-11]  flags (i32) - started=1, ended=2, sensor_entered=3, sensor_exited=4
+ *  [12-15] reserved (i32)
+ *  [16-27] contactPoint (3 x f32 as i32 bitcast)
+ *  [28-39] normal (3 x f32 as i32 bitcast)
+ *  [40-43] impulse (f32 as i32 bitcast)
+ *  [44-47] penetration (f32 as i32 bitcast)
+ *  [48-79] reserved for future use
  * ======================================================================================== */
 
 /** Magic number for collision events SAB validation ('COLL'). */
@@ -266,7 +270,7 @@ export const COLLISION_EVENTS_GEN_OFFSET = 16;
 
 export const COLLISION_EVENTS_HEADER_BYTES = 24;
 export const COLLISION_EVENTS_RING_CAPACITY = 256;
-export const COLLISION_EVENTS_SLOT_SIZE = 16; // 3x u32 + 1x pad
+export const COLLISION_EVENTS_SLOT_SIZE = 80; // 20 x i32 (80 bytes per event)
 
 export const COLLISION_EVENTS_SLOT_OFFSET = COLLISION_EVENTS_HEADER_BYTES;
 export const COLLISION_EVENTS_BUFFER_SIZE =
@@ -275,7 +279,79 @@ export const COLLISION_EVENTS_BUFFER_SIZE =
 
 // Flags for collision events
 export const COLLISION_EVENT_FLAG_STARTED = 1;
-export const COLLISION_EVENT_FLAG_STOPPED = 0;
+export const COLLISION_EVENT_FLAG_ENDED = 2;
+export const COLLISION_EVENT_FLAG_SENSOR_ENTERED = 3;
+export const COLLISION_EVENT_FLAG_SENSOR_EXITED = 4;
+
+// Slot field byte offsets (relative to slot base)
+export const COLLISION_EVENT_PHYS_ID_A_OFFSET = 0;
+export const COLLISION_EVENT_PHYS_ID_B_OFFSET = 4;
+export const COLLISION_EVENT_FLAGS_OFFSET = 8;
+export const COLLISION_EVENT_RESERVED_0_OFFSET = 12;
+export const COLLISION_EVENT_CONTACT_X_OFFSET = 16;
+export const COLLISION_EVENT_CONTACT_Y_OFFSET = 20;
+export const COLLISION_EVENT_CONTACT_Z_OFFSET = 24;
+export const COLLISION_EVENT_NORMAL_X_OFFSET = 28;
+export const COLLISION_EVENT_NORMAL_Y_OFFSET = 32;
+export const COLLISION_EVENT_NORMAL_Z_OFFSET = 36;
+export const COLLISION_EVENT_IMPULSE_OFFSET = 40;
+export const COLLISION_EVENT_PENETRATION_OFFSET = 44;
+
+/* ==========================================================================================
+ * Character controller Events SAB (physics → render)
+ * A ring buffer to return character controller events (ie character is airborne).
+ *
+ * Slot layout (per slot, bytes):
+ *  Layout per slot (16 x i32 = 64 bytes):
+ *  [0-3]   physId (i32)
+ *  [4-7]   eventType (i32) - grounded=1, airborne=2, wall_contact=3, step=4, ceiling=5, slide_start=6, slide_stop=7
+ *  [8-11]  reserved (i32)
+ *  [12-15] reserved (i32)
+ *  [16-27] eventData1 (3 x f32) - context-dependent (ie wall normal, step height)
+ *  [28-31] eventData2 (f32) - additional context
+ *  [32-35] groundEntityId (i32) - entity standing on (if applicable)
+ *  [36-63] reserved
+ * ======================================================================================== */
+
+export const CHAR_CONTROLLER_EVENTS_MAGIC_OFFSET = 0; // i32 - magic number
+export const CHAR_CONTROLLER_EVENTS_VERSION_OFFSET = 4; // i32 - layout version
+export const CHAR_CONTROLLER_EVENTS_HEAD_OFFSET = 8; // i32 - producer write index
+export const CHAR_CONTROLLER_EVENTS_TAIL_OFFSET = 12; // i32 - consumer read index
+export const CHAR_CONTROLLER_EVENTS_GEN_OFFSET = 16;
+
+export const CHAR_CONTROLLER_EVENTS_HEADER_BYTES = 24;
+export const CHAR_CONTROLLER_EVENTS_RING_CAPACITY = 64;
+export const CHAR_CONTROLLER_EVENTS_SLOT_SIZE = 64; // 16 x i32
+
+export const CHAR_CONTROLLER_EVENTS_SLOT_OFFSET =
+  CHAR_CONTROLLER_EVENTS_HEADER_BYTES;
+export const CHAR_CONTROLLER_EVENTS_BUFFER_SIZE =
+  CHAR_CONTROLLER_EVENTS_HEADER_BYTES +
+  CHAR_CONTROLLER_EVENTS_RING_CAPACITY * CHAR_CONTROLLER_EVENTS_SLOT_SIZE;
+
+// Magic number and version
+export const CHAR_CONTROLLER_EVENTS_MAGIC = 0x43484152; // "CHAR"
+export const CHAR_CONTROLLER_EVENTS_VERSION = 1;
+
+// Character controller event types
+export const CHAR_EVENT_GROUNDED = 1;
+export const CHAR_EVENT_AIRBORNE = 2;
+export const CHAR_EVENT_WALL_CONTACT = 3;
+export const CHAR_EVENT_STEP_CLIMBED = 4;
+export const CHAR_EVENT_CEILING_HIT = 5;
+export const CHAR_EVENT_SLIDE_START = 6;
+export const CHAR_EVENT_SLIDE_STOP = 7;
+
+// Slot field byte offsets (relative to slot base)
+export const CHAR_EVENT_PHYS_ID_OFFSET = 0;
+export const CHAR_EVENT_TYPE_OFFSET = 4;
+export const CHAR_EVENT_RESERVED_0_OFFSET = 8;
+export const CHAR_EVENT_RESERVED_1_OFFSET = 12;
+export const CHAR_EVENT_DATA1_X_OFFSET = 16;
+export const CHAR_EVENT_DATA1_Y_OFFSET = 20;
+export const CHAR_EVENT_DATA1_Z_OFFSET = 24;
+export const CHAR_EVENT_DATA2_OFFSET = 28;
+export const CHAR_EVENT_GROUND_ENTITY_OFFSET = 32;
 
 /* ==========================================================================================
  * Usage Notes:

@@ -40,6 +40,14 @@ import {
   COLLISION_EVENTS_HEAD_OFFSET,
   COLLISION_EVENTS_TAIL_OFFSET,
   COLLISION_EVENTS_GEN_OFFSET,
+  CHAR_CONTROLLER_EVENTS_BUFFER_SIZE,
+  CHAR_CONTROLLER_EVENTS_MAGIC_OFFSET,
+  CHAR_CONTROLLER_EVENTS_VERSION,
+  CHAR_CONTROLLER_EVENTS_MAGIC,
+  CHAR_CONTROLLER_EVENTS_VERSION_OFFSET,
+  CHAR_CONTROLLER_EVENTS_HEAD_OFFSET,
+  CHAR_CONTROLLER_EVENTS_TAIL_OFFSET,
+  CHAR_CONTROLLER_EVENTS_GEN_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
 /** Context holding typed-array views into the shared physics buffers. */
@@ -54,6 +62,8 @@ export interface PhysicsContext {
   statesF32: Float32Array;
   /** Collision Events (physics → render) Int32 view. */
   collisionEventsI32: Int32Array;
+  /** Character Controller Events (physics → render) Int32 view. */
+  charControllerEventsI32: Int32Array;
 }
 
 /**
@@ -74,6 +84,7 @@ const idx = (byteOffset: number) => byteOffset >> 2;
  * @param commandsBuffer - SharedArrayBuffer for commands (render → physics).
  * @param statesBuffer - SharedArrayBuffer for states (physics → render).
  * @param collisionEventsBuffer - SharedArrayBuffer for collision events (physics → render).
+ * @param charControllerEventsBuffer - SharedArrayBuffer for character controller events (physics → render).
  * @returns PhysicsContext with typed views for all buffers.
  * @throws If any buffer has an invalid size.
  */
@@ -81,6 +92,7 @@ export function createPhysicsContext(
   commandsBuffer: SharedArrayBuffer,
   statesBuffer: SharedArrayBuffer,
   collisionEventsBuffer: SharedArrayBuffer,
+  charControllerEventsBuffer: SharedArrayBuffer,
 ): PhysicsContext {
   if (commandsBuffer.byteLength !== COMMANDS_BUFFER_SIZE) {
     throw new Error(
@@ -97,12 +109,20 @@ export function createPhysicsContext(
       `createPhysicsContext: collisionEventsBuffer has invalid size ${collisionEventsBuffer.byteLength}, expected ${COLLISION_EVENTS_BUFFER_SIZE}`,
     );
   }
+  if (
+    charControllerEventsBuffer.byteLength !== CHAR_CONTROLLER_EVENTS_BUFFER_SIZE
+  ) {
+    throw new Error(
+      `createPhysicsContext: charControllerEventsBuffer has invalid size ${charControllerEventsBuffer.byteLength}, expected ${CHAR_CONTROLLER_EVENTS_BUFFER_SIZE}`,
+    );
+  }
   return {
     commandsI32: new Int32Array(commandsBuffer),
     commandsF32: new Float32Array(commandsBuffer),
     statesI32: new Int32Array(statesBuffer),
     statesF32: new Float32Array(statesBuffer),
     collisionEventsI32: new Int32Array(collisionEventsBuffer),
+    charControllerEventsI32: new Int32Array(charControllerEventsBuffer),
   };
 }
 
@@ -145,6 +165,33 @@ export function initializePhysicsHeaders(ctx: PhysicsContext): void {
   Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_HEAD_OFFSET), 0);
   Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_TAIL_OFFSET), 0);
   Atomics.store(ctx.collisionEventsI32, idx(COLLISION_EVENTS_GEN_OFFSET), 0);
+
+  // Character Controller Events header
+  Atomics.store(
+    ctx.charControllerEventsI32,
+    idx(CHAR_CONTROLLER_EVENTS_MAGIC_OFFSET),
+    CHAR_CONTROLLER_EVENTS_MAGIC,
+  );
+  Atomics.store(
+    ctx.charControllerEventsI32,
+    idx(CHAR_CONTROLLER_EVENTS_VERSION_OFFSET),
+    CHAR_CONTROLLER_EVENTS_VERSION,
+  );
+  Atomics.store(
+    ctx.charControllerEventsI32,
+    idx(CHAR_CONTROLLER_EVENTS_HEAD_OFFSET),
+    0,
+  );
+  Atomics.store(
+    ctx.charControllerEventsI32,
+    idx(CHAR_CONTROLLER_EVENTS_TAIL_OFFSET),
+    0,
+  );
+  Atomics.store(
+    ctx.charControllerEventsI32,
+    idx(CHAR_CONTROLLER_EVENTS_GEN_OFFSET),
+    0,
+  );
 }
 
 /**

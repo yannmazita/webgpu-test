@@ -19,6 +19,7 @@ export interface PhysicsInitMsg {
   raycastResultsBuffer: SharedArrayBuffer;
   collisionEventsBuffer: SharedArrayBuffer;
   interactionRaycastResultsBuffer: SharedArrayBuffer;
+  charControllerEventsBuffer: SharedArrayBuffer;
 }
 
 /** Step command (for testing; internal fixed-step loop used in prod). */

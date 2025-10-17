@@ -23,6 +23,15 @@ export class HealthComponent implements IComponent {
   }
 
   /**
+   * Increases the entity's current health by a specified amount.
+   * Health is clamped to a maximum of `HealthComponent.maxHealth`.
+   * @param amount The amount of healing to give.
+   */
+  public heal(amount: number): void {
+    this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount);
+  }
+
+  /**
    * Checks if the entity's health has reached zero.
    * @returns True if currentHealth is 0 or less, false otherwise.
    */
@@ -30,4 +39,3 @@ export class HealthComponent implements IComponent {
     return this.currentHealth <= 0;
   }
 }
-
