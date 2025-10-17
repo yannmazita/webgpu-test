@@ -31,6 +31,17 @@ import {
   RigidBodyDesc,
 } from "@/core/wasm/rapierModule";
 
+/**
+ * Processes all pending commands from the shared command ring buffer.
+ *
+ * Implements the consumer side of an SPSC queue, reading commands from
+ * the render worker and executing corresponding physics operations.
+ *
+ * @remarks
+ * Commands include body creation/destruction, player movement, and raycasts.
+ * Each command is processed atomically and the tail pointer is advanced
+ * to mark the slot as consumed.
+ */
 export function processCommands(): void {
   const RAPIER = getRapierModule();
   if (!state.commandsView || !state.world || !RAPIER) {

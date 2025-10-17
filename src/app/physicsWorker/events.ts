@@ -54,6 +54,19 @@ import {
 } from "@/core/wasm/rapierModule";
 import { floatToInt32Bits } from "@/core/utils/bitConversion";
 
+/**
+ * Checks for wall contact in front of a moving character controller.
+ *
+ * Casts rays in the movement direction to detect obstacles within 30cm.
+ *
+ * @remarks
+ * Only performs checks when moving horizontally and not grounded.
+ * The normal points away from the wall surface.
+ *
+ * @param controller - The character controller to check
+ * @param body - The rigid body associated with the controller
+ * @returns Object indicating contact status and wall normal if detected
+ */
 function checkWallContact(
   controller: KinematicCharacterController,
   body: RigidBody,

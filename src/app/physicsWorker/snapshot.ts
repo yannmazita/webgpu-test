@@ -11,6 +11,16 @@ import {
   STATES_READ_GEN_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 
+/**
+ * Publishes a snapshot of all rigid body states to the shared buffer.
+ *
+ * Implements a lock-free triple-buffered pattern where the producer writes
+ * to the next available slot while the consumer reads from the previous slot.
+ *
+ * @remarks
+ * The snapshot includes position, rotation, and player-specific flags.
+ * A generation counter is incremented to signal new data availability.
+ */
 export function publishSnapshot(): void {
   if (!state.world || !state.statesI32 || !state.statesF32) {
     return;

@@ -63,6 +63,18 @@ import { publishSnapshot } from "@/app/physicsWorker/snapshot";
 
 const GRAVITY = { x: 0.0, y: -9.81, z: 0.0 };
 
+/**
+ * Validates the header of a shared buffer.
+ *
+ * Checks magic number and version to ensure buffer compatibility.
+ *
+ * @param view - Int32Array view of the buffer
+ * @param magicOffset - Byte offset of the magic number
+ * @param versionOffset - Byte offset of the version number
+ * @param expectedMagic - Expected magic value
+ * @param expectedVersion - Expected version value
+ * @returns True if header is valid, false otherwise
+ */
 function validateHeader(
   view: Int32Array,
   magicOffset: number,
@@ -76,6 +88,16 @@ function validateHeader(
   );
 }
 
+/**
+ * Initializes the Rapier physics engine in the worker.
+ *
+ * Loads the WASM module, creates the physics world with gravity,
+ * and sets up the event queue for collision detection.
+ *
+ * @remarks
+ * Throws an error if initialization fails.
+ * Uses a fixed time step of 1/60 second for the world.
+ */
 async function initializePhysics(): Promise<void> {
   try {
     await initRapier();

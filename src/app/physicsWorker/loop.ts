@@ -9,6 +9,18 @@ import {
 
 const FIXED_DT = 1 / 60;
 
+/**
+ * Advances the physics simulation by one or more fixed time steps.
+ *
+ * Uses an accumulator to ensure consistent simulation rate regardless
+ * of frame rate variations.
+ *
+ * @remarks
+ * Processes commands before each world step.
+ * Updates performance metrics after completing all steps.
+ *
+ * @param dt - Delta time in seconds since the last call
+ */
 export function stepWorld(dt: number): void {
   if (!state.world || !state.eventQueue) return;
 
@@ -25,6 +37,16 @@ export function stepWorld(dt: number): void {
   state.lastStepTimeMs = performance.now() - stepStart;
 }
 
+/**
+ * Starts the fixed-rate physics simulation loop.
+ *
+ * Runs at 60Hz using setInterval, processing commands, stepping the world,
+ * and publishing snapshots and events each tick.
+ *
+ * @remarks
+ * The loop continues until stopPhysicsLoop() is called.
+ * Time is measured using performance.now() for accuracy.
+ */
 export function startPhysicsLoop(): void {
   let lastTime = performance.now();
   state.stepInterval = setInterval(() => {
@@ -39,6 +61,16 @@ export function startPhysicsLoop(): void {
   console.log("[PhysicsWorker] Fixed-step loop started (60Hz).");
 }
 
+/**
+ * Stops the physics loop and cleans up all resources.
+ *
+ * Removes all bodies and controllers from the world, frees the world
+ * and event queue, and resets all state to initial values.
+ *
+ * @remarks
+ * Must be called before worker termination to prevent memory leaks.
+ * Clears all entity mappings and resets the accumulator.
+ */
 export function stopPhysicsLoop(): void {
   if (state.stepInterval != null) {
     clearInterval(state.stepInterval);
