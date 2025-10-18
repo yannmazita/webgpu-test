@@ -32,6 +32,23 @@ import {
   BodyWokeEvent,
   VelocityThresholdEvent,
 } from "@/core/ecs/events/physicsEvents";
+import {
+  AimStateChangedEvent,
+  AmmoChangedEvent,
+  AmmoCollectedEvent,
+  HitMarkerEvent,
+  HitscanFiredEvent,
+  HitscanHitEvent,
+  ProjectileImpactEvent,
+  ProjectileSpawnedEvent,
+  WeaponEmptyEvent,
+  WeaponEquippedEvent,
+  WeaponHolsteredEvent,
+  WeaponReloadCompletedEvent,
+  WeaponReloadStartedEvent,
+  WeaponSwitchCompletedEvent,
+  WeaponSwitchStartedEvent,
+} from "./combatEvents";
 
 /**
  * A union of all possible event payloads.
@@ -57,7 +74,22 @@ export type GameEventPayload =
   | DamageDealtEvent
   | BodySleptEvent
   | BodyWokeEvent
-  | VelocityThresholdEvent;
+  | VelocityThresholdEvent
+  | WeaponEquippedEvent
+  | WeaponHolsteredEvent
+  | WeaponSwitchStartedEvent
+  | WeaponSwitchCompletedEvent
+  | WeaponReloadStartedEvent
+  | WeaponReloadCompletedEvent
+  | WeaponEmptyEvent
+  | ProjectileSpawnedEvent
+  | ProjectileImpactEvent
+  | HitscanFiredEvent
+  | HitscanHitEvent
+  | HitMarkerEvent
+  | AmmoCollectedEvent
+  | AmmoChangedEvent
+  | AimStateChangedEvent;
 
 /** Discriminated union of all possible game events. */
 export type GameEvent =
@@ -84,7 +116,22 @@ export type GameEvent =
   | { type: "damage-dealt"; payload: DamageDealtEvent }
   | { type: "body-slept"; payload: BodySleptEvent }
   | { type: "body-woke"; payload: BodyWokeEvent }
-  | { type: "velocity-threshold"; payload: VelocityThresholdEvent };
+  | { type: "velocity-threshold"; payload: VelocityThresholdEvent }
+  | { type: "weapon-equipped"; payload: WeaponEquippedEvent }
+  | { type: "weapon-holstered"; payload: WeaponHolsteredEvent }
+  | { type: "weapon-switch-started"; payload: WeaponSwitchStartedEvent }
+  | { type: "weapon-switch-completed"; payload: WeaponSwitchCompletedEvent }
+  | { type: "weapon-reload-started"; payload: WeaponReloadStartedEvent }
+  | { type: "weapon-reload-completed"; payload: WeaponReloadCompletedEvent }
+  | { type: "weapon-empty"; payload: WeaponEmptyEvent }
+  | { type: "projectile-spawned"; payload: ProjectileSpawnedEvent }
+  | { type: "projectile-impact"; payload: ProjectileImpactEvent }
+  | { type: "hitscan-fired"; payload: HitscanFiredEvent }
+  | { type: "hitscan-hit"; payload: HitscanHitEvent }
+  | { type: "hit-marker"; payload: HitMarkerEvent }
+  | { type: "ammo-collected"; payload: AmmoCollectedEvent }
+  | { type: "ammo-changed"; payload: AmmoChangedEvent }
+  | { type: "aim-state-changed"; payload: AimStateChangedEvent };
 
 /**
  * A union of all possible event type strings.
