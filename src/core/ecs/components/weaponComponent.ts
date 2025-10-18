@@ -33,6 +33,16 @@ export class WeaponComponent implements IComponent {
   /** The radius of the projectile's physics collider. */
   public projectileRadius = 0.1;
 
+  // -- Ammo properties
+  public usesAmmo = true;
+  public magazineSize = 30;
+  public currentMagazineAmmo = 30;
+  public reserveAmmo = 90;
+  public maxReserveAmmo = 90;
+  public reloadTime = 2.0; // seconds
+  public isReloading = false;
+  public reloadTimer = 0.0;
+
   /**
    * A timer to manage the cooldown between shots.
    * When a shot is fired, this is reset to (1 / fireRate).
