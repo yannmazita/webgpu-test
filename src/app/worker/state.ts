@@ -23,6 +23,7 @@ import { IInputSource } from "@/core/input/iinputSource";
 import { EventManager } from "@/core/ecs/events";
 import { PrefabFactory } from "@/app/prefabs";
 import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
+import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 
 /**
  * Shared state for the render worker.
@@ -55,6 +56,7 @@ export interface WorkerState {
   damageSystem: DamageSystem | null;
   collisionEventSystem: CollisionEventSystem | null;
   deathSystem: DeathSystem | null;
+  projectileSystem: ProjectileSystem | null;
   weaponSystem: WeaponSystem | null;
   interactionSystem: InteractionSystem | null;
   pickupSystem: PickupSystem | null;
@@ -105,6 +107,7 @@ export const state: WorkerState = {
   damageSystem: null,
   collisionEventSystem: null,
   deathSystem: null,
+  projectileSyste: null,
   weaponSystem: null,
   interactionSystem: null,
   pickupSystem: null,

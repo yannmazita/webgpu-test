@@ -14,6 +14,7 @@ import { InteractionSystem } from "@/core/ecs/systems/interactionSystem";
 import { PickupSystem } from "@/core/ecs/systems/pickupSystem";
 import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
 import { RespawnSystem } from "@/core/ecs/systems/respawnSystem";
+import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import {
   createInputContext,
@@ -262,7 +263,6 @@ export async function initWorker(
       state.resourceManager,
       state.physicsCtx,
       state.raycastResultsCtx,
-      state.damageSystem,
       state.eventManager,
     );
   }
@@ -271,9 +271,13 @@ export async function initWorker(
     state.world,
     state.physicsCtx,
     state.eventManager,
-    state.damageSystem,
   );
   state.deathSystem = new DeathSystem(state.world, state.eventManager);
+  state.projectileSystem = new ProjectileSystem(
+    state.world,
+    state.eventManager,
+    state.damageSystem,
+  );
   state.respawnSystem = new RespawnSystem(
     state.world,
     state.eventManager,
