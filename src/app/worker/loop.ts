@@ -95,6 +95,7 @@ export function frame(now: number): void {
   // Update gameplay systems
   state.interactionSystem.update();
   state.weaponSystem?.update(dt);
+  state.projectileSystem?.update();
   lifetimeSystem(state.world, dt);
   state.collisionEventSystem.update();
   state.damageSystem.update(state.world);
