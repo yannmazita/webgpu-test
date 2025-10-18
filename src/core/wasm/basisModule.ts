@@ -7,7 +7,7 @@
  * transcoder library. It provides a singleton pattern for loading the WASM module.
  */
 
-import type { BasisModule } from "@/core/types/basis";
+import type { BasisModule } from "basis-universal";
 
 let BASIS: BasisModule | null = null;
 let basisPromise: Promise<void> | null = null;

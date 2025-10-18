@@ -27,5 +27,5 @@
     "noUncheckedSideEffectImports": true
   },
   //"include": ["src/**/*.ts", "src/**/*.tsx"]
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/core/types/*"]
 }

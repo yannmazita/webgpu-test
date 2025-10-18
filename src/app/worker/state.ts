@@ -20,7 +20,7 @@ import { EngineStateContext } from "@/core/engineState";
 import { PhysicsContext } from "@/core/physicsState";
 import { IActionController } from "@/core/input/action";
 import { IInputSource } from "@/core/input/iinputSource";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import { PrefabFactory } from "@/app/prefabs";
 import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
@@ -107,7 +107,7 @@ export const state: WorkerState = {
   damageSystem: null,
   collisionEventSystem: null,
   deathSystem: null,
-  projectileSyste: null,
+  projectileSystem: null,
   weaponSystem: null,
   interactionSystem: null,
   pickupSystem: null,
