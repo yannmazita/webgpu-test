@@ -1,7 +1,7 @@
 // src/core/ecs/systems/characterControllerEventSystem.ts
 import { World } from "@/core/ecs/world";
 import { PhysicsContext } from "@/core/physicsState";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import {
   CHAR_CONTROLLER_EVENTS_HEAD_OFFSET,
   CHAR_CONTROLLER_EVENTS_RING_CAPACITY,

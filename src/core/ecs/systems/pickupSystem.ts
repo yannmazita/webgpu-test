@@ -1,6 +1,7 @@
 // src/core/ecs/systems/pickupSystem.ts
 import { World } from "@/core/ecs/world";
-import { EventManager, GameEvent } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
+import { GameEvent } from "@/core/ecs/events/gameEvent";
 import { PickupComponent } from "@/core/ecs/components/pickupComponent";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
 

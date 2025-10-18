@@ -9,6 +9,8 @@ import { Mesh } from "@/core/types/gpu";
  * Can be configured for either instant hitscan or projectile-based firing.
  */
 export class WeaponComponent implements IComponent {
+  public weaponType = "default"; // todo: type this
+
   /** How many shots can be fired per second. */
   public fireRate = 10.0;
 
@@ -32,6 +34,16 @@ export class WeaponComponent implements IComponent {
   public projectileMaterialHandle?: ResourceHandle<MaterialInstance>;
   /** The radius of the projectile's physics collider. */
   public projectileRadius = 0.1;
+
+  // -- Ammo properties
+  public usesAmmo = true;
+  public magazineSize = 30;
+  public currentMagazineAmmo = 30;
+  public reserveAmmo = 90;
+  public maxReserveAmmo = 90;
+  public reloadTime = 2.0; // seconds
+  public isReloading = false;
+  public reloadTimer = 0.0;
 
   /**
    * A timer to manage the cooldown between shots.

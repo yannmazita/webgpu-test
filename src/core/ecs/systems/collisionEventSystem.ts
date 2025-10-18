@@ -1,7 +1,7 @@
 // src/core/ecs/systems/collisionEventSystem.ts
 import { World } from "@/core/ecs/world";
 import { PhysicsContext } from "@/core/physicsState";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import {
   COLLISION_EVENTS_HEAD_OFFSET,
   COLLISION_EVENTS_RING_CAPACITY,
@@ -25,42 +25,31 @@ import {
   COLLISION_EVENT_PENETRATION_OFFSET,
 } from "@/core/sharedPhysicsLayout";
 import { int32BitsToFloat, toIndex } from "@/core/utils/bitConversion";
-import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
-import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { vec3 } from "wgpu-matrix";
 
 /**
  * Drains the collision event ring buffer from the physics worker and
- * translates physics events into gameplay logic before publishing them to the event bus.
+ * translates physics events into gameplay events.
  *
  * @remarks
- * All offsets in sharedPhysicsLayout are expressed in bytes. This system converts
- * them to 32-bit element indices via `toIndex` prior to accessing the shared Int32Array,
- * ensuring collision data such as contact points and normals are read correctly.
+ * This system no longer handles damage logic directly. It publishes events
+ * for other systems (like ProjectileSystem) to handle gameplay logic.
  */
 export class CollisionEventSystem {
   /**
    * @param world - The ECS world, used to access components of colliding entities.
    * @param physCtx - The context for the shared physics buffers, used to read events.
    * @param eventManager - The event manager to publish game events to.
-   * @param damageSystem - The system to which damage events will be enqueued.
    */
   constructor(
     private world: World,
     private physCtx: PhysicsContext,
     private eventManager: EventManager,
-    private damageSystem: DamageSystem,
   ) {}
 
   /**
    * Reads and processes all available collision events from the shared buffer.
-   *
-   * @remarks
-   * This function implements the consumer side of the SPSC collision event
-   * ring buffer. It reads events between the `tail` and `head` pointers,
-   * dispatches them based on event type, and then atomically advances the
-   * `tail` pointer to mark the events as consumed.
    */
   public update(): void {
     const view = this.physCtx.collisionEventsI32;
@@ -203,12 +192,15 @@ export class CollisionEventSystem {
       },
     });
 
-    // Handle projectile logic (this could be moved to a separate system that listens to collision events)
+    // Handle projectile logic - publish impact event with damage data
     const projA = this.world.getComponent(entityA, ProjectileComponent);
     const projB = this.world.getComponent(entityB, ProjectileComponent);
 
     // Ignore projectile-on-projectile collisions
     if (projA && projB) {
+      console.log(
+        `[CollisionEventSystem] Ignoring projectile-on-projectile collision: ${entityA} vs ${entityB}`,
+      );
       return;
     }
 
@@ -226,21 +218,45 @@ export class CollisionEventSystem {
       projectileComponent = projB;
     }
 
-    // If a projectile was involved...
+    // If a projectile was involved, publish impact event with damage data
     if (projectileEntity && otherEntity && projectileComponent) {
-      // Don't let projectiles damage their owner
+      console.log(
+        `[CollisionEventSystem] Projectile ${projectileEntity} hit entity ${otherEntity}`,
+      );
+      console.log(
+        `[CollisionEventSystem] Projectile damage: ${projectileComponent.damage}, owner: ${projectileComponent.owner}`,
+      );
+
+      // Don't publish impact for self-hits (let ProjectileSystem handle this logic)
       if (otherEntity !== projectileComponent.owner) {
-        // Check if the other entity can take damage
-        if (this.world.hasComponent(otherEntity, HealthComponent)) {
-          this.damageSystem.enqueueDamageEvent({
+        const impactEvent = {
+          type: "projectile-impact" as const,
+          payload: {
+            projectile: projectileEntity,
+            owner: projectileComponent.owner,
             target: otherEntity,
-            amount: projectileComponent.damage,
-            source: projectileComponent.owner,
-          });
-        }
+            position: contactPoint,
+            normal: normal,
+            damage: projectileComponent.damage, // Include damage from projectile component
+            dealtDamage: false, // Will be updated by ProjectileSystem
+          },
+        };
+
+        console.log(
+          `[CollisionEventSystem] Publishing projectile-impact event:`,
+          impactEvent.payload,
+        );
+        this.eventManager.publish(impactEvent);
+      } else {
+        console.log(
+          `[CollisionEventSystem] Ignoring self-hit: projectile ${projectileEntity} hit its owner ${otherEntity}`,
+        );
       }
 
       // Destroy the projectile on any impact
+      console.log(
+        `[CollisionEventSystem] Destroying projectile ${projectileEntity}`,
+      );
       this.world.destroyEntity(projectileEntity);
     }
   }

@@ -11,7 +11,7 @@ import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3 } from "wgpu-matrix";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import { IActionController } from "@/core/input/action";
 import { Entity } from "@/core/ecs/entity";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";

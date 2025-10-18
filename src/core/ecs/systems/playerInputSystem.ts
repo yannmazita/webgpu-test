@@ -2,7 +2,7 @@
 import { IActionController } from "@/core/input/action";
 import { World } from "@/core/ecs/world";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 
 /**
  * Translates raw player input actions into gameplay intent events.

@@ -1,6 +1,7 @@
 // src/core/ecs/systems/respawnSystem.ts
 import { World } from "@/core/ecs/world";
-import { EventManager, GameEvent } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
+import { GameEvent } from "@/core/ecs/events/gameEvent";
 import { SpawnPointComponent } from "@/core/ecs/components/spawnPointComponent";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { Entity } from "@/core/ecs/entity";
