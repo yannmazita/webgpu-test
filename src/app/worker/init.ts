@@ -39,7 +39,7 @@ import {
 import { PhysicsInitMsg, PhysicsMessage } from "@/core/types/physics";
 import { createScene } from "@/app/scene2";
 import { PrefabFactory, registerPrefabs } from "@/app/prefabs";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import {
   getAxisValue,
   isActionPressed,

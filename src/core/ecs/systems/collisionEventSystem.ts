@@ -1,7 +1,7 @@
 // src/core/ecs/systems/collisionEventSystem.ts
 import { World } from "@/core/ecs/world";
 import { PhysicsContext } from "@/core/physicsState";
-import { EventManager } from "@/core/ecs/events";
+import { EventManager } from "@/core/ecs/events/eventManager";
 import {
   COLLISION_EVENTS_HEAD_OFFSET,
   COLLISION_EVENTS_RING_CAPACITY,

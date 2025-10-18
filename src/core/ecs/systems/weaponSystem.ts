@@ -13,7 +13,7 @@ import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
 import { vec3 } from "wgpu-matrix";
-import { DamageSystem } from "./damageSystem";
+import { DamageSystem } from "@/core/ecs/systems/damageSystem";
 import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
 import {
   PhysicsBodyComponent,
@@ -21,8 +21,9 @@ import {
 } from "@/core/ecs/components/physicsComponents";
 import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
 import { ResourceManager } from "@/core/resources/resourceManager";
-import { LifetimeComponent } from "../components/lifetimeComponent";
-import { EventManager, GameEvent } from "../events";
+import { LifetimeComponent } from "@/core/ecs/components/lifetimeComponent";
+import { EventManager } from "@/core/ecs/events/eventManager";
+import { GameEvent } from "@/core/ecs/events/gameEvent";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();

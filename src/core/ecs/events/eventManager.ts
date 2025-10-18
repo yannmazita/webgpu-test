@@ -1,4 +1,4 @@
-// src/core/ecs/events.ts
+// src/core/ecs/events/eventManager
 import {
   GameEvent,
   GameEventType,
