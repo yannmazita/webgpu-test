@@ -9,6 +9,8 @@ import { Mesh } from "@/core/types/gpu";
  * Can be configured for either instant hitscan or projectile-based firing.
  */
 export class WeaponComponent implements IComponent {
+  public weaponType = "default"; // todo: type this
+
   /** How many shots can be fired per second. */
   public fireRate = 10.0;
 
