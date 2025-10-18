@@ -37,7 +37,6 @@ export class ProjectileSystem {
     // Check if the target can take damage
     if (this.world.hasComponent(target, HealthComponent)) {
       // Use the damage value from the impact event payload
-      // This was included by CollisionEventSystem from the ProjectileComponent
 
       // Enqueue damage event with the actual damage from the projectile
       this.damageSystem.enqueueDamageEvent({
@@ -65,7 +64,7 @@ export class ProjectileSystem {
         payload: {
           attacker: owner,
           victim: target,
-          isCritical: false, // TODO: Implement critical hit logic based on hit location or other factors
+          isCritical: false, // todo: Implement critical hit logic based on hit location or other factors
         },
       });
     }
