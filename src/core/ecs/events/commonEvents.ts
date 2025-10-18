@@ -13,15 +13,6 @@ export interface DeathEvent {
 }
 
 /**
- * Represents the data payload for a fire weapon event.
- * @remarks
- * This event is published when an entity intends to fire its equipped weapon.
- */
-export interface FireWeaponEvent {
-  shooter: Entity;
-}
-
-/**
  * Fired when the player's interaction target changes.
  * @remarks
  * Used to update UI prompts.

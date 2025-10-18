@@ -3,6 +3,15 @@ import { Entity } from "@/core/ecs/entity";
 import { Vec3 } from "wgpu-matrix";
 
 /**
+ * Represents the data payload for a fire weapon event.
+ * @remarks
+ * This event is published when an entity intends to fire its equipped weapon.
+ */
+export interface FireWeaponEvent {
+  shooter: Entity;
+}
+
+/**
  * Fired when a weapon is equipped/drawn.
  * Useful for: animation triggers, UI updates, sound effects.
  */
@@ -94,6 +103,8 @@ export interface ProjectileImpactEvent {
   target: Entity;
   position: Vec3;
   normal: Vec3;
+  /** Damage amount from the projectile */
+  damage: number;
   /** True if target was damageable and damage was applied */
   dealtDamage: boolean;
 }

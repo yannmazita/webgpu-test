@@ -1,6 +1,5 @@
 import {
   DeathEvent,
-  FireWeaponEvent,
   InteractionTargetChangedEvent,
   InteractEvent,
   AddToInventoryEvent,
@@ -32,6 +31,7 @@ import {
   BodyWokeEvent,
   VelocityThresholdEvent,
 } from "@/core/ecs/events/physicsEvents";
+import { FireWeaponEvent } from "@/core/ecs/events/combatEvents";
 import {
   AimStateChangedEvent,
   AmmoChangedEvent,
@@ -48,7 +48,7 @@ import {
   WeaponReloadStartedEvent,
   WeaponSwitchCompletedEvent,
   WeaponSwitchStartedEvent,
-} from "./combatEvents";
+} from "@/core/ecs/events/combatEvents";
 
 /**
  * A union of all possible event payloads.
