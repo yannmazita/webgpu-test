@@ -502,7 +502,7 @@ export class ResourceManager {
    */
   public async resolveMeshByHandle(
     handle: ResourceHandle<Mesh>,
-  ): Promise<Mesh> {
+  ): Promise<Mesh | null> {
     const key = handle.key;
     const cached = this.meshes.get(key);
     if (cached) return cached;
@@ -565,15 +565,15 @@ export class ResourceManager {
       }
     }
 
-    let mesh: Mesh;
+    let mesh: Mesh | null;
     if (meshData) {
       mesh = await this.createMesh(key, meshData);
     } else if (key.startsWith("OBJ:")) {
       const url = key.substring(4);
-      mesh = await this.loadMeshFromOBJ(url);
+      mesh = (await this.loadMeshFromOBJ(url)) ?? null;
     } else if (key.startsWith("STL:")) {
       const url = key.substring(4);
-      mesh = await this.loadMeshFromSTL(url);
+      mesh = (await this.loadMeshFromSTL(url)) ?? null;
     } else if (key.startsWith("GLTF:")) {
       const parts = key.substring(5).split("#");
       const url = parts[0];
@@ -596,8 +596,10 @@ export class ResourceManager {
       throw new Error(`Unsupported mesh handle: ${key}`);
     }
 
-    this.meshes.set(key, mesh);
-    this.meshToHandle.set(mesh, handle);
+    if (mesh) {
+      this.meshes.set(key, mesh);
+      this.meshToHandle.set(mesh, handle);
+    }
     return mesh;
   }
 
@@ -681,30 +683,32 @@ export class ResourceManager {
         decodedData.vertexData,
       )) {
         const accessorIndex = primitive.attributes[attributeName];
-        const accessor = gltf.json.accessors![accessorIndex];
-        let finalData: Float32Array;
+        if (gltf.json.accessors) {
+          const accessor = gltf.json.accessors[accessorIndex];
+          let finalData: Float32Array;
 
-        if (accessor.normalized) {
-          finalData = dequantize(rawData, accessor);
-        } else if (rawData instanceof Float32Array) {
-          finalData = rawData;
-        } else {
-          finalData = new Float32Array(rawData);
-        }
+          if (accessor.normalized) {
+            finalData = dequantize(rawData, accessor);
+          } else if (rawData instanceof Float32Array) {
+            finalData = rawData;
+          } else {
+            finalData = new Float32Array(rawData);
+          }
 
-        switch (attributeName) {
-          case "POSITION":
-            positions = finalData;
-            break;
-          case "NORMAL":
-            normals = finalData;
-            break;
-          case "TEXCOORD_0":
-            texCoords = finalData;
-            break;
-          case "TEXCOORD_1":
-            texCoords1 = finalData;
-            break;
+          switch (attributeName) {
+            case "POSITION":
+              positions = finalData;
+              break;
+            case "NORMAL":
+              normals = finalData;
+              break;
+            case "TEXCOORD_0":
+              texCoords = finalData;
+              break;
+            case "TEXCOORD_1":
+              texCoords1 = finalData;
+              break;
+          }
         }
       }
     } else {
@@ -713,12 +717,15 @@ export class ResourceManager {
       ): Float32Array | undefined => {
         const accessorIndex = primitive.attributes[attributeName];
         if (accessorIndex === undefined) return undefined;
-        const accessor = gltf.json.accessors![accessorIndex];
-        const rawData = getAccessorData(gltf, accessorIndex);
-        if (accessor.normalized) return dequantize(rawData, accessor);
-        return rawData instanceof Float32Array
-          ? rawData
-          : new Float32Array(rawData);
+        if (gltf.json.accessors) {
+          const accessor = gltf.json.accessors[accessorIndex];
+          const rawData = getAccessorData(gltf, accessorIndex);
+          if (accessor.normalized) return dequantize(rawData, accessor);
+          return rawData instanceof Float32Array
+            ? rawData
+            : new Float32Array(rawData);
+        }
+        return undefined;
       };
 
       positions = getAttribute("POSITION");
@@ -737,11 +744,11 @@ export class ResourceManager {
     }
 
     const meshData: MeshData = {
-      positions: positions!,
+      positions: positions,
       normals: normals ?? new Float32Array(),
       texCoords: texCoords ?? new Float32Array(),
       texCoords1: texCoords1 ?? new Float32Array(),
-      indices: indices!,
+      indices: indices,
     };
     return this.createMesh(key, meshData);
   }
@@ -778,10 +785,10 @@ export class ResourceManager {
    * @param url The URL of the .obj file.
    * @returns A promise that resolves to the created or cached Mesh.
    */
-  public async loadMeshFromOBJ(url: string): Promise<Mesh> {
+  public async loadMeshFromOBJ(url: string): Promise<Mesh | null> {
     const meshKey = `OBJ:${url}`;
     if (this.meshes.has(meshKey)) {
-      return this.meshes.get(meshKey)!;
+      return this.meshes.get(meshKey) ?? null;
     }
 
     const objGeometry = await loadOBJ(url);
@@ -793,7 +800,6 @@ export class ResourceManager {
     };
 
     const mesh = await this.createMesh(meshKey, meshData);
-    _setHandle(mesh, meshKey);
     return mesh;
   }
 
@@ -802,9 +808,9 @@ export class ResourceManager {
    * @param url The URL of the .stl file.
    * @returns A promise that resolves to the created or cached Mesh.
    */
-  public async loadMeshFromSTL(url: string): Promise<Mesh> {
+  public async loadMeshFromSTL(url: string): Promise<Mesh | null> {
     const meshKey = `STL:${url}`;
-    if (this.meshes.has(meshKey)) return this.meshes.get(meshKey)!;
+    if (this.meshes.has(meshKey)) return this.meshes.get(meshKey) ?? null;
     const stlGeometry = await loadSTL(url);
     const meshData: MeshData = {
       positions: stlGeometry.vertices,
@@ -812,7 +818,6 @@ export class ResourceManager {
       indices: stlGeometry.indices,
     };
     const mesh = await this.createMesh(meshKey, meshData);
-    _setHandle(mesh, meshKey);
     return mesh;
   }
 }
