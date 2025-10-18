@@ -46,6 +46,8 @@ import {
   isActionPressed,
   wasActionPressed,
 } from "@/core/input/action";
+import { ParticleSystem } from "@/core/ecs/systems/particleSystem";
+import { ParticleSubsystem } from "@/core/rendering/particle";
 
 /**
  * Initializes the render worker with all necessary contexts and systems.
@@ -283,6 +285,14 @@ export async function initWorker(
     state.eventManager,
     state.prefabFactory,
   );
+
+  // Initialize Particle System (ECS logic) and Subsystem (GPU resources)
+  state.particleSubsystem = new ParticleSubsystem(state.renderer.device);
+  await state.particleSubsystem.init();
+  state.particleSystem = new ParticleSystem();
+
+  // Wire particle subsystem into the renderer
+  state.renderer.setParticleSubsystem(state.particleSubsystem);
 
   // Publish initial engine state snapshot
   if (state.engineStateCtx) {

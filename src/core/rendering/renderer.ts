@@ -17,6 +17,9 @@ import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
 import { UIPass } from "@/core/rendering/passes/uiPass";
 import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";
+import { ParticlePass } from "@/core/rendering/passes/particlePass";
+import { ParticleComputePass } from "@/core/rendering/passes/particleComputePass";
+import { ParticleSubsystem } from "@/core/rendering/particle";
 
 /**
  * The central rendering engine for the application.
@@ -35,6 +38,7 @@ import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";
  * opaque geometry rendering) independently.
  */
 export class Renderer {
+  private MAX_PARTICLES = 10000;
   /** The primary WebGPU device used for all GPU operations. */
   public device!: GPUDevice;
   /** The default texture sampler for the renderer. */
@@ -64,7 +68,12 @@ export class Renderer {
   private skyboxPass!: SkyboxPass;
   private opaquePass!: OpaquePass;
   private transparentPass!: TransparentPass;
+  private particlePass!: ParticlePass;
+  private particleComputePass!: ParticleComputePass;
   private uiPass!: UIPass;
+
+  // Rendering Subsystems
+  private particleSubsystem?: ParticleSubsystem;
 
   // Per-frame data
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -88,6 +97,7 @@ export class Renderer {
     clusterAvgLpcX1000: 0,
     clusterMaxLpc: 0,
     clusterOverflows: 0,
+    lastFrameTime: 0,
   };
 
   // UI-driven rendering flag
@@ -250,7 +260,9 @@ export class Renderer {
 
     this.skyboxPass = new SkyboxPass();
     this.opaquePass = new OpaquePass();
-    this.transparentPass = new TransparentPass(this.device);
+    this.transparentPass = new TransparentPass();
+    this.particlePass = new ParticlePass(this.device);
+    this.particleComputePass = new ParticleComputePass(this.device);
     this.uiPass = new UIPass();
 
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
@@ -324,6 +336,15 @@ export class Renderer {
       ],
     });
 
+    // The renderer doesn't create the subsystem, it just gets a reference to it.
+    // We still need to init the pass itself though.
+    await this.particlePass.init(
+      this.frameBindGroupLayout,
+      this.canvasFormat,
+      this.depthFormat,
+    );
+    await this.particleComputePass.init(this.MAX_PARTICLES);
+
     this.uniformManager = new UniformManager();
     this.instanceBufferManager = new InstanceBufferManager(this.device);
 
@@ -332,6 +353,14 @@ export class Renderer {
     if (error) {
       console.error("[WebGPU Validation Error during init]", error);
     }
+  }
+
+  /**
+   * Sets the particle subsystem for the renderer to use.
+   * @param subsystem The particle subsystem instance.
+   */
+  public setParticleSubsystem(subsystem: ParticleSubsystem): void {
+    this.particleSubsystem = subsystem;
   }
 
   /**
@@ -817,6 +846,10 @@ export class Renderer {
     const commandEncoder = this.device.createCommandEncoder({
       label: "MAIN_FRAME_ENCODER",
     });
+
+    // Update particle simulation before creating the render context
+    const particleResources = this.particleSubsystem?.getRenderResources();
+
     const context: RenderContext = {
       // Pass the culled list of renderables to the context
       sceneData: { ...sceneData, renderables: visibleRenderables },
@@ -836,6 +869,8 @@ export class Renderer {
       instanceAllocations,
       clusterBuilder: this.clusterPass.getClusterBuilder(),
       shadowSubsystem: this.shadowPass.getShadowSubsystem(),
+      particleBuffer: particleResources?.buffer,
+      particleCount: particleResources?.count,
       canvasWidth: this.canvas.width,
       canvasHeight: this.canvas.height,
     };
@@ -900,6 +935,9 @@ export class Renderer {
     );
     Profiler.end("Render.TransparentPass");
 
+    // Execute particle pass
+    this.particlePass.execute(context, scenePassEncoder);
+
     scenePassEncoder.end();
 
     if (postSceneDrawCallback) {
@@ -932,6 +970,7 @@ export class Renderer {
       0,
       Math.round((performance.now() - tStart) * 1000),
     );
+    this.stats.lastFrameTime = performance.now();
     Profiler.end("Render.Total");
   }
 

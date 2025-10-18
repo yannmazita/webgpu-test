@@ -46,7 +46,9 @@ export function frame(now: number): void {
     !state.interactionSystem ||
     !state.pickupSystem ||
     !state.inventorySystem ||
-    !state.respawnSystem
+    !state.respawnSystem ||
+    !state.particleSystem ||
+    !state.particleSubsystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -100,6 +102,7 @@ export function frame(now: number): void {
   state.collisionEventSystem.update();
   state.damageSystem.update(state.world);
   state.respawnSystem.update(now);
+  state.particleSystem.update(state.world, dt, state.particleSubsystem);
 
   // Process all queued events
   state.eventManager.update();

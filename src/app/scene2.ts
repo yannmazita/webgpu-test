@@ -24,13 +24,14 @@ import { WeaponComponent } from "@/core/ecs/components/weaponComponent";
 import { HealthComponent } from "@/core/ecs/components/healthComponent";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowComponent";
-import { vec3 } from "wgpu-matrix";
+import { vec3, vec4 } from "wgpu-matrix";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
 import { PickupComponent } from "@/core/ecs/components/pickupComponent";
 import { PBRMaterialOptions } from "@/core/types/gpu";
 import { Entity } from "@/core/ecs/entity";
 import { RespawnComponent } from "@/core/ecs/components/respawnComponent";
 import { SpawnPointComponent } from "@/core/ecs/components/spawnPointComponent";
+import { ParticleEmitterComponent } from "@/core/ecs/components/particleComponents";
 
 /**
  * Procedurally generates a "forest" of tall, static pillars for the player
@@ -406,6 +407,25 @@ export async function createScene(
   // --- Global Sun and Shadow Settings ---
   world.addResource(new SceneSunComponent());
   world.addResource(new ShadowSettingsComponent());
+
+  // --- Particle Emitter Test ---
+  {
+    const fountainEntity = world.createEntity("fountain");
+    const fountainTransform = new TransformComponent();
+    fountainTransform.setPosition(8, 0.1, 5);
+    world.addComponent(fountainEntity, fountainTransform);
+
+    const fountainEmitter = new ParticleEmitterComponent();
+    fountainEmitter.emitRate = 500;
+    fountainEmitter.initialVelocity = vec3.create(0, 8, 0);
+    fountainEmitter.spread = vec3.create(2, 1, 2);
+    fountainEmitter.startColor = vec4.create(1.0, 0.5, 0.2, 1.0);
+    fountainEmitter.endColor = vec4.create(0.2, 0.2, 0.2, 0.0);
+    fountainEmitter.startSize = 0.2;
+    fountainEmitter.endSize = 0.05;
+    fountainEmitter.particleLifetime = { min: 1.5, max: 3.0 };
+    world.addComponent(fountainEntity, fountainEmitter);
+  }
 
   return {
     cameraEntity,

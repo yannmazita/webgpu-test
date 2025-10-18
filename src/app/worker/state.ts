@@ -24,6 +24,8 @@ import { EventManager } from "@/core/ecs/events/eventManager";
 import { PrefabFactory } from "@/app/prefabs";
 import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
+import { ParticleSystem } from "@/core/ecs/systems/particleSystem";
+import { ParticleSubsystem } from "@/core/rendering/particle";
 
 /**
  * Shared state for the render worker.
@@ -63,7 +65,11 @@ export interface WorkerState {
   inventorySystem: InventorySystem | null;
   respawnSystem: RespawnSystem | null;
   physicsCommandSystem: PhysicsCommandSystem | null;
+  particleSystem: ParticleSystem | null;
   prefabFactory: PrefabFactory | null;
+
+  // Rendering Subsystems
+  particleSubsystem: ParticleSubsystem | null;
 
   // Shared contexts
   metricsContext: MetricsContext | null;
@@ -114,7 +120,9 @@ export const state: WorkerState = {
   inventorySystem: null,
   respawnSystem: null,
   physicsCommandSystem: null,
+  particleSystem: null,
   prefabFactory: null,
+  particleSubsystem: null,
   metricsContext: null,
   engineStateCtx: null,
   physicsCtx: null,

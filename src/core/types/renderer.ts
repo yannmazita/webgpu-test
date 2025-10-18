@@ -50,4 +50,5 @@ export interface RendererStats {
   clusterMaxLpc?: number;
   /** The number of clusters that overflowed their light capacity. */
   clusterOverflows?: number;
+  lastFrameTime?: number;
 }

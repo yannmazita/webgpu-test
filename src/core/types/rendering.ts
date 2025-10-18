@@ -62,6 +62,10 @@ export interface RenderContext {
   readonly clusterBuilder: ClusterBuilder;
   readonly shadowSubsystem: ShadowSubsystem;
 
+  // Optional particle data for the particle pass
+  readonly particleBuffer?: GPUBuffer;
+  readonly particleCount?: number;
+
   // Canvas dimensions
   readonly canvasWidth: number;
   readonly canvasHeight: number;
