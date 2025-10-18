@@ -79,7 +79,12 @@ async function createPillarForest(
 
     // Add visual components
     world.addComponent(entity, transform);
-    world.addComponent(entity, new MeshRendererComponent(boxMesh, boxMaterial));
+    if (boxMesh) {
+      world.addComponent(
+        entity,
+        new MeshRendererComponent(boxMesh, boxMaterial),
+      );
+    }
 
     // Add physics components: a static (fixed) body with a box collider.
     world.addComponent(entity, new PhysicsBodyComponent("fixed"));
@@ -293,10 +298,12 @@ export async function createScene(
       },
     );
 
-    world.addComponent(
-      groundEntity,
-      new MeshRendererComponent(groundMesh, groundMaterial),
-    );
+    if (groundMesh) {
+      world.addComponent(
+        groundEntity,
+        new MeshRendererComponent(groundMesh, groundMaterial),
+      );
+    }
 
     // Physics: A fixed body that cannot move.
     world.addComponent(groundEntity, new PhysicsBodyComponent("fixed"));
@@ -348,7 +355,9 @@ export async function createScene(
       // Stack them vertically with a slight offset so that they fall
       t.setPosition(5, 0.5 + i * 10.01, 5);
       world.addComponent(cube, t);
-      world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
+      if (cubeMesh) {
+        world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
+      }
       // Physics: Dynamic body with a 1x1x1 box collider.
       world.addComponent(cube, new PhysicsBodyComponent("dynamic"));
       world.addComponent(
@@ -374,10 +383,12 @@ export async function createScene(
     const t = new TransformComponent();
     t.setPosition(-3, 0.5, 2);
     world.addComponent(pickupCube, t);
-    world.addComponent(
-      pickupCube,
-      new MeshRendererComponent(cubeMesh, pickupCubeMat),
-    );
+    if (cubeMesh) {
+      world.addComponent(
+        pickupCube,
+        new MeshRendererComponent(cubeMesh, pickupCubeMat),
+      );
+    }
     world.addComponent(pickupCube, new PhysicsBodyComponent("dynamic"));
     world.addComponent(
       pickupCube,
