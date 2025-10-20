@@ -79,7 +79,6 @@ self.onmessage = async (
     await initWorker(
       msg.canvas,
       msg.sharedInputBuffer,
-      msg.sharedMetricsBuffer,
       msg.sharedEngineStateBuffer,
       msg.sharedRaycastResultsBuffer,
       msg.sharedInteractionRaycastResultsBuffer,

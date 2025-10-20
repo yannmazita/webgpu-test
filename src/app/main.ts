@@ -1,8 +1,6 @@
 // src/app/main.ts
 import "@/style.css";
 import { SHARED_BUFFER_SIZE } from "@/core/sharedInputLayout";
-import { METRICS_BUFFER_SIZE } from "@/core/sharedMetricsLayout";
-import { createMetricsContext } from "@/core/metrics";
 import { createInputContext } from "@/core/input/manager";
 import { SHARED_ENGINE_STATE_BUFFER_SIZE } from "@/core/sharedEngineStateLayout";
 import {
@@ -21,15 +19,9 @@ if (!canvas) throw new Error("Canvas element not found");
 const uiCanvas = document.querySelector<HTMLCanvasElement>("#ui-canvas");
 if (!uiCanvas) throw new Error("UI Canvas element not found");
 
-const hud = document.querySelector<HTMLDivElement>("#hud");
-if (!hud) throw new Error("HUD element not found");
-
 // Setup shared memory and contexts
 const inputBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
 const inputContext = createInputContext(inputBuffer, true);
-
-const metricsBuffer = new SharedArrayBuffer(METRICS_BUFFER_SIZE);
-const metricsContext = createMetricsContext(metricsBuffer);
 
 const engineStateBuffer = new SharedArrayBuffer(
   SHARED_ENGINE_STATE_BUFFER_SIZE,
@@ -56,15 +48,7 @@ const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 
-initUIElements(
-  canvas,
-  uiCanvas,
-  hud,
-  inputContext,
-  metricsContext,
-  engineStateCtx,
-  worker,
-);
+initUIElements(canvas, uiCanvas, inputContext, engineStateCtx, worker);
 
 const offscreen = canvas.transferControlToOffscreen();
 worker.postMessage(
@@ -72,7 +56,6 @@ worker.postMessage(
     type: "INIT",
     canvas: offscreen,
     sharedInputBuffer: inputBuffer,
-    sharedMetricsBuffer: metricsBuffer,
     sharedEngineStateBuffer: engineStateBuffer,
     sharedRaycastResultsBuffer: raycastResultsBuffer,
     sharedCollisionEventsBuffer: collisionEventsBuffer,

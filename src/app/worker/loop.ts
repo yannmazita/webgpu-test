@@ -8,7 +8,6 @@ import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
 import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
 import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
 import { syncEngineState } from "@/core/engineState";
-import { publishMetrics } from "@/core/metrics";
 import { updatePreviousActionState } from "@/core/input/action";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { STATES_PHYSICS_STEP_TIME_MS_OFFSET } from "@/core/sharedPhysicsLayout";
@@ -25,7 +24,6 @@ import { STATES_PHYSICS_STEP_TIME_MS_OFFSET } from "@/core/sharedPhysicsLayout";
  * 5. Process all queued events
  * 6. Update core ECS systems (animation, transforms)
  * 7. Render the scene
- * 8. Publish performance metrics
  *
  * @param now - Current high-resolution timestamp from requestAnimationFrame
  */
@@ -126,20 +124,17 @@ export function frame(now: number): void {
   );
 
   // Publish performance metrics
-  if (state.metricsContext && state.renderer) {
+  if (state.renderer) {
     let physicsTimeUs = 0;
     if (state.physicsCtx) {
       const physicsTimeMs =
         state.physicsCtx.statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2];
       physicsTimeUs = Math.round(physicsTimeMs * 1000);
     }
-    publishMetrics(
-      state.metricsContext,
-      state.renderer.getStats(),
-      dt,
-      ++state.metricsFrameId,
-      physicsTimeUs,
-    );
+    // The previous block is used to get a physicsTimeMs from the physics thread,
+    // however it no longer is wired to anything
+    // todo: tidy up the remnants of the old metrics logic,
+    // maybe with a dedicated metricsSystem
   }
 
   self.postMessage({ type: "FRAME_DONE" });

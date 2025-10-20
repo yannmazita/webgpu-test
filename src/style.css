@@ -28,20 +28,6 @@ body {
   z-index: 1;
 }
 
-#hud {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  color: hsla(82, 100%, 36%, 1);
-  background-color: hsla(0, 0%, 0%, 0.5);
-  padding: 8px;
-  border-radius: 4px;
-  font-family: monospace;
-  white-space: pre;
-  pointer-events: none; /* Let pointer events go through to canvas */
-}
-
 #ui-canvas {
   z-index: 10;
   pointer-events: none; /* UI will enable pointer events itself when active */

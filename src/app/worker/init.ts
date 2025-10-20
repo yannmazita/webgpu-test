@@ -24,7 +24,6 @@ import {
   getMousePosition,
   isPointerLocked,
 } from "@/core/input/manager";
-import { createMetricsContext, initializeMetrics } from "@/core/metrics";
 import {
   createEngineStateContext as createEngineStateCtx,
   publishSnapshotFromWorld,
@@ -53,14 +52,13 @@ import {
  * @remarks
  * This function orchestrates the complete setup process:
  * - Creates WebGPU renderer and resource manager
- * - Sets up shared memory contexts for input, metrics, engine state, and physics
+ * - Sets up shared memory contexts for input, engine state, physics etc
  * - Initializes ECS world and all game systems
  * - Spawns and configures the physics worker
  * - Creates the default scene
  *
  * @param offscreen - OffscreenCanvas for WebGPU rendering
  * @param sharedInputBuffer - SharedArrayBuffer for input state
- * @param sharedMetricsBuffer - SharedArrayBuffer for performance metrics
  * @param sharedEngineStateBuffer - SharedArrayBuffer for editor state sync
  * @param sharedRaycastResultsBuffer - SharedArrayBuffer for weapon raycast results
  * @param sharedInteractionRaycastResultsBuffer - SharedArrayBuffer for interaction raycast results
@@ -71,7 +69,6 @@ import {
 export async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
-  sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
   sharedRaycastResultsBuffer: SharedArrayBuffer,
   sharedInteractionRaycastResultsBuffer: SharedArrayBuffer,
@@ -85,10 +82,6 @@ export async function initWorker(
   console.log("[Worker] Awaiting renderer init...");
   await state.renderer.init();
   console.log("[Worker] Renderer initialized.");
-
-  // Setup metrics context
-  state.metricsContext = createMetricsContext(sharedMetricsBuffer);
-  initializeMetrics(state.metricsContext);
 
   // Setup input context
   state.inputContext = createInputContext(sharedInputBuffer, false);

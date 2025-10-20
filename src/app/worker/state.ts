@@ -15,7 +15,6 @@ import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
 import { RespawnSystem } from "@/core/ecs/systems/respawnSystem";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import { InputContext } from "@/core/input/manager";
-import { MetricsContext } from "@/core/metrics";
 import { EngineStateContext } from "@/core/engineState";
 import { PhysicsContext } from "@/core/physicsState";
 import { IActionController } from "@/core/input/action";
@@ -66,7 +65,6 @@ export interface WorkerState {
   prefabFactory: PrefabFactory | null;
 
   // Shared contexts
-  metricsContext: MetricsContext | null;
   engineStateCtx: EngineStateContext | null;
   physicsCtx: PhysicsContext | null;
   raycastResultsCtx: { i32: Int32Array; f32: Float32Array } | null;
@@ -80,7 +78,6 @@ export interface WorkerState {
   lastViewportWidth: number;
   lastViewportHeight: number;
   lastFrameTime: number;
-  metricsFrameId: number;
 }
 
 /**
@@ -115,7 +112,6 @@ export const state: WorkerState = {
   respawnSystem: null,
   physicsCommandSystem: null,
   prefabFactory: null,
-  metricsContext: null,
   engineStateCtx: null,
   physicsCtx: null,
   raycastResultsCtx: null,
@@ -125,5 +121,4 @@ export const state: WorkerState = {
   lastViewportWidth: 0,
   lastViewportHeight: 0,
   lastFrameTime: 0,
-  metricsFrameId: 0,
 };
