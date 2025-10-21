@@ -7,7 +7,11 @@ import {
   createEngineStateContext as createEngineStateCtx,
   initializeEngineStateHeader,
 } from "@/core/engineState";
-import { init as initUIElements, initUI, tickUI } from "./ui";
+import {
+  init as initEditor,
+  initGPU as initEditorGPU,
+  update as tickUI,
+} from "@/app/editor";
 import {
   CHAR_CONTROLLER_EVENTS_BUFFER_SIZE,
   INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE,
@@ -48,7 +52,7 @@ const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 
-initUIElements(canvas, uiCanvas, inputContext, engineStateCtx, worker);
+initEditor(canvas, uiCanvas, inputContext, engineStateCtx, worker);
 
 const offscreen = canvas.transferControlToOffscreen();
 worker.postMessage(
@@ -117,7 +121,8 @@ worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
 
 const tick = (now: number) => {
   // Always check for resize at the start of a frame.
-  // todo: refactor resizing (dumpster fire performance)
+  // todo: refactor resizing (dumpster fire performance - (only on firefox apparently))
+  // todo2: don't do on-the-fly resize, app (via UI) should be setting render and window (canvas) resolution
   sendResize();
 
   if (canSendFrame) {
@@ -129,9 +134,9 @@ const tick = (now: number) => {
       now,
     });
   }
-  tickUI(now);
+  tickUI();
   requestAnimationFrame(tick);
 };
 
-await initUI();
+await initEditorGPU();
 requestAnimationFrame(tick);
