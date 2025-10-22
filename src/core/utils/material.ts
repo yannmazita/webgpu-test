@@ -1,5 +1,8 @@
 // src/core/utils/material.ts
 import { PBRMaterialOptions } from "@/core/types/gpu";
+import { MaterialInstanceCache } from "../resources/resourceCache";
+import { MaterialInstance } from "../materials/materialInstance";
+import { PBRMaterialSpec } from "../resources/resourceManager";
 
 /**
  * Creates a deterministic, unique cache key for a PBR material based on its options.
@@ -59,4 +62,25 @@ export function createMaterialCacheKey(options: PBRMaterialOptions): string {
   // Sort parts to ensure the key is always the same for the same options
   parts.sort();
   return parts.join("|");
+}
+
+/**
+ * Gets the PBR material specification for a material instance.
+ */
+export function getMaterialSpec(
+  cache: MaterialInstanceCache,
+  material: MaterialInstance,
+): PBRMaterialSpec | null {
+  return cache.getMetadata(material) as PBRMaterialSpec | null;
+}
+
+/**
+ * Sets the PBR material specification for a material instance.
+ */
+export function setMaterialSpec(
+  cache: MaterialInstanceCache,
+  material: MaterialInstance,
+  spec: PBRMaterialSpec,
+): void {
+  cache.setMetadata(material, spec);
 }

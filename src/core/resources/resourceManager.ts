@@ -22,16 +22,24 @@ import { MaterialFactory } from "@/core/resources/materialFactory";
 import { GltfSceneLoader } from "@/loaders/gltfSceneLoader";
 import { IblGenerator } from "@/core/rendering/iblGenerator";
 import {
-  MaterialInstanceCache,
-  MaterialTemplateCache,
+  ResourceCache,
   MeshCache,
   SamplerCache,
+  MaterialInstanceCache,
+  PBRMaterialCache,
 } from "@/core/resources/resourceCache";
 import { MeshLoaderRegistry } from "@/core/resources/mesh/meshLoaderRegistry";
 import { PrimitiveMeshLoader } from "@/loaders/mesh/primitiveMeshLoader";
 import { ObjMeshLoader } from "@/loaders/mesh/objMeshLoader";
 import { StlMeshLoader } from "@/loaders/mesh/stlMeshLoader";
 import { GltfMeshLoader } from "@/loaders/mesh/gltfMeshLoader";
+import {
+  createMaterialHandle,
+  createMeshHandle,
+  createPBRMaterialTemplateHandle,
+  createSamplerHandle,
+} from "@/core/utils/resourceHandle";
+import { getMaterialSpec } from "@/core/utils/material";
 
 /**
  * Defines the declarative specification for a PBR material.
@@ -73,10 +81,11 @@ export class ResourceManager {
   private supportedCompressedFormats: Set<GPUTextureFormat>;
   private iblGenerator: IblGenerator | null = null;
 
-  private materialTemplateCache = new MaterialTemplateCache();
-  private meshCache = new MeshCache();
-  private samplerCache = new SamplerCache();
-  private materialInstanceCache = new MaterialInstanceCache();
+  private meshCache: MeshCache = new ResourceCache<Mesh>();
+  private samplerCache: SamplerCache = new ResourceCache<GPUSampler>();
+  private materialInstanceCache: MaterialInstanceCache =
+    new ResourceCache<MaterialInstance>();
+  private pbrMaterialCache: PBRMaterialCache = new ResourceCache<PBRMaterial>();
 
   private meshLoaderRegistry = new MeshLoaderRegistry();
 
@@ -162,7 +171,8 @@ export class ResourceManager {
 
     // Check cache first
     const cached = this.samplerCache.getByKey(key);
-    if (cached) {
+    // Assert it's not an array since samplers are always single instances
+    if (cached && !Array.isArray(cached)) {
       return cached;
     }
 
@@ -219,8 +229,8 @@ export class ResourceManager {
       mipmapFilter: getMipmapFilterMode(gltfSampler.minFilter),
     });
 
-    const samplerHandle = ResourceHandle.forSampler(key);
-    this.samplerCache.set(samplerHandle, newSampler);
+    const handle = createSamplerHandle(key);
+    this.samplerCache.set(handle, newSampler);
     return newSampler;
   }
 
@@ -271,8 +281,12 @@ export class ResourceManager {
    */
   public getMaterialInstanceByHandleSync(
     handle: ResourceHandle<MaterialInstance>,
-  ): MaterialInstance | undefined {
-    return this.materialInstanceCache.get(handle);
+  ): MaterialInstance | null {
+    const cached = this.materialInstanceCache.get(handle);
+    if (cached && !Array.isArray(cached)) {
+      return cached;
+    }
+    return null;
   }
 
   /**
@@ -289,7 +303,7 @@ export class ResourceManager {
    *     used to create the instance, otherwise undefined.
    */
   public getMaterialSpec(material: MaterialInstance): PBRMaterialSpec | null {
-    return this.materialInstanceCache.getMaterialSpec(material);
+    return getMaterialSpec(this.materialInstanceCache, material);
   }
 
   /**
@@ -309,8 +323,10 @@ export class ResourceManager {
     const isTransparent = albedo[3] < 1.0;
     const templateKey = `PBR_TEMPLATE:${isTransparent}`;
 
-    const cached = this.materialTemplateCache.getByKey(templateKey);
-    if (cached) return cached as PBRMaterial;
+    const cached = this.pbrMaterialCache.getByKey(templateKey);
+    if (cached && !Array.isArray(cached)) {
+      return cached; // No cast needed now
+    }
 
     const materialTemplate = await MaterialFactory.createPBRTemplate(
       this.renderer.device,
@@ -318,8 +334,8 @@ export class ResourceManager {
       options,
     );
 
-    const handle = ResourceHandle.forMaterialTemplate(templateKey);
-    this.materialTemplateCache.set(handle, materialTemplate);
+    const handle = createPBRMaterialTemplateHandle(templateKey);
+    this.pbrMaterialCache.set(handle, materialTemplate);
     return materialTemplate;
   }
 
@@ -369,7 +385,9 @@ export class ResourceManager {
     const instanceKey = `UNLIT_GROUND_INSTANCE:${options.textureUrl ?? ""}:${colorKey}`;
 
     const cached = this.materialInstanceCache.getByKey(instanceKey);
-    if (cached) return cached;
+    if (cached && !Array.isArray(cached)) {
+      return cached;
+    }
 
     const instance = await MaterialFactory.createUnlitGroundMaterial(
       this.renderer.device,
@@ -379,7 +397,7 @@ export class ResourceManager {
       options,
     );
 
-    const handle = ResourceHandle.forMaterial(instanceKey);
+    const handle = createMaterialHandle(instanceKey);
     this.materialInstanceCache.set(handle, instance);
     return instance;
   }
@@ -438,9 +456,11 @@ export class ResourceManager {
     spec: PBRMaterialSpec,
     cacheKey?: string,
   ): Promise<MaterialInstance> {
-    if (cacheKey) {
-      const cached = this.materialInstanceCache.getByKey(cacheKey);
-      if (cached) return cached;
+    const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
+
+    const cached = this.materialInstanceCache.getByKey(finalKey);
+    if (cached && !Array.isArray(cached)) {
+      return cached;
     }
 
     if (!spec || spec.type !== "PBR") {
@@ -454,9 +474,7 @@ export class ResourceManager {
       this.defaultSampler,
     );
 
-    // Store the spec with the instance for serialization
-    const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
-    const handle = ResourceHandle.forMaterial(finalKey);
+    const handle = createMaterialHandle(finalKey);
     this.materialInstanceCache.set(handle, instance, spec);
 
     return instance;
@@ -572,8 +590,7 @@ export class ResourceManager {
 
     mesh.id = ResourceManager.nextMeshId++;
 
-    // Store in cache with an auto-generated handle.
-    const handle = ResourceHandle.forMesh(key);
+    const handle = createMeshHandle(key);
     this.meshCache.set(handle, mesh);
 
     return mesh;
