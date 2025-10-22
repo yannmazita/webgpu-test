@@ -20,6 +20,8 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { setParent } from "@/core/ecs/utils/hierarchy";
 import { mat4, quat, vec3 } from "wgpu-matrix";
+import { ResourceHandle } from "@/core/resources/resourceHandle";
+import { createMaterialCacheKey } from "@/core/utils/material";
 
 /**
  * The context object passed through the glTF node instantiation process.
@@ -107,27 +109,20 @@ export class GltfSceneLoader {
   /**
    * Instantiates a parsed glTF asset into the world and returns the root entity.
    *
-   * This is the main entry point for the loader. It orchestrates the entire
-   * process of converting a glTF scene definition into a live entity hierarchy
-   * within the game engine.
-   *
    * @remarks
    * The process involves three main stages:
    * 1.  **Pre-analysis**: It first scans materials and animations to build
-   *     templates and identify which resources need special handling (like
-   *     materials targeted by animations).
+   *     templates and identify which resources need special handling.
    * 2.  **Scene Instantiation**: It recursively traverses the glTF nodes,
    *     creating an entity for each one and setting up the parent-child
-   *     hierarchy.
+   *     hierarchy. Multi-primitive meshes are handled by creating a single
+   *     entity with a MeshRendererComponent containing an array of meshes.
    * 3.  **Animation Parsing**: It parses all animation clips and their channels,
    *     linking them to the newly created entities.
    *
-   * @param gltf The fully parsed glTF asset, including the JSON scene graph and
-   *     all associated binary buffer data.
-   * @param baseUri The base URI of the loaded glTF file, used to resolve any
-   *     relative paths for external assets like image textures.
-   * @returns A promise that resolves to the root `Entity` of the newly created
-   *     scene hierarchy.
+   * @param gltf - The fully parsed glTF asset.
+   * @param baseUri - The base URI of the loaded glTF file.
+   * @returns A promise that resolves to the root `Entity`.
    */
   public async load(gltf: ParsedGLTF, baseUri: string): Promise<Entity> {
     // --- Step 1: Pre-analysis and Asset Creation ---
@@ -190,23 +185,15 @@ export class GltfSceneLoader {
   /**
    * Recursively instantiates a single glTF node and its children into the ECS.
    *
-   * For each node, this method creates a corresponding `Entity`, sets its
-   * transform, and establishes its parent in the scene hierarchy. If the node
-   * contains a mesh, it resolves the mesh and material resources via the
-   * ResourceManager and adds a `MeshRendererComponent`.
-   *
    * @remarks
-   * This function is the core of the scene graph traversal. It uses a shared
-   * context object (`ctx`) to maintain state across the recursive calls,
-   * avoiding redundant work by caching materials and tracking the mapping
-   * from glTF node indices to created entities.
+   * If a node contains a mesh, it resolves the entire mesh (all primitives) at once
+   * and creates a single `MeshRendererComponent` on the node's entity. This aligns
+   * with the engine's architecture for handling multi-primitive meshes.
    *
-   * @param nodeIndex The index of the node to instantiate from the glTF's `nodes` array.
-   * @param parentEntity The parent `Entity` in the ECS to which the new entity
-   *     will be attached.
-   * @param ctx The shared context object for the entire instantiation process.
-   * @returns A promise that resolves when the node and all its descendants
-   *     have been fully instantiated.
+   * @param nodeIndex - The index of the node to instantiate.
+   * @param parentEntity - The parent `Entity` in the ECS.
+   * @param ctx - The shared context object.
+   * @returns A promise that resolves when the node and its descendants are instantiated.
    */
   private async instantiateNode(
     nodeIndex: number,
@@ -222,10 +209,10 @@ export class GltfSceneLoader {
 
     const transform = new TransformComponent();
     if (node.matrix) {
+      // todo: Implement full matrix decomposition to T/R/S
       const pos = vec3.create();
       mat4.getTranslation(node.matrix, pos);
       transform.setPosition(pos);
-      // todo: Full matrix decomposition to T/R/S
     } else {
       if (node.translation)
         transform.setPosition(vec3.fromValues(...node.translation));
@@ -238,106 +225,123 @@ export class GltfSceneLoader {
 
     if (node.mesh !== undefined) {
       const gltfMesh = ctx.gltf.json.meshes?.[node.mesh];
-      if (!gltfMesh) {
-        throw new Error(`Mesh ${node.mesh} not found in glTF file.`);
+      if (!gltfMesh || gltfMesh.primitives.length === 0) {
+        throw new Error(`Mesh ${node.mesh} not found or has no primitives.`);
       }
 
-      const meshRootEntity =
-        gltfMesh.primitives.length > 1 ? this.world.createEntity() : entity;
-      if (gltfMesh.primitives.length > 1) {
-        this.world.addComponent(meshRootEntity, new TransformComponent());
-        setParent(this.world, meshRootEntity, entity);
+      const meshName = gltfMesh.name ?? `mesh_${node.mesh}`;
+      const meshHandle = ResourceHandle.forMesh(
+        `GLTF:${ctx.baseUri}#${meshName}`,
+      );
+
+      // RESOLVE ALL MESH PRIMITIVES AT ONCE
+      const meshes = await this.resourceManager.resolveMeshByHandle(meshHandle);
+      if (!meshes) {
+        console.error(`Failed to load mesh ${meshName} for node ${node.name}`);
+        return;
       }
+
+      // PREPARE MATERIALS AND OVERRIDES
+      const materialOverrides = new Map<number, MaterialInstance>();
+      let defaultMaterial: MaterialInstance | undefined;
 
       for (let i = 0; i < gltfMesh.primitives.length; i++) {
         const primitive = gltfMesh.primitives[i];
-        const primitiveEntity =
-          gltfMesh.primitives.length > 1
-            ? this.world.createEntity()
-            : meshRootEntity;
-        if (gltfMesh.primitives.length > 1) {
-          this.world.addComponent(primitiveEntity, new TransformComponent());
-          setParent(this.world, primitiveEntity, meshRootEntity);
+        const matIndex = primitive.material;
+
+        if (matIndex === undefined) {
+          // Fallback to a default material if no material is specified
+          if (i === 0) {
+            const defaultMatOptions: PBRMaterialOptions = {
+              albedo: [0.8, 0.8, 0.8, 1],
+            };
+            const defaultMat = await this.resourceManager.resolveMaterialSpec(
+              { type: "PBR", options: defaultMatOptions },
+              `gltf/default_material`,
+            );
+            defaultMaterial = defaultMat;
+          }
+          // Continue to next primitive, as we don't have a specific material to resolve
+          continue;
         }
 
-        const meshCacheKey = `GLTF:${ctx.gltf.json.asset.version}#mesh${node.mesh}#primitive${i}`;
-        const mesh = await this.resourceManager.createMeshFromPrimitive(
-          meshCacheKey,
+        const gltfMat = ctx.gltf.json.materials?.[matIndex];
+        if (!gltfMat) throw new Error(`Material ${matIndex} not found.`);
+
+        const isAnimated = ctx.animatedMaterialIndices.has(matIndex);
+        const options = this._getGLTFMaterialOptions(
+          gltfMat,
           ctx.gltf,
-          primitive,
+          ctx.baseUri,
         );
 
-        const matIndex = primitive.material;
+        // Create a unique cache key for this specific material configuration
+        const cacheKey = createMaterialCacheKey(options);
+
         let materialInstance: MaterialInstance | undefined;
-
-        if (matIndex !== undefined) {
-          const gltfMat = ctx.gltf.json.materials?.[matIndex];
-          if (!gltfMat) throw new Error(`Material ${matIndex} not found.`);
-
-          if (!ctx.materialToEntitiesMap.has(matIndex)) {
-            ctx.materialToEntitiesMap.set(matIndex, []);
-          }
-          ctx.materialToEntitiesMap.get(matIndex)!.push(primitiveEntity);
-
-          const isAnimated = ctx.animatedMaterialIndices.has(matIndex);
-          const options = this._getGLTFMaterialOptions(
-            gltfMat,
-            ctx.gltf,
-            ctx.baseUri,
-          );
+        if (isAnimated) {
+          // Animated materials are never shared; always create a new instance.
+          // They could be cached by their animation target, but that's more complex.
+          // Todo: actually do it
+          const template = ctx.materialTemplates[matIndex];
           const sampler = this.resourceManager.getGLTFSampler(
             ctx.gltf,
             gltfMat.pbrMetallicRoughness?.baseColorTexture?.index,
           );
-
-          if (isAnimated) {
+          materialInstance =
+            await this.resourceManager.createPBRMaterialInstance(
+              template,
+              options,
+              sampler,
+            );
+        } else {
+          // For static materials, use the scene-wide cache
+          materialInstance = ctx.staticMaterialInstanceCache.get(cacheKey);
+          if (!materialInstance) {
+            const template = ctx.materialTemplates[matIndex];
+            const sampler = this.resourceManager.getGLTFSampler(
+              ctx.gltf,
+              gltfMat.pbrMetallicRoughness?.baseColorTexture?.index,
+            );
             materialInstance =
               await this.resourceManager.createPBRMaterialInstance(
-                ctx.materialTemplates[matIndex],
+                template,
                 options,
                 sampler,
               );
-          } else {
-            const staticCacheKey = `${matIndex}-${sampler.label ?? "default"}`;
-            materialInstance =
-              ctx.staticMaterialInstanceCache.get(staticCacheKey);
-            if (!materialInstance) {
-              materialInstance =
-                await this.resourceManager.createPBRMaterialInstance(
-                  ctx.materialTemplates[matIndex],
-                  options,
-                  sampler,
-                );
-              ctx.staticMaterialInstanceCache.set(
-                staticCacheKey,
-                materialInstance,
-              );
-            }
+            ctx.staticMaterialInstanceCache.set(cacheKey, materialInstance);
           }
         }
 
-        if (!materialInstance) {
-          // Fallback to default material
-          const defaultTemplate =
-            await this.resourceManager.createPBRMaterialTemplate({});
-          materialInstance =
-            await this.resourceManager.createPBRMaterialInstance(
-              defaultTemplate,
-              {},
-            );
+        // Set the first resolved material as the default for the MeshRendererComponent
+        if (i === 0) {
+          defaultMaterial = materialInstance;
+        } else {
+          // Subsequent materials are overrides
+          materialOverrides.set(i, materialInstance);
         }
+      }
 
-        this.world.addComponent(
-          primitiveEntity,
-          new MeshRendererComponent(mesh, materialInstance),
+      // If we still don't have a default material (e.g., all primitives had no material), create one.
+      if (!defaultMaterial) {
+        const defaultMatOptions: PBRMaterialOptions = {
+          albedo: [0.8, 0.8, 0.8, 1],
+        };
+        defaultMaterial = await this.resourceManager.resolveMaterialSpec(
+          { type: "PBR", options: defaultMatOptions },
+          `gltf/default_material_${Date.now()}`, // Ensure unique key
         );
       }
-    }
 
-    if (node.children) {
-      for (const childNodeIndex of node.children) {
-        await this.instantiateNode(childNodeIndex, entity, ctx);
-      }
+      // CREATE A SINGLE MESH RENDERER COMPONENT
+      this.world.addComponent(
+        entity,
+        new MeshRendererComponent(
+          meshes,
+          defaultMaterial, // We know defaultMaterial is set
+          materialOverrides.size > 0 ? materialOverrides : null,
+        ),
+      );
     }
   }
 
