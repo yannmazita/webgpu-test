@@ -103,6 +103,11 @@ self.onmessage = async (
       break;
     }
     case MSG_FRAME: {
+      // If the worker is busy with an async task, skip the frame.
+      if (state.isBusy) {
+        self.postMessage({ type: "FRAME_DONE" });
+        return;
+      }
       // Apply physics snapshot before frame
       if (state.physicsCtx) {
         applyPhysicsSnapshot(state.world, state.physicsCtx);
@@ -115,7 +120,14 @@ self.onmessage = async (
       break;
     }
     case MSG_SET_ENVIRONMENT: {
-      await handleEnvironmentChange(msg.url, msg.size);
+      state.isBusy = true; // set the busy flag before starting the async operation
+      try {
+        await handleEnvironmentChange(msg.url, msg.size);
+      } catch (e) {
+        console.error("Failed to handle environment change:", e);
+      } finally {
+        state.isBusy = false;
+      }
       break;
     }
     case MSG_RAYCAST_REQUEST: {

@@ -78,6 +78,7 @@ export interface WorkerState {
   lastViewportWidth: number;
   lastViewportHeight: number;
   lastFrameTime: number;
+  isBusy: boolean;
 }
 
 /**
@@ -121,4 +122,5 @@ export const state: WorkerState = {
   lastViewportWidth: 0,
   lastViewportHeight: 0,
   lastFrameTime: 0,
+  isBusy: false,
 };
