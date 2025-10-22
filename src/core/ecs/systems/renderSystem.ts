@@ -2,19 +2,19 @@
 import { Renderer } from "@/core/rendering/renderer";
 import { SceneRenderData } from "@/core/types/rendering";
 import { vec4 } from "wgpu-matrix";
-import { CameraComponent } from "../components/cameraComponent";
-import { LightComponent } from "../components/lightComponent";
-import { MeshRendererComponent } from "../components/meshRendererComponent";
-import { MainCameraTagComponent } from "../components/tagComponents";
-import { TransformComponent } from "../components/transformComponent";
-import { World } from "../world";
-import { SkyboxComponent } from "../components/skyboxComponent";
-import { IBLComponent } from "../components/iblComponent";
+import { CameraComponent } from "@/core/ecs/components/cameraComponent";
+import { LightComponent } from "@/core/ecs/components/lightComponent";
+import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
+import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
+import { World } from "@/core/ecs/world";
+import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
+import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "../components/sunComponent";
-import { FogComponent } from "../components/fogComponent";
+} from "@/core/ecs/components/sunComponent";
+import { FogComponent } from "@/core/ecs/components/fogComponent";
 
 /**
  * Gathers all necessary data and orchestrates the rendering of a single frame.
@@ -112,22 +112,33 @@ export function renderSystem(
 
     if (!transform || !meshRenderer) continue;
 
-    if (typeof meshRenderer.mesh?.aabb === "undefined") {
-      console.error(
-        "CRITICAL ERROR in renderSystem: Invalid mesh found for entity",
-        entity,
-        meshRenderer.mesh,
-      );
-    }
+    // Get all meshes from the component (handles both single and array cases)
+    const meshes = meshRenderer.getMeshes();
 
-    sceneData.renderables.push({
-      mesh: meshRenderer.mesh,
-      material: meshRenderer.material,
-      modelMatrix: transform.worldMatrix,
-      isUniformlyScaled: transform.isUniformlyScaled,
-      castShadows: meshRenderer.castShadows,
-      receiveShadows: meshRenderer.receiveShadows,
-    });
+    for (let i = 0; i < meshes.length; i++) {
+      const mesh = meshes[i];
+
+      if (typeof mesh?.aabb === "undefined") {
+        console.error(
+          "CRITICAL ERROR in renderSystem: Invalid mesh found for entity",
+          entity,
+          mesh,
+        );
+        continue; // Skip this sub-mesh
+      }
+
+      // Get the specific material for this sub-mesh index
+      const material = meshRenderer.getMaterialForIndex(i);
+
+      sceneData.renderables.push({
+        mesh: mesh,
+        material: material,
+        modelMatrix: transform.worldMatrix,
+        isUniformlyScaled: transform.isUniformlyScaled,
+        castShadows: meshRenderer.castShadows,
+        receiveShadows: meshRenderer.receiveShadows,
+      });
+    }
   }
 
   renderer.render(
