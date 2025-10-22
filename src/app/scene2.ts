@@ -27,7 +27,6 @@ import { CameraFollowComponent } from "@/core/ecs/components/cameraFollowCompone
 import { vec3 } from "wgpu-matrix";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
 import { PickupComponent } from "@/core/ecs/components/pickupComponent";
-import { PBRMaterialOptions } from "@/core/types/gpu";
 import { Entity } from "@/core/ecs/entity";
 import { RespawnComponent } from "@/core/ecs/components/respawnComponent";
 import { SpawnPointComponent } from "@/core/ecs/components/spawnPointComponent";
@@ -134,7 +133,7 @@ export async function createPlayerPrefab(
   );
 
   // Weapon component configured for projectile firing.
-  // Pre-loading projectile assets
+  // These handles are for assets that should be pre-loaded by the scene.
   const projectileMeshHandle = ResourceHandle.forMesh(
     "PRIM:icosphere:r=0.1,sub=1",
   );
@@ -180,13 +179,6 @@ export async function createScene(
 ): Promise<{
   cameraEntity: number;
   playerEntity: number;
-}>;
-export async function createScene(
-  world: World,
-  resourceManager: ResourceManager,
-): Promise<{
-  cameraEntity: number;
-  playerEntity: number;
 }> {
   // --- Environment & Skybox ---
   const envMap = await resourceManager.createEnvironmentMap(
@@ -196,10 +188,10 @@ export async function createScene(
   world.addResource(new SkyboxComponent(envMap.skyboxMaterial));
   world.addResource(envMap.iblComponent);
 
-  // --- Pre-load Projectile Assets ---
+  // --- FIX: Pre-load Projectile Assets FIRST ---
   // Define handles and specs for projectile assets. By resolving them here during
   // scene setup, they are guaranteed to be in the cache for synchronous use
-  // by the weaponSystem at runtime.
+  // by the weaponSystem at runtime, before any entities that might use them are created.
   const projectileMeshHandle = ResourceHandle.forMesh(
     "PRIM:icosphere:r=0.1,sub=1",
   );
@@ -222,7 +214,7 @@ export async function createScene(
   );
 
   // --- Player ---
-  // Create the initial player instance
+  // Create the initial player instance AFTER the assets it depends on are loaded.
   const initialPlayerTransform = new TransformComponent();
   initialPlayerTransform.setPosition(0, 1, 10); // Start above ground
   const playerEntity = await createPlayerPrefab(
@@ -286,16 +278,20 @@ export async function createScene(
     );
 
     // Create a material instance with UV tiling
-    const groundMaterial = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate({}),
+    const groundMaterial = await resourceManager.resolveMaterialSpec(
       {
-        albedoMap: "/assets/textures/snow_02_4k/textures/snow_02_diff_4k.jpg",
-        normalMap: "/assets/textures/snow_02_4k/textures/snow_02_nor_gl_4k.jpg",
-        metallicRoughnessMap:
-          "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
-        metallic: 0.0, // Snow is not metallic
-        uvScale: [5, 5], // Tile the texture 10 times
+        type: "PBR",
+        options: {
+          albedoMap: "/assets/textures/snow_02_4k/textures/snow_02_diff_4k.jpg",
+          normalMap:
+            "/assets/textures/snow_02_4k/textures/snow_02_nor_gl_4k.jpg",
+          metallicRoughnessMap:
+            "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
+          metallic: 0.0, // Snow is not metallic
+          uvScale: [5, 5], // Tile the texture 10 times
+        },
       },
+      "scene2/ground_material", // Cache with a specific key
     );
 
     if (groundMesh) {
@@ -323,8 +319,6 @@ export async function createScene(
     textureBallTransform.setPosition(0, 2, 0);
     world.addComponent(textureBallEntity, textureBallTransform);
 
-    world.addComponent(textureBallEntity, textureBallTransform);
-
     world.addComponent(textureBallEntity, new PhysicsBodyComponent("fixed"));
     world.addComponent(textureBallEntity, new PhysicsColliderComponent(0));
   }
@@ -338,14 +332,19 @@ export async function createScene(
     const cubeMesh = await resourceManager.resolveMeshByHandle(
       ResourceHandle.forMesh("PRIM:cube:size=1"),
     );
-    const whiteMaterialOptions: PBRMaterialOptions = {
-      albedo: [0.9, 0.8, 0.9, 1],
-      metallic: 0,
-      roughness: 0.8,
+
+    // Use resolveMaterialSpec for consistent caching
+    const whiteMaterialSpec: PBRMaterialSpec = {
+      type: "PBR",
+      options: {
+        albedo: [0.9, 0.8, 0.9, 1],
+        metallic: 0,
+        roughness: 0.8,
+      },
     };
-    const cubeMat = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate(whiteMaterialOptions),
-      whiteMaterialOptions,
+    const cubeMat = await resourceManager.resolveMaterialSpec(
+      whiteMaterialSpec,
+      "scene2/white_cube_material", // Cache with a specific key
     );
 
     const CUBE_COUNT = 8;
@@ -353,7 +352,7 @@ export async function createScene(
       const cube = world.createEntity(`dynamic_cube_${i}`);
       const t = new TransformComponent();
       // Stack them vertically with a slight offset so that they fall
-      t.setPosition(5, 0.5 + i * 10.01, 5);
+      t.setPosition(5, 0.5 + i * 1.01, 5);
       world.addComponent(cube, t);
       if (cubeMesh) {
         world.addComponent(cube, new MeshRendererComponent(cubeMesh, cubeMat));
@@ -370,14 +369,17 @@ export async function createScene(
 
     // Create a special "pickup" cube
     const pickupCube = world.createEntity("pickup_cube_health");
-    const greenMaterialOptions: PBRMaterialOptions = {
-      albedo: [0.1, 0.8, 0.2, 1.0],
-      emissive: [0.1, 0.8, 0.2],
-      emissiveStrength: 5,
+    const greenMaterialSpec: PBRMaterialSpec = {
+      type: "PBR",
+      options: {
+        albedo: [0.1, 0.8, 0.2, 1.0],
+        emissive: [0.1, 0.8, 0.2],
+        emissiveStrength: 5,
+      },
     };
-    const pickupCubeMat = await resourceManager.createPBRMaterialInstance(
-      await resourceManager.createPBRMaterialTemplate(greenMaterialOptions),
-      greenMaterialOptions,
+    const pickupCubeMat = await resourceManager.resolveMaterialSpec(
+      greenMaterialSpec,
+      "scene2/green_pickup_material", // Cache with a specific key
     );
 
     const t = new TransformComponent();
