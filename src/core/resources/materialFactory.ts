@@ -14,26 +14,28 @@ import {
 
 /**
  * A stateless factory for creating Material objects.
- * It handles shader initialization, template creation, and instance creation.
+ *
+ * @remarks
+ * It handles shader initialization, the creation of shared material templates,
+ * and the instantiation of unique material instances. This centralizes the
+ * logic for material creation and ensures that shaders are compiled only once.
  */
 export class MaterialFactory {
   private static pbrInitialized = false;
   private static unlitGroundInitialized = false;
 
   /**
-   * Creates a PBR material template.
+   * Creates or retrieves a PBR material template.
    *
    * @remarks
    * This method provides a shared `PBRMaterial` object that acts as a template
    * for creating material instances. This is a performance optimization that
-   * avoids redundant shader compilation and pipeline layout creation. It also
-   * handles the one-time static initialization of the PBR shader system if it
-   * has not been run before.
+   * avoids redundant shader compilation and pipeline creation. It also handles
+   * the one-time static initialization of the PBR shader system.
    *
    * @param device The WebGPU device used for resource creation.
    * @param preprocessor The shader preprocessor for shader compilation.
-   * @param options Material properties used to configure the template, such as
-   *     determining transparency from the albedo color's alpha channel.
+   * @param options Material properties used to configure the template.
    * @returns A promise that resolves to a `PBRMaterial` template.
    */
   public static async createPBRTemplate(
@@ -55,24 +57,17 @@ export class MaterialFactory {
    * @remarks
    * This method takes a shared `PBRMaterial` template and a specific set of
    * options to create a fully configured `MaterialInstance`. It handles the
-   * asynchronous loading and creation of all required GPU textures (like
-   * albedo, normal, metallic-roughness) based on the URLs provided in the
-   * options. If a texture URL is not provided for a given map, the provided
-   * dummy texture is used as a fallback.
+   * asynchronous loading and creation of all required GPU textures based on the
+   * URLs provided in the options. If a texture URL is not provided
+   * for a given map, the provided dummy texture is used as a fallback.
    *
    * @param device The WebGPU device used for resource creation.
-   * @param supportedCompressedFormats A set of supported GPU texture formats,
-   *     used for loading Basis Universal compressed textures.
-   * @param dummyTexture A fallback 1x1 GPU texture to use when an optional
-   *     texture map is not specified in the options.
-   * @param materialTemplate The shared `PBRMaterial` template that defines the
-   *     shader and pipeline layout for this instance.
-   * @param options An object containing material properties and URLs for the
-   *     various texture maps.
-   * @param sampler The `GPUSampler` to be used for all textures within this
-   *     material instance.
-   * @returns A promise that resolves to a new `MaterialInstance`, complete with
-   *     its own uniform buffer and bind group.
+   * @param supportedCompressedFormats A set of supported GPU texture formats.
+   * @param dummyTexture A fallback 1x1 GPU texture.
+   * @param materialTemplate The shared `PBRMaterial` template.
+   * @param options An object containing material properties and texture URLs.
+   * @param sampler The `GPUSampler` to be used for all textures.
+   * @returns A promise that resolves to a new `MaterialInstance`.
    */
   public static async createPBRInstance(
     device: GPUDevice,
@@ -136,18 +131,13 @@ export class MaterialFactory {
    * @remarks
    * This method creates a specialized material instance for rendering simple,
    * unlit ground planes. It handles the one-time static initialization of the
-   * `UnlitGroundMaterial` shader if it has not been run before. Caching of the
-   * resulting `MaterialInstance` is the responsibility of the caller (ie
-   * the `ResourceManager`), as these instances are often static and reusable.
+   * `UnlitGroundMaterial` shader if it has not been run before.
    *
    * @param device The WebGPU device used for resource creation.
    * @param preprocessor The shader preprocessor for shader compilation.
-   * @param dummyTexture A fallback GPU texture to use if a texture URL is not
-   *     provided in the options.
-   * @param defaultSampler The default `GPUSampler` to use for the material's
-   *     texture.
-   * @param options An object containing the material's properties, such as
-   *     color and an optional texture URL.
+   * @param dummyTexture A fallback GPU texture.
+   * @param defaultSampler The default `GPUSampler` to use.
+   * @param options An object containing the material's properties.
    * @returns A promise that resolves to a new `MaterialInstance`.
    */
   public static async createUnlitGroundMaterial(
