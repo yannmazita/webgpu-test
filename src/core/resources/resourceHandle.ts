@@ -1,6 +1,7 @@
 // src/core/resources/resourceHandle.ts
 import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
+import { Material } from "@/core/materials/material";
 
 /**
  * An enumeration of all managed resource types.
@@ -21,20 +22,15 @@ export enum ResourceType {
  * @remarks
  * It combines a string-based key for uniqueness and caching with a phantom
  * generic type `T` to ensure that a handle for a Mesh cannot be accidentally
- * used to request a Material. This provides compile-time safety for resource
- * lookups.
+ * used to request a Material.
  *
- * `T` The type of the resource this handle points to.
+ * The generic `T` represents the *primary* or *singular* form of the resource.
+ * For example, a mesh handle uses `Mesh`, even if it might resolve to an array
+ * of meshes for multi-primitive assets.
+ *
  */
 export class ResourceHandle<T> {
-  /**
-   * The unique string identifier for the resource.
-   */
   public readonly key: string;
-
-  /**
-   * The enumerated type of the resource.
-   */
   public readonly type: ResourceType;
   private __phantom: T | undefined; // Enforces compile-time type safety
 
@@ -46,8 +42,11 @@ export class ResourceHandle<T> {
   /**
    * Creates a new handle for a Mesh resource.
    *
-   * @param key The unique string identifier for the mesh (like "PRIM:cube").
-   * @returns A new, type-safe resource handle for a Mesh.
+   * @remarks
+   * This handle represents a mesh asset, which may resolve to a single Mesh
+   * or an array of Mesh objects.
+   *
+   * @param key - The unique string identifier for the mesh (like "PRIM:cube").
    */
   public static forMesh(key: string): ResourceHandle<Mesh> {
     return new ResourceHandle<Mesh>(ResourceType.Mesh, key);
@@ -55,21 +54,39 @@ export class ResourceHandle<T> {
 
   /**
    * Creates a new handle for a MaterialInstance resource.
-   *
-   * @param key The unique string identifier for the material instance.
-   * @returns A new, type-safe resource handle for a MaterialInstance.
+   * @param key - The unique string identifier for the material instance.
    */
   public static forMaterial(key: string): ResourceHandle<MaterialInstance> {
     return new ResourceHandle<MaterialInstance>(ResourceType.Material, key);
   }
 
   /**
-   * Returns a string representation for debugging.
+   * Creates a new handle for a shared Material template.
    *
    * @remarks
-   * The format is "ResourceType:key", for example, "Mesh:PRIM:cube".
+   * This is distinct from a material instance, as a template is a shared
+   * pipeline and shader definition, not a per-object resource.
    *
-   * @returns A string representation of the handle.
+   * @param key - The unique string identifier for the material template.
+   */
+  public static forMaterialTemplate(key: string): ResourceHandle<Material> {
+    return new ResourceHandle<Material>(ResourceType.Material, key);
+  }
+
+  /**
+   * Creates a new handle for a GPUSampler resource.
+   *
+   * @remarks
+   * Samplers are cached based on their filter and wrap mode properties.
+   *
+   * @param key - The unique string identifier for the sampler configuration.
+   */
+  public static forSampler(key: string): ResourceHandle<GPUSampler> {
+    return new ResourceHandle<GPUSampler>(ResourceType.Texture, key);
+  }
+
+  /**
+   * Returns a string representation for debugging.
    */
   public toString(): string {
     return `${ResourceType[this.type]}:${this.key}`;
