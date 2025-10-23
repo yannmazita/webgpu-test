@@ -17,19 +17,17 @@ import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { MeshFactory } from "@/core/resources/meshFactory";
 import { MaterialFactory } from "@/core/resources/materialFactory";
 import { IblGenerator } from "@/core/rendering/iblGenerator";
-import {
-  MeshCache,
-  SamplerCache,
-  MaterialInstanceCache,
-  PBRMaterialCache,
-  MeshArrayCache,
-} from "@/core/resources/resourceCache";
 import { MeshLoaderRegistry } from "@/core/resources/mesh/meshLoaderRegistry";
 import { PrimitiveMeshLoader } from "@/loaders/mesh/primitiveMeshLoader";
 import { ObjMeshLoader } from "@/loaders/mesh/objMeshLoader";
 import { StlMeshLoader } from "@/loaders/mesh/stlMeshLoader";
 import { GltfMeshLoader } from "@/loaders/mesh/gltfMeshLoader";
 import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
+import {
+  ResourceCache,
+  MultiResourceCache,
+} from "@/core/resources/resourceCache";
+import { ResourceType } from "@/core/resources/resourceHandle";
 
 /**
  * Defines the declarative specification for a PBR material.
@@ -72,12 +70,15 @@ export class ResourceManager {
   private supportedCompressedFormats: Set<GPUTextureFormat>;
   private iblGenerator: IblGenerator | null = null;
 
-  private meshCache: MeshCache = new MeshCache();
-  private meshArrayCache: MeshArrayCache = new MeshArrayCache();
-  private samplerCache: SamplerCache = new SamplerCache();
-  private materialInstanceCache: MaterialInstanceCache =
-    new MaterialInstanceCache();
-  private pbrMaterialCache: PBRMaterialCache = new PBRMaterialCache();
+  private meshCache = new ResourceCache<Mesh>(ResourceType.Mesh);
+  private meshArrayCache = new MultiResourceCache<Mesh>(ResourceType.Mesh);
+  private samplerCache = new ResourceCache<GPUSampler>(ResourceType.Sampler);
+  private materialInstanceCache = new ResourceCache<MaterialInstance>(
+    ResourceType.Material,
+  );
+  private pbrMaterialCache = new ResourceCache<PBRMaterial>(
+    ResourceType.MaterialTemplate,
+  );
 
   private meshLoaderRegistry = new MeshLoaderRegistry();
   private gltfManager: GltfResourceManager;

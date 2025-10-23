@@ -1,9 +1,5 @@
 // src/core/resources/resourceCache.ts
-import { Material } from "@/core/materials/material";
-import { MaterialInstance } from "@/core/materials/materialInstance";
-import { Mesh } from "@/core/types/gpu";
 import { ResourceHandle, ResourceType } from "@/core/resources/resourceHandle";
-import { PBRMaterial } from "../materials/pbrMaterial";
 
 /**
  * A unified cache for managing single engine resources.
@@ -11,13 +7,24 @@ import { PBRMaterial } from "../materials/pbrMaterial";
  * @remarks
  * This class provides a consistent mechanism for storing, retrieving, and managing
  * the lifecycle of single resources. It handles forward/reverse lookups and
- * optional metadata storage directly within the cache.
+ * optional metadata storage directly within the cache. The resource type is
+ * provided at construction time rather than through inheritance.
  *
- * @template T The type of the resource being cached
+ * `T` The type of the resource being cached
  */
 export class ResourceCache<T> {
   private cache = new Map<string, { resource: T; metadata?: unknown }>();
   private resourceToKey = new WeakMap<T, string>();
+  private resourceType: ResourceType;
+
+  /**
+   * Constructs a new resource cache.
+   *
+   * @param resourceType The type of resources this cache will manage.
+   */
+  constructor(resourceType: ResourceType) {
+    this.resourceType = resourceType;
+  }
 
   /**
    * Gets a resource by its handle.
@@ -66,7 +73,7 @@ export class ResourceCache<T> {
    * @param resource The resource to associate metadata with
    * @param metadata The metadata to store
    */
-  public setMetadata(resource: T, metadata: unknown): void {
+  public setMetadata(resource: T, metadata?: unknown): void {
     const key = this.resourceToKey.get(resource);
     if (!key) return;
     const entry = this.cache.get(key);
@@ -83,7 +90,7 @@ export class ResourceCache<T> {
   public getHandle(resource: T): ResourceHandle<T> | null {
     const key = this.resourceToKey.get(resource);
     if (!key) return null;
-    return ResourceHandle.fromKey(key, this.getResourceType());
+    return ResourceHandle.fromKey(key, this.resourceType);
   }
 
   /**
@@ -167,14 +174,6 @@ export class ResourceCache<T> {
   public getAllWithMetadata(): { resource: T; metadata?: unknown }[] {
     return Array.from(this.cache.values());
   }
-
-  /**
-   * Override this method in subclasses to provide the resource type for handle creation.
-   * @protected
-   */
-  protected getResourceType(): unknown {
-    return undefined; // Base implementation returns undefined
-  }
 }
 
 /**
@@ -185,6 +184,16 @@ export class ResourceCache<T> {
 export class MultiResourceCache<T> {
   private cache = new Map<string, T[]>();
   private resourceToKey = new WeakMap<T, string>();
+  private resourceType: ResourceType;
+
+  /**
+   * Constructs a new multi-resource cache.
+   *
+   * @param resourceType The type of resources this cache will manage.
+   */
+  constructor(resourceType: ResourceType) {
+    this.resourceType = resourceType;
+  }
 
   /**
    * Gets resources by their handle.
@@ -225,7 +234,7 @@ export class MultiResourceCache<T> {
   public getHandle(resource: T): ResourceHandle<T> | null {
     const key = this.resourceToKey.get(resource);
     if (!key) return null;
-    return ResourceHandle.fromKey(key, this.getResourceType());
+    return ResourceHandle.fromKey(key, this.resourceType);
   }
 
   /**
@@ -290,50 +299,5 @@ export class MultiResourceCache<T> {
    */
   public getAllKeys(): string[] {
     return Array.from(this.cache.keys());
-  }
-
-  /**
-   * Override this method in subclasses to provide the resource type for handle creation.
-   * @protected
-   */
-  protected getResourceType(): unknown {
-    return undefined; // Base implementation returns undefined
-  }
-}
-
-// Type aliases for specific resource caches
-export class MeshCache extends ResourceCache<Mesh> {
-  protected getResourceType(): unknown {
-    return ResourceType.Mesh;
-  }
-}
-
-export class MaterialTemplateCache extends ResourceCache<Material> {
-  protected getResourceType(): unknown {
-    return ResourceType.MaterialTemplate;
-  }
-}
-
-export class SamplerCache extends ResourceCache<GPUSampler> {
-  protected getResourceType(): unknown {
-    return ResourceType.Sampler;
-  }
-}
-
-export class MaterialInstanceCache extends ResourceCache<MaterialInstance> {
-  protected getResourceType(): unknown {
-    return ResourceType.Material;
-  }
-}
-
-export class PBRMaterialCache extends ResourceCache<PBRMaterial> {
-  protected getResourceType(): unknown {
-    return ResourceType.MaterialTemplate;
-  }
-}
-
-export class MeshArrayCache extends MultiResourceCache<Mesh> {
-  protected getResourceType(): unknown {
-    return ResourceType.Mesh;
   }
 }
