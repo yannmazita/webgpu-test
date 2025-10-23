@@ -63,24 +63,3 @@ export function createMaterialCacheKey(options: PBRMaterialOptions): string {
   parts.sort();
   return parts.join("|");
 }
-
-/**
- * Gets the PBR material specification for a material instance.
- */
-export function getMaterialSpec(
-  cache: MaterialInstanceCache,
-  material: MaterialInstance,
-): PBRMaterialSpec | null {
-  return cache.getMetadata(material) as PBRMaterialSpec | null;
-}
-
-/**
- * Sets the PBR material specification for a material instance.
- */
-export function setMaterialSpec(
-  cache: MaterialInstanceCache,
-  material: MaterialInstance,
-  spec: PBRMaterialSpec,
-): void {
-  cache.setMetadata(material, spec);
-}
