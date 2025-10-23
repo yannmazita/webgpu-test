@@ -13,7 +13,9 @@ import { Mesh } from "@/core/types/gpu";
  * @remarks
  * This class encapsulates all GLTF-specific functionality including scene loading,
  * sampler management, and GLTF asset coordination. It delegates to the main
- * ResourceManager for actual resource creation and caching.
+ * ResourceManager for actual resource creation and caching. This separation allows
+ * for GLTF-specific optimizations and keeps the main ResourceManager focused on
+ * general resource management concerns.
  */
 export class GltfResourceManager {
   private resourceManager: ResourceManager;
@@ -122,6 +124,12 @@ export class GltfResourceManager {
   /**
    * Loads a glTF file and instantiates its scene graph into the ECS world.
    *
+   * @remarks
+   * This method handles the complete glTF loading pipeline including parsing,
+   * resource resolution, and ECS entity creation. It uses the `GltfSceneLoader`
+   * for the actual instantiation logic while coordinating resource loading
+   * through the `ResourceManager`.
+   *
    * @param world The World instance where the scene entities will be created.
    * @param url The URL of the `.gltf` or `.glb` file to load.
    * @returns A promise that resolves to the root Entity of the new hierarchy.
@@ -135,8 +143,13 @@ export class GltfResourceManager {
   /**
    * Creates a handle for a GLTF mesh.
    *
-   * @param url The GLTF file URL
-   * @param meshName The mesh name within the GLTF
+   * @remarks
+   * This is a convenience method that creates a formatted handle for GTLF
+   * mesh resources. The handle follows the format "GLTF:url#meshName".
+   *
+   * @param url The GLTF file URL.
+   * @param meshName The mesh name within the GLTF.
+   * @returns A ResourceHandle for the GLTF mesh.
    */
   public createGltfMeshHandle(
     url: string,

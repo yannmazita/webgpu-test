@@ -22,6 +22,7 @@ import { setParent } from "@/core/ecs/utils/hierarchy";
 import { mat4, quat, vec3 } from "wgpu-matrix";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { createMaterialCacheKey } from "@/core/utils/material";
+import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
 
 /**
  * The context object passed through the glTF node instantiation process.
@@ -85,14 +86,17 @@ interface NodeInstantiationContext {
 /**
  * Handles the instantiation of a parsed GLTF asset into an ECS scene.
  *
+ * @remarks
  * This class is responsible for traversing the glTF scene graph, creating
  * corresponding entities in the world, and attaching the necessary components
  * like Transforms, MeshRenderers, and Animations. It relies on the
- * ResourceManager to resolve and create the final GPU assets.
+ * ResourceManager to resolve and create the final GPU assets. It uses the
+ * GltfResourceManager for GLTF-specific operations like sampler creation.
  */
 export class GltfSceneLoader {
   private resourceManager: ResourceManager;
   private world: World;
+  private gltfManager: GltfResourceManager;
 
   /**
    * Constructs a new GltfSceneLoader.
@@ -104,6 +108,7 @@ export class GltfSceneLoader {
   constructor(world: World, resourceManager: ResourceManager) {
     this.world = world;
     this.resourceManager = resourceManager;
+    this.gltfManager = resourceManager.getGltfManager();
   }
 
   /**
@@ -120,8 +125,8 @@ export class GltfSceneLoader {
    * 3.  **Animation Parsing**: It parses all animation clips and their channels,
    *     linking them to the newly created entities.
    *
-   * @param gltf - The fully parsed glTF asset.
-   * @param baseUri - The base URI of the loaded glTF file.
+   * @param gltf The fully parsed glTF asset.
+   * @param baseUri The base URI of the loaded glTF file.
    * @returns A promise that resolves to the root `Entity`.
    */
   public async load(gltf: ParsedGLTF, baseUri: string): Promise<Entity> {
@@ -190,9 +195,9 @@ export class GltfSceneLoader {
    * and creates a single `MeshRendererComponent` on the node's entity. This aligns
    * with the engine's architecture for handling multi-primitive meshes.
    *
-   * @param nodeIndex - The index of the node to instantiate.
-   * @param parentEntity - The parent `Entity` in the ECS.
-   * @param ctx - The shared context object.
+   * @param nodeIndex The index of the node to instantiate.
+   * @param parentEntity The parent `Entity` in the ECS.
+   * @param ctx The shared context object.
    * @returns A promise that resolves when the node and its descendants are instantiated.
    */
   private async instantiateNode(
@@ -282,7 +287,7 @@ export class GltfSceneLoader {
           // They could be cached by their animation target, but that's more complex.
           // Todo: actually do it
           const template = ctx.materialTemplates[matIndex];
-          const sampler = this.resourceManager.getGLTFSampler(
+          const sampler = this.gltfManager.getGLTFSampler(
             ctx.gltf,
             gltfMat.pbrMetallicRoughness?.baseColorTexture?.index,
           );
@@ -297,7 +302,7 @@ export class GltfSceneLoader {
           materialInstance = ctx.staticMaterialInstanceCache.get(cacheKey);
           if (!materialInstance) {
             const template = ctx.materialTemplates[matIndex];
-            const sampler = this.resourceManager.getGLTFSampler(
+            const sampler = this.gltfManager.getGLTFSampler(
               ctx.gltf,
               gltfMat.pbrMetallicRoughness?.baseColorTexture?.index,
             );
@@ -346,17 +351,16 @@ export class GltfSceneLoader {
   /**
    * Parses all animation clips defined in the glTF and attaches them to the scene root.
    *
-   * This method iterates through the animations in the glTF asset, creating an
-   * `AnimationClip` for each one. It resolves the animation channels, which
-   * target specific entities (for transforms) or materials (for properties),
-   * and packages them into a single `AnimationComponent` on the root entity.
-   *
    * @remarks
    * The method handles both standard transform animations (translation,
    * rotation, scale) and material property animations via the
    * `KHR_animation_pointer` extension. It relies on the `nodeToEntityMap` and
    * `materialToEntitiesMap` built during the node instantiation phase to link
    * animation channels to their targets.
+   * It iterates through the animations in the glTF asset, creating an
+   * `AnimationClip` for each one. It resolves the animation channels, which
+   * target specific entities (for transforms) or materials (for properties),
+   * and packages them into a single `AnimationComponent` on the root entity.
    *
    * @param sceneRootEntity The root entity of the loaded scene, which will
    *     receive the `AnimationComponent`.
@@ -441,13 +445,12 @@ export class GltfSceneLoader {
   /**
    * Builds a `PBRMaterialOptions` object from a glTF material definition.
    *
+   * @remarks
    * This function translates the properties from a glTF material object into the
    * flat `PBRMaterialOptions` structure used by the engine's MaterialFactory.
    * It resolves texture URIs, extracts material factors, and handles several
    * common PBR-related glTF extensions.
-   *
-   * @remarks
-   * This method supports the following core properties and extensions:
+   * It currently supports the following core properties and extensions:
    * - PBR Metallic-Roughness properties and textures.
    * - Normal, Occlusion, and Emissive maps with their associated factors.
    * - `KHR_materials_emissive_strength` for controlling emissive intensity.
@@ -578,11 +581,10 @@ export class GltfSceneLoader {
   /**
    * Resolves the URI for a glTF image, handling external files and embedded data.
    *
-   * This utility function determines the correct, fully-qualified URL for a
-   * texture. It can handle standard relative file paths, base64-encoded data
-   * URIs, and images embedded directly in the glTF's binary buffer.
-   *
    * @remarks
+   * This utility function determines the fully-qualified URL for a texture.
+   * It can handle standard relative file paths, base64-encoded data
+   * URIs, and images embedded directly in the glTF's binary buffer.
    * It also handles the `KHR_texture_basisu` extension by prioritizing
    * its `source` index over the standard texture `source`. When an image is
    * embedded as a buffer view, it creates a `Blob` and returns its object URL.

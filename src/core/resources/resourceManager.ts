@@ -60,6 +60,7 @@ export interface EnvironmentMap {
  * coordinates with various loaders and factories to abstract away the
  * complexities of resource creation and management. It ensures that resources
  * are loaded only once and are efficiently reused throughout the engine.
+ * GLTF-specific operations are found in `GltfResourceManager`.
  */
 export class ResourceManager {
   private static nextMeshId = 0;
@@ -101,6 +102,12 @@ export class ResourceManager {
 
   /**
    * Gets the GLTF resource manager for GLTF-specific operations.
+   *
+   * @remarks
+   * This provides access to GLTF-specific functionality such as scene loading
+   * and sampler management.
+   *
+   * @returns The GLTF resource manager instance.
    */
   public getGltfManager(): GltfResourceManager {
     return this.gltfManager;
@@ -108,6 +115,12 @@ export class ResourceManager {
 
   /**
    * Gets the renderer instance.
+   *
+   * @remarks
+   * Provides access to the renderer for GPU operations needed by resource
+   * factories and loaders.
+   *
+   * @returns The renderer instance.
    */
   public getRenderer(): Renderer {
     return this.renderer;
@@ -115,6 +128,12 @@ export class ResourceManager {
 
   /**
    * Gets the default sampler.
+   *
+   * @remarks
+   * Returns the engine's default sampler that follows glTF conventions.
+   * This sampler is used when no specific sampler is requested.
+   *
+   * @returns The default GPUSampler.
    */
   public getDefaultSampler(): GPUSampler {
     return this.defaultSampler;
@@ -122,6 +141,13 @@ export class ResourceManager {
 
   /**
    * Gets a sampler by handle.
+   *
+   * @remarks
+   * Retrieves a cached sampler. Used internally by `GltfResourceManager`
+   * to check for existing samplers before creating new ones.
+   *
+   * @param handle The handle of the sampler to retrieve.
+   * @returns The cached sampler or null if not found.
    */
   public getSamplerByHandle(
     handle: ResourceHandle<GPUSampler>,
@@ -131,6 +157,13 @@ export class ResourceManager {
 
   /**
    * Caches a sampler.
+   *
+   * @remarks
+   * Stores a sampler in the cache. Used internally by `GltfResourceManager`
+   * to cache newly created samplers.
+   *
+   * @param handle The handle for the sampler.
+   * @param sampler The sampler to cache.
    */
   public cacheSampler(
     handle: ResourceHandle<GPUSampler>,
@@ -180,9 +213,9 @@ export class ResourceManager {
    * entire asset (ie the GLTF file). The association is created when a
    * mesh is successfully resolved via `resolveMeshByHandle`.
    *
-   * @param mesh - The mesh object whose handle is to be retrieved.
+   * @param mesh The mesh object whose handle is to be retrieved.
    * @returns The handle if the mesh is managed by the resource manager,
-   *     otherwise undefined.
+   *     otherwise null.
    */
   public getHandleForMesh(mesh: Mesh): ResourceHandle<Mesh> | null {
     // Try single mesh cache first
@@ -202,7 +235,7 @@ export class ResourceManager {
    * array of meshes (ie a multi-primitive GLTF), this method will return null.
    * Use the asynchronous `resolveMeshByHandle` to get the full result.
    *
-   * @param handle - The handle of the mesh to retrieve.
+   * @param handle The handle of the mesh to retrieve.
    * @returns The Mesh object if it has been loaded and cached as a single mesh, otherwise null.
    */
   public getMeshByHandleSync(handle: ResourceHandle<Mesh>): Mesh | null {
@@ -223,7 +256,7 @@ export class ResourceManager {
    * Synchronously retrieves a pre-loaded material instance from the cache.
    *
    * @param handle The handle of the material instance to retrieve.
-   * @returns The MaterialInstance if cached, otherwise undefined.
+   * @returns The MaterialInstance if cached, otherwise null.
    */
   public getMaterialInstanceByHandleSync(
     handle: ResourceHandle<MaterialInstance>,
@@ -242,7 +275,7 @@ export class ResourceManager {
    *
    * @param material The material instance to query.
    * @return The specification object if one was
-   *     used to create the instance, otherwise undefined.
+   *     used to create the instance, otherwise null.
    */
   public getMaterialSpec(material: MaterialInstance): PBRMaterialSpec | null {
     return this.materialInstanceCache.getMetadata(
@@ -446,8 +479,7 @@ export class ResourceManager {
    * - `"STL:path/to/model.stl"`
    * - `"GLTF:path/to/model.gltf#meshName"`
    *
-   *
-   * @param handle - The typed handle identifying the mesh asset.
+   * @param handle The typed handle identifying the mesh asset.
    * @returns A promise that resolves to the requested Mesh object, an array of Mesh objects, or null.
    * @throws If the handle's key format is unsupported or the asset is not found.
    */
