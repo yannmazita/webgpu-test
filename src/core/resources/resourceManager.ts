@@ -5,7 +5,6 @@ import {
   PBRMaterialOptions,
   UnlitGroundMaterialOptions,
 } from "@/core/types/gpu";
-import { MeshData } from "@/core/types/mesh";
 
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
@@ -14,20 +13,21 @@ import { getSupportedCompressedFormats } from "@/core/utils/webgpu";
 import { initBasis } from "@/core/wasm/basisModule";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
-import { MeshFactory } from "@/core/resources/meshFactory";
 import { MaterialFactory } from "@/core/resources/materialFactory";
 import { IblGenerator } from "@/core/rendering/iblGenerator";
+import {
+  ResourceCache,
+  MultiResourceCache,
+} from "@/core/resources/resourceCache";
 import { MeshLoaderRegistry } from "@/core/resources/mesh/meshLoaderRegistry";
 import { PrimitiveMeshLoader } from "@/loaders/mesh/primitiveMeshLoader";
 import { ObjMeshLoader } from "@/loaders/mesh/objMeshLoader";
 import { StlMeshLoader } from "@/loaders/mesh/stlMeshLoader";
 import { GltfMeshLoader } from "@/loaders/mesh/gltfMeshLoader";
 import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
-import {
-  ResourceCache,
-  MultiResourceCache,
-} from "@/core/resources/resourceCache";
 import { ResourceType } from "@/core/resources/resourceHandle";
+import { MeshFactory } from "@/core/resources/meshFactory";
+import { MeshData } from "@//core/types/mesh";
 
 /**
  * Defines the declarative specification for a PBR material.
@@ -51,14 +51,13 @@ export interface EnvironmentMap {
 }
 
 /**
- * Manages the creation, loading, and caching of engine resources.
+ * Coordinates resource management across the engine.
  *
  * @remarks
- * This class acts as a central hub for all resource-related operations. It
- * coordinates with various loaders and factories to abstract away the
- * complexities of resource creation and management. It ensures that resources
- * are loaded only once and are efficiently reused throughout the engine.
- * GLTF-specific operations are found in `GltfResourceManager`.
+ * This class acts as a central coordinator for resource operations. It manages
+ * caches, delegates to specialized factories and loaders, and provides a unified
+ * API for resource resolution. All actual resource creation is handled by
+ * factories, making this manager purely a coordinator.
  */
 export class ResourceManager {
   private static nextMeshId = 0;
@@ -70,6 +69,7 @@ export class ResourceManager {
   private supportedCompressedFormats: Set<GPUTextureFormat>;
   private iblGenerator: IblGenerator | null = null;
 
+  // Caches for storing resolved resources
   private meshCache = new ResourceCache<Mesh>(ResourceType.Mesh);
   private meshArrayCache = new MultiResourceCache<Mesh>(ResourceType.Mesh);
   private samplerCache = new ResourceCache<GPUSampler>(ResourceType.Sampler);
@@ -80,6 +80,7 @@ export class ResourceManager {
     ResourceType.MaterialTemplate,
   );
 
+  // Delegates for actual resource creation
   private meshLoaderRegistry = new MeshLoaderRegistry();
   private gltfManager: GltfResourceManager;
 
@@ -95,82 +96,13 @@ export class ResourceManager {
     );
     this.createDefaultResources();
     this.registerMeshLoaders();
+
+    // Initialize GLTF manager
     this.gltfManager = new GltfResourceManager(this);
+
     initBasis("/basis_transcoder.wasm").catch((e) =>
       console.error("Failed to initialize Basis transcoder", e),
-    ); // the wasm file is in the public dir, so root of the page
-  }
-
-  /**
-   * Gets the GLTF resource manager for GLTF-specific operations.
-   *
-   * @remarks
-   * This provides access to GLTF-specific functionality such as scene loading
-   * and sampler management.
-   *
-   * @returns The GLTF resource manager instance.
-   */
-  public getGltfManager(): GltfResourceManager {
-    return this.gltfManager;
-  }
-
-  /**
-   * Gets the renderer instance.
-   *
-   * @remarks
-   * Provides access to the renderer for GPU operations needed by resource
-   * factories and loaders.
-   *
-   * @returns The renderer instance.
-   */
-  public getRenderer(): Renderer {
-    return this.renderer;
-  }
-
-  /**
-   * Gets the default sampler.
-   *
-   * @remarks
-   * Returns the engine's default sampler that follows glTF conventions.
-   * This sampler is used when no specific sampler is requested.
-   *
-   * @returns The default GPUSampler.
-   */
-  public getDefaultSampler(): GPUSampler {
-    return this.defaultSampler;
-  }
-
-  /**
-   * Gets a sampler by handle.
-   *
-   * @remarks
-   * Retrieves a cached sampler. Used internally by `GltfResourceManager`
-   * to check for existing samplers before creating new ones.
-   *
-   * @param handle The handle of the sampler to retrieve.
-   * @returns The cached sampler or null if not found.
-   */
-  public getSamplerByHandle(
-    handle: ResourceHandle<GPUSampler>,
-  ): GPUSampler | null {
-    return this.samplerCache.get(handle);
-  }
-
-  /**
-   * Caches a sampler.
-   *
-   * @remarks
-   * Stores a sampler in the cache. Used internally by `GltfResourceManager`
-   * to cache newly created samplers.
-   *
-   * @param handle The handle for the sampler.
-   * @param sampler The sampler to cache.
-   */
-  public cacheSampler(
-    handle: ResourceHandle<GPUSampler>,
-    sampler: GPUSampler,
-  ): void {
-    this.samplerCache.set(handle, sampler);
+    );
   }
 
   /**
@@ -183,6 +115,9 @@ export class ResourceManager {
     this.meshLoaderRegistry.register("GLTF", new GltfMeshLoader());
   }
 
+  /**
+   * Creates default resources used throughout the engine.
+   */
   private createDefaultResources(): void {
     this.dummyTexture = this.renderer.device.createTexture({
       size: [1, 1],
@@ -205,42 +140,63 @@ export class ResourceManager {
     });
   }
 
-  /**
-   * Retrieves the resource handle associated with a given mesh object.
-   *
-   * @remarks
-   * This allows for reverse lookups. If the mesh was part of a multi-mesh
-   * asset loaded from a handle, this method will return the handle for the
-   * entire asset (ie the GLTF file). The association is created when a
-   * mesh is successfully resolved via `resolveMeshByHandle`.
-   *
-   * @param mesh The mesh object whose handle is to be retrieved.
-   * @returns The handle if the mesh is managed by the resource manager,
-   *     otherwise null.
-   */
-  public getHandleForMesh(mesh: Mesh): ResourceHandle<Mesh> | null {
-    // Try single mesh cache first
-    let handle = this.meshCache.getHandle(mesh);
-    if (handle) return handle;
+  // === ACCESSORS FOR DELEGATES AND CONTEXT ===
 
-    // Try mesh array cache
-    handle = this.meshArrayCache.getHandle(mesh);
-    return handle;
+  /**
+   * Gets the GLTF resource manager for GLTF-specific operations.
+   */
+  public getGltfManager(): GltfResourceManager {
+    return this.gltfManager;
   }
 
   /**
-   * Synchronously retrieves a pre-loaded mesh from the cache.
-   *
-   * @remarks
-   * This method only returns a single mesh. If the handle resolves to an
-   * array of meshes (ie a multi-primitive GLTF), this method will return null.
-   * Use the asynchronous `resolveMeshByHandle` to get the full result.
-   *
-   * @param handle The handle of the mesh to retrieve.
-   * @returns The Mesh object if it has been loaded and cached as a single mesh, otherwise null.
+   * Gets the renderer instance.
+   */
+  public getRenderer(): Renderer {
+    return this.renderer;
+  }
+
+  /**
+   * Gets the default sampler.
+   */
+  public getDefaultSampler(): GPUSampler {
+    return this.defaultSampler;
+  }
+
+  /**
+   * Gets the dummy texture used as fallback.
+   */
+  public getDummyTexture(): GPUTexture {
+    return this.dummyTexture;
+  }
+
+  /**
+   * Gets the shader preprocessor.
+   */
+  public getShaderPreprocessor(): ShaderPreprocessor {
+    return this.preprocessor;
+  }
+
+  /**
+   * Gets supported compressed texture formats.
+   */
+  public getSupportedCompressedFormats(): Set<GPUTextureFormat> {
+    return this.supportedCompressedFormats;
+  }
+
+  /**
+   * Gets the next unique mesh ID.
+   */
+  public getNextMeshId(): number {
+    return ResourceManager.nextMeshId++;
+  }
+
+  // === CACHE MANAGEMENT ===
+
+  /**
+   * Gets a mesh by handle from cache.
    */
   public getMeshByHandleSync(handle: ResourceHandle<Mesh>): Mesh | null {
-    // Try single mesh cache first
     const mesh = this.meshCache.get(handle);
     if (mesh) return mesh;
 
@@ -254,10 +210,7 @@ export class ResourceManager {
   }
 
   /**
-   * Synchronously retrieves a pre-loaded material instance from the cache.
-   *
-   * @param handle The handle of the material instance to retrieve.
-   * @returns The MaterialInstance if cached, otherwise null.
+   * Gets a material instance by handle from cache.
    */
   public getMaterialInstanceByHandleSync(
     handle: ResourceHandle<MaterialInstance>,
@@ -266,22 +219,139 @@ export class ResourceManager {
   }
 
   /**
-   * Retrieves the PBR material specification used to create a material instance.
-   *
-   * @remarks
-   * This is primarily used for serialization, allowing the engine to save the
-   * high-level description of a material (ie colors, texture URLs) rather
-   * than its GPU-specific state. The association is created when a material is
-   * resolved via `resolveMaterialSpec`.
-   *
-   * @param material The material instance to query.
-   * @return The specification object if one was
-   *     used to create the instance, otherwise null.
+   * Gets a sampler by handle from cache.
+   */
+  public getSamplerByHandle(
+    handle: ResourceHandle<GPUSampler>,
+  ): GPUSampler | null {
+    return this.samplerCache.get(handle);
+  }
+
+  /**
+   * Caches a sampler.
+   */
+  public cacheSampler(
+    handle: ResourceHandle<GPUSampler>,
+    sampler: GPUSampler,
+  ): void {
+    this.samplerCache.set(handle, sampler);
+  }
+
+  /**
+   * Gets the handle for a mesh.
+   */
+  public getHandleForMesh(mesh: Mesh): ResourceHandle<Mesh> | null {
+    // Try single mesh cache first
+    let handle = this.meshCache.getHandle(mesh);
+    if (handle) return handle;
+
+    // Try mesh array cache
+    handle = this.meshArrayCache.getHandle(mesh);
+    return handle;
+  }
+
+  /**
+   * Gets material specification metadata.
    */
   public getMaterialSpec(material: MaterialInstance): PBRMaterialSpec | null {
     return this.materialInstanceCache.getMetadata(
       material,
     ) as PBRMaterialSpec | null;
+  }
+
+  // === RESOURCE RESOLUTION ===
+
+  /**
+   * Resolves a mesh handle by delegating to appropriate loader.
+   *
+   * @remarks
+   * This method coordinates the loading process by selecting the appropriate
+   * loader and caching the result. All actual mesh creation is delegated
+   * to MeshFactory through the createMesh method.
+   *
+   * @param handle The mesh handle to resolve
+   * @returns Promise resolving to mesh, array of meshes, or null
+   */
+  public async resolveMeshByHandle(
+    handle: ResourceHandle<Mesh>,
+  ): Promise<Mesh | Mesh[] | null> {
+    const key = handle.key;
+
+    // Check caches first
+    const singleCached = this.meshCache.get(handle);
+    if (singleCached) {
+      return singleCached;
+    }
+
+    const arrayCached = this.meshArrayCache.get(handle);
+    if (arrayCached) {
+      return arrayCached;
+    }
+
+    // Delegate to loader registry
+    const [type, ...rest] = key.split(":");
+    const path = rest.join(":");
+
+    const loader = this.meshLoaderRegistry.getLoader(type);
+    if (!loader) {
+      throw new Error(`Unsupported mesh handle type: ${type}`);
+    }
+
+    const loadResult = await loader.load(path);
+    if (!loadResult) {
+      console.error(
+        `[ResourceManager] Failed to load mesh data for key: ${key}`,
+      );
+      return null;
+    }
+
+    // Use the unified createMesh method for single meshes
+    if (Array.isArray(loadResult)) {
+      const meshes = await Promise.all(
+        loadResult.map((data, index) =>
+          this.createMesh(`${key}-${index}`, data),
+        ),
+      );
+      this.meshArrayCache.set(handle, meshes);
+      return meshes;
+    } else {
+      // Use the unified createMesh method
+      return this.createMesh(key, loadResult);
+    }
+  }
+
+  /**
+   * Creates a mesh from raw mesh data.
+   *
+   * @remarks
+   * This is a low-level method for creating meshes directly from data.
+   * Most code should use resolveMeshByHandle instead for proper caching.
+   * This method handles caching and delegates to MeshFactory for actual creation.
+   *
+   * @param key A unique key to identify the mesh
+   * @param data The raw mesh data
+   * @returns Promise resolving to created mesh
+   */
+  public async createMesh(key: string, data: MeshData): Promise<Mesh> {
+    const handle = ResourceHandle.forMesh(key);
+
+    // Check cache first
+    const cached = this.meshCache.get(handle);
+    if (cached) {
+      return cached;
+    }
+
+    // Delegate to MeshFactory and assign unique ID
+    const mesh: Mesh & { id?: number } = await MeshFactory.createMesh(
+      this.renderer.device,
+      key,
+      data,
+    );
+    mesh.id = this.getNextMeshId();
+
+    // Cache the result
+    this.meshCache.set(handle, mesh);
+    return mesh;
   }
 
   /**
@@ -290,6 +360,7 @@ export class ResourceManager {
    * @remarks
    * Material templates define the shader and pipeline for a class of materials
    * (like opaque vs. transparent), avoiding redundant shader compilation.
+   * Templates are cached in the ResourceManager to ensure reuse across the engine.
    *
    * @param options Material properties, used to determine the template type.
    * @returns A promise that resolves to a cached or newly created PBRMaterial.
@@ -323,6 +394,8 @@ export class ResourceManager {
    * @remarks
    * This method orchestrates the creation of a MaterialInstance by delegating
    * to the MaterialFactory, providing necessary context like default samplers.
+   * This is useful when you already have a template and want to create multiple
+   * instances from it (like in GLTF loading).
    *
    * @param materialTemplate The shared PBRMaterial template.
    * @param options Specific properties for this instance (colors, textures).
@@ -347,56 +420,64 @@ export class ResourceManager {
   }
 
   /**
-   * Creates or retrieves an instance of the UnlitGroundMaterial.
+   * Resolves a material specification by delegating to MaterialFactory.
    *
    * @remarks
-   * This is a specialized, performant shader for rendering grids or ground planes.
-   * Instances are cached based on their options to prevent duplication.
+   * This method coordinates material creation by interpreting the specification
+   * and delegating all actual creation to the MaterialFactory.
    *
-   * @param options The configuration for the ground material.
-   * @returns A promise resolving to a cached or new MaterialInstance.
+   * @param spec The material specification
+   * @param cacheKey Optional cache key
+   * @returns Promise resolving to material instance
    */
-  public async createUnlitGroundMaterial(
-    options: UnlitGroundMaterialOptions,
+  public async resolveMaterialSpec(
+    spec: PBRMaterialSpec,
+    cacheKey?: string,
   ): Promise<MaterialInstance> {
-    const handle = ResourceHandle.forUnlitGroundMaterial(
-      options.textureUrl,
-      options.color,
-    );
+    const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
+    const handle = ResourceHandle.forMaterial(finalKey);
 
     const cached = this.materialInstanceCache.get(handle);
     if (cached) {
       return cached;
     }
 
-    const instance = await MaterialFactory.createUnlitGroundMaterial(
+    if (!spec || spec.type !== "PBR") {
+      throw new Error("Unsupported material spec (expected type 'PBR').");
+    }
+
+    // Delegate all creation to MaterialFactory
+    const instance = await MaterialFactory.resolvePBRMaterial(
       this.renderer.device,
-      this.preprocessor,
+      this.supportedCompressedFormats,
       this.dummyTexture,
       this.defaultSampler,
-      options,
+      this.preprocessor,
+      spec.options,
     );
 
-    this.materialInstanceCache.set(handle, instance);
+    // Cache with metadata
+    this.materialInstanceCache.set(handle, instance, spec);
+
     return instance;
   }
 
   /**
-   * Creates a complete environment map from an equirectangular image URL.
+   * Creates an environment map by delegating to IblGenerator.
    *
    * @remarks
-   * Orchestrates the IBL generation process, including the BRDF lookup table,
-   * skybox cubemap, and diffuse irradiance/prefiltered specular maps.
+   * This method coordinates IBL generation, delegating the actual work to
+   * the IblGenerator.
    *
-   * @param url The URL of the `.hdr` or `.exr` file.
-   * @param cubemapSize The resolution for the generated cubemap faces.
-   * @returns A promise resolving to an EnvironmentMap object.
+   * @param url The environment map URL
+   * @param cubemapSize The cubemap resolution
+   * @returns Promise resolving to environment map
    */
   public async createEnvironmentMap(
     url: string,
     cubemapSize = 512,
   ): Promise<EnvironmentMap> {
-    // Lazily initialize the IBL generator and its pipelines once.
+    // Lazily initialize the IBL generator
     if (!this.iblGenerator) {
       this.iblGenerator = new IblGenerator(
         this.renderer.device,
@@ -421,147 +502,38 @@ export class ResourceManager {
   }
 
   /**
-   * Resolves a high-level material specification into a renderable instance.
+   * Creates an unlit ground material by delegating to MaterialFactory.
    *
    * @remarks
-   * This serves as an abstraction for material creation, typically used when
-   * loading scenes. It interprets the spec, creates the instance, and caches it.
+   * This method coordinates ground material creation, delegating to the
+   * MaterialFactory for the actual implementation.
    *
-   * @param spec The declarative description of the material.
-   * @param cacheKey An optional key to cache the created instance.
-   * @returns A promise that resolves to a new MaterialInstance.
+   * @param options Ground material options
+   * @returns Promise resolving to material instance
    */
-  public async resolveMaterialSpec(
-    spec: PBRMaterialSpec,
-    cacheKey?: string,
+  public async createUnlitGroundMaterial(
+    options: UnlitGroundMaterialOptions,
   ): Promise<MaterialInstance> {
-    const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
-    const handle = ResourceHandle.forMaterial(finalKey);
+    const handle = ResourceHandle.forUnlitGroundMaterial(
+      options.textureUrl,
+      options.color,
+    );
 
     const cached = this.materialInstanceCache.get(handle);
     if (cached) {
       return cached;
     }
 
-    if (!spec || spec.type !== "PBR") {
-      throw new Error("Unsupported material spec (expected type 'PBR').");
-    }
-
-    const template = await this.createPBRMaterialTemplate(spec.options);
-    const instance = await this.createPBRMaterialInstance(
-      template,
-      spec.options,
-      this.defaultSampler,
-    );
-
-    // Store the spec as metadata
-    this.materialInstanceCache.set(handle, instance, spec);
-
-    return instance;
-  }
-
-  /**
-   * Retrieves or creates a mesh or a collection of meshes from a resource handle.
-   *
-   * @remarks
-   * This is the primary method for loading mesh assets. It uses the handle's key to cache results.
-   * For multi-primitive meshes (like GLTF), this will return an array of meshes.
-   * The entire result (single mesh or array) is cached to ensure consistency on subsequent calls.
-   *
-   * Supported handle key formats:
-   * - `"PRIM:cube:size=2.5"`
-   * - `"PRIM:plane:size=10"`
-   * - `"PRIM:icosphere:r=1.0,sub=3"`
-   * - `"PRIM:uvsphere:r=1.0,sub=32"`
-   * - `"PRIM:cylinder:r=0.5,h=2,sub=32"`
-   * - `"PRIM:cone:r=0.5,h=2,sub=32"`
-   * - `"PRIM:torus:r=1,tube=0.4,rseg=16,tseg=32"`
-   * - `"OBJ:path/to/model.obj"`
-   * - `"STL:path/to/model.stl"`
-   * - `"GLTF:path/to/model.gltf#meshName"`
-   *
-   * @param handle The typed handle identifying the mesh asset.
-   * @returns A promise that resolves to the requested Mesh object, an array of Mesh objects, or null.
-   * @throws If the handle's key format is unsupported or the asset is not found.
-   */
-  public async resolveMeshByHandle(
-    handle: ResourceHandle<Mesh>,
-  ): Promise<Mesh | Mesh[] | null> {
-    const key = handle.key;
-
-    // Check single mesh cache first
-    const singleCached = this.meshCache.get(handle);
-    if (singleCached) {
-      return singleCached;
-    }
-
-    // Check mesh array cache
-    const arrayCached = this.meshArrayCache.get(handle);
-    if (arrayCached) {
-      return arrayCached;
-    }
-
-    const [type, ...rest] = key.split(":");
-    const path = rest.join(":");
-
-    const loader = this.meshLoaderRegistry.getLoader(type);
-    if (!loader) {
-      throw new Error(`Unsupported mesh handle type: ${type}`);
-    }
-
-    const loadResult = await loader.load(path);
-    if (!loadResult) {
-      console.error(
-        `[ResourceManager] Failed to load mesh data for key: ${key}`,
-      );
-      return null;
-    }
-
-    // Cache based on result type
-    if (Array.isArray(loadResult)) {
-      const meshes = await Promise.all(
-        loadResult.map((data, index) =>
-          this.createMesh(`${key}-${index}`, data),
-        ),
-      );
-      this.meshArrayCache.set(handle, meshes);
-      return meshes;
-    } else {
-      const mesh = await this.createMesh(key, loadResult);
-      this.meshCache.set(handle, mesh);
-      return mesh;
-    }
-  }
-
-  /**
-   * Creates a new mesh from raw mesh data, delegating to the MeshFactory.
-   *
-   * @remarks
-   * This is a low-level method that takes processed mesh data and creates the
-   * necessary GPU buffers, caching the result.
-   *
-   * @param key A unique key to identify the mesh in the cache.
-   * @param data The raw mesh data (positions, normals, etc.).
-   * @returns A promise that resolves to the created Mesh.
-   */
-  public async createMesh(key: string, data: MeshData): Promise<Mesh> {
-    const handle = ResourceHandle.forMesh(key);
-
-    const cached = this.meshCache.get(handle);
-    if (cached) {
-      return cached;
-    }
-
-    const mesh: Mesh & { id?: number } = await MeshFactory.createMesh(
+    // Delegate to MaterialFactory
+    const instance = await MaterialFactory.createUnlitGroundMaterial(
       this.renderer.device,
-      key,
-      data,
+      this.preprocessor,
+      this.dummyTexture,
+      this.defaultSampler,
+      options,
     );
 
-    mesh.id = ResourceManager.nextMeshId++;
-
-    this.meshCache.set(handle, mesh);
-
-    return mesh;
+    this.materialInstanceCache.set(handle, instance);
+    return instance;
   }
 }

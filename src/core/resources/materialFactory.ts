@@ -163,4 +163,46 @@ export class MaterialFactory {
     const template = UnlitGroundMaterial.getTemplate(device);
     return template.createInstance(options, texture, defaultSampler);
   }
+
+  /**
+   * Resolves a PBR material specification into a complete material instance.
+   *
+   * @remarks
+   * This is a high-level method that handles the complete PBR material creation
+   * process, from template creation to instance creation. It coordinates the
+   * various steps internally to provide a simple API for material resolution.
+   *
+   * @param device The WebGPU device
+   * @param supportedCompressedFormats Set of supported texture formats
+   * @param dummyTexture Fallback texture for missing maps
+   * @param defaultSampler Default sampler for textures
+   * @param preprocessor Shader preprocessor for template creation
+   * @param options Material options and properties
+   * @returns Promise resolving to complete material instance
+   */
+  public static async resolvePBRMaterial(
+    device: GPUDevice,
+    supportedCompressedFormats: Set<GPUTextureFormat>,
+    dummyTexture: GPUTexture,
+    defaultSampler: GPUSampler,
+    preprocessor: ShaderPreprocessor,
+    options: PBRMaterialOptions = {},
+  ): Promise<MaterialInstance> {
+    // Create template
+    const template = await this.createPBRTemplate(
+      device,
+      preprocessor,
+      options,
+    );
+
+    // Create instance
+    return this.createPBRInstance(
+      device,
+      supportedCompressedFormats,
+      dummyTexture,
+      template,
+      options,
+      defaultSampler,
+    );
+  }
 }
