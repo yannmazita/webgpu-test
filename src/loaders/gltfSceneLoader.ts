@@ -20,7 +20,6 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { setParent } from "@/core/ecs/utils/hierarchy";
 import { mat4, quat, vec3 } from "wgpu-matrix";
-import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { createMaterialCacheKey } from "@/core/utils/material";
 import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
 
@@ -235,7 +234,10 @@ export class GltfSceneLoader {
       }
 
       const meshName = gltfMesh.name ?? `mesh_${node.mesh}`;
-      const meshHandle = ResourceHandle.forGltfMesh(ctx.baseUri, meshName);
+      const meshHandle = this.gltfManager.createGltfMeshHandle(
+        ctx.baseUri,
+        meshName,
+      );
 
       // RESOLVE ALL MESH PRIMITIVES AT ONCE
       const meshes = await this.resourceManager.resolveMeshByHandle(meshHandle);
@@ -345,6 +347,13 @@ export class GltfSceneLoader {
           materialOverrides.size > 0 ? materialOverrides : null,
         ),
       );
+
+      // Recursively instantiate children
+      if (node.children) {
+        for (const childIndex of node.children) {
+          await this.instantiateNode(childIndex, entity, ctx);
+        }
+      }
     }
   }
 

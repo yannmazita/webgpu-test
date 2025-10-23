@@ -25,6 +25,25 @@ export class GltfResourceManager {
   }
 
   /**
+   * Creates a handle for a GLTF mesh.
+   *
+   * @remarks
+   * This is a convenience method that creates a properly formatted handle
+   * for GLTF mesh resources.
+   *
+   * @param url The GLTF file URL.
+   * @param meshName The mesh name within the GLTF.
+   * @returns A ResourceHandle for the GLTF mesh.
+   */
+  public createGltfMeshHandle(
+    url: string,
+    meshName: string,
+  ): ResourceHandle<Mesh> {
+    const key = `GLTF:${url}#${meshName}`;
+    return ResourceHandle.forMesh(key);
+  }
+
+  /**
    * Retrieves or creates a cached GPUSampler from a glTF sampler definition.
    *
    * @remarks
@@ -50,12 +69,9 @@ export class GltfResourceManager {
       return this.resourceManager.getDefaultSampler();
     }
 
-    const handle = ResourceHandle.forGltfSampler(
-      gltfSampler.magFilter,
-      gltfSampler.minFilter,
-      gltfSampler.wrapS,
-      gltfSampler.wrapT,
-    );
+    // Use forSampler API
+    const key = `${gltfSampler.magFilter ?? "L"}|${gltfSampler.minFilter ?? "L"}|${gltfSampler.wrapS ?? "R"}|${gltfSampler.wrapT ?? "R"}`;
+    const handle = ResourceHandle.forSampler(key);
 
     // Check cache
     const cached = this.resourceManager.getSamplerByHandle(handle);
@@ -138,23 +154,5 @@ export class GltfResourceManager {
     const { parsedGltf, baseUri } = await loadGLTF(url);
     const sceneLoader = new GltfSceneLoader(world, this.resourceManager);
     return sceneLoader.load(parsedGltf, baseUri);
-  }
-
-  /**
-   * Creates a handle for a GLTF mesh.
-   *
-   * @remarks
-   * This is a convenience method that creates a formatted handle for GTLF
-   * mesh resources. The handle follows the format "GLTF:url#meshName".
-   *
-   * @param url The GLTF file URL.
-   * @param meshName The mesh name within the GLTF.
-   * @returns A ResourceHandle for the GLTF mesh.
-   */
-  public createGltfMeshHandle(
-    url: string,
-    meshName: string,
-  ): ResourceHandle<Mesh> {
-    return ResourceHandle.forGltfMesh(url, meshName);
   }
 }

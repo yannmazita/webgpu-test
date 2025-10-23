@@ -436,7 +436,7 @@ export class ResourceManager {
     cacheKey?: string,
   ): Promise<MaterialInstance> {
     const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
-    const handle = ResourceHandle.forPbrMaterial(finalKey);
+    const handle = ResourceHandle.forMaterial(finalKey);
 
     const cached = this.materialInstanceCache.get(handle);
     if (cached) {

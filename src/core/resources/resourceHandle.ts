@@ -4,6 +4,8 @@ import { MaterialInstance } from "@/core/materials/materialInstance";
 import { Material } from "@/core/materials/material";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
 
+// src/core/resources/resourceHandle.ts
+
 /**
  * An enumeration of all managed resource types.
  */
@@ -33,85 +35,119 @@ export class ResourceHandle<T> {
     this.key = key;
   }
 
+  // === CORE HANDLE CREATION METHODS ===
+
+  /**
+   * Creates a new handle for a resource with the given type and key.
+   *
+   * @remarks
+   * This is the primary method for creating handles. It provides full control
+   * over the handle type and key format. Most specialized factory methods
+   * delegate to this method.
+   *
+   * @param type The resource type
+   * @param key The unique identifier
+   */
+  public static create<T>(type: ResourceType, key: string): ResourceHandle<T> {
+    return new ResourceHandle<T>(type, key);
+  }
+
+  /**
+   * Auto-creates a handle from a cache key, inferring the type from the resource.
+   *
+   * @remarks
+   * This is used internally by caches for reverse lookups when the type is known.
+   *
+   * @param key The cache key
+   * @param type The resource type
+   */
+  public static fromKey<T>(key: string, type: ResourceType): ResourceHandle<T> {
+    return new ResourceHandle<T>(type, key);
+  }
+
   // === MESH HANDLES ===
 
   /**
-   * Creates a new handle for a Mesh resource.
-   * @param key The unique identifier
+   * Creates a handle for a mesh resource.
+   *
+   * @remarks
+   * This is the primary method for mesh handles. The key should follow the
+   * format "TYPE:path" where TYPE is one of: PRIM, OBJ, STL, GLTF.
+   * Examples: "PRIM:cube:size=2", "OBJ:model.obj", "GLTF:model.gltf#mesh".
+   *
+   * @param key The mesh identifier in format "TYPE:path"
    */
   public static forMesh(key: string): ResourceHandle<Mesh> {
     return new ResourceHandle<Mesh>(ResourceType.Mesh, key);
   }
 
-  /**
-   * Creates a handle for a primitive mesh.
-   * @param type The primitive type (cube, sphere, etc.)
-   * @param params Optional parameters string
-   */
-  public static forPrimitiveMesh(
-    type: string,
-    params?: string,
-  ): ResourceHandle<Mesh> {
-    const key = params ? `PRIM:${type}:${params}` : `PRIM:${type}`;
-    return new ResourceHandle<Mesh>(ResourceType.Mesh, key);
-  }
-
-  /**
-   * Creates a handle for an OBJ mesh.
-   * @param url The OBJ file URL
-   */
-  public static forObjMesh(url: string): ResourceHandle<Mesh> {
-    return new ResourceHandle<Mesh>(ResourceType.Mesh, `OBJ:${url}`);
-  }
-
-  /**
-   * Creates a handle for an STL mesh.
-   * @param url The STL file URL
-   */
-  public static forStlMesh(url: string): ResourceHandle<Mesh> {
-    return new ResourceHandle<Mesh>(ResourceType.Mesh, `STL:${url}`);
-  }
-
-  /**
-   * Creates a handle for a GLTF mesh.
-   * @param url The GLTF file URL
-   * @param meshName The mesh name within the GLTF
-   */
-  public static forGltfMesh(
-    url: string,
-    meshName: string,
-  ): ResourceHandle<Mesh> {
-    return new ResourceHandle<Mesh>(
-      ResourceType.Mesh,
-      `GLTF:${url}#${meshName}`,
-    );
-  }
-
   // === MATERIAL HANDLES ===
 
   /**
-   * Creates a new handle for a MaterialInstance resource.
-   * @param key The unique identifier
+   * Creates a handle for a material resource.
+   *
+   * @remarks
+   * Use this for both material instances and templates. The key should uniquely
+   * identify the material configuration. For templates, use "TEMPLATE:name".
+   * For instances, use a descriptive key or auto-generated one.
+   *
+   * @param key The material identifier
    */
   public static forMaterial(key: string): ResourceHandle<MaterialInstance> {
     return new ResourceHandle<MaterialInstance>(ResourceType.Material, key);
   }
 
   /**
-   * Creates a handle for a PBR material instance.
-   * @param cacheKey The cache key for the material
+   * Creates a handle for a material template.
+   *
+   * @remarks
+   * Template keys should follow the format "TEMPLATE:name" to distinguish
+   * them from material instances.
+   *
+   * @param key The template identifier
    */
-  public static forPbrMaterial(
-    cacheKey: string,
-  ): ResourceHandle<MaterialInstance> {
-    return new ResourceHandle<MaterialInstance>(
-      ResourceType.Material,
-      cacheKey,
-    );
+  public static forMaterialTemplate(key: string): ResourceHandle<Material> {
+    return new ResourceHandle<Material>(ResourceType.MaterialTemplate, key);
+  }
+
+  // === SIMPLIFIED SAMPLER HANDLES ===
+
+  /**
+   * Creates a handle for a sampler resource.
+   *
+   * @remarks
+   * Sampler keys should encode the sampler properties in a consistent format.
+   * For GLTF samplers, use "mag|min|wrapS|wrapT" format.
+   *
+   * @param key The sampler identifier
+   */
+  public static forSampler(key: string): ResourceHandle<GPUSampler> {
+    return new ResourceHandle<GPUSampler>(ResourceType.Sampler, key);
+  }
+
+  // === CONVENIENCE HELPERS ===
+
+  /**
+   * Creates a handle for a PBR material template.
+   *
+   * @remarks
+   * This is kept as it's commonly used and has a standardized format.
+   *
+   * @param isTransparent Whether the template is for transparent materials
+   */
+  public static forPbrTemplate(
+    isTransparent: boolean,
+  ): ResourceHandle<PBRMaterial> {
+    const key = `TEMPLATE:PBR:${isTransparent ? "TRANSPARENT" : "OPAQUE"}`;
+    return new ResourceHandle<PBRMaterial>(ResourceType.MaterialTemplate, key);
   }
 
   /**
    * Creates a handle for an unlit ground material.
+   *
+   * @remarks
+   * This is kept as it has a specific format used by the ground material system.
+   *
    * @param textureUrl Optional texture URL
    * @param color Optional color array
    */
@@ -120,67 +156,8 @@ export class ResourceHandle<T> {
     color?: number[],
   ): ResourceHandle<MaterialInstance> {
     const colorKey = color ? color.join(",") : "";
-    const key = `UNLIT_GROUND_INSTANCE:${textureUrl ?? ""}:${colorKey}`;
+    const key = `UNLIT_GROUND:${textureUrl ?? ""}:${colorKey}`;
     return new ResourceHandle<MaterialInstance>(ResourceType.Material, key);
-  }
-
-  // === MATERIAL TEMPLATE HANDLES ===
-
-  /**
-   * Creates a new handle for a Material template.
-   * @param key The unique identifier
-   */
-  public static forMaterialTemplate(key: string): ResourceHandle<Material> {
-    return new ResourceHandle<Material>(ResourceType.MaterialTemplate, key);
-  }
-
-  /**
-   * Creates a handle for a PBR material template.
-   * @param isTransparent Whether the template is for transparent materials
-   */
-  public static forPbrTemplate(
-    isTransparent: boolean,
-  ): ResourceHandle<PBRMaterial> {
-    const key = `PBR_TEMPLATE:${isTransparent}`;
-    return new ResourceHandle<PBRMaterial>(ResourceType.MaterialTemplate, key);
-  }
-
-  // === SAMPLER HANDLES ===
-
-  /**
-   * Creates a new handle for a GPUSampler resource.
-   * @param key The unique identifier
-   */
-  public static forSampler(key: string): ResourceHandle<GPUSampler> {
-    return new ResourceHandle<GPUSampler>(ResourceType.Sampler, key);
-  }
-
-  /**
-   * Creates a handle for a GLTF sampler.
-   * @param magFilter Magnification filter
-   * @param minFilter Minification filter
-   * @param wrapS U wrap mode
-   * @param wrapT V wrap mode
-   */
-  public static forGltfSampler(
-    magFilter?: number,
-    minFilter?: number,
-    wrapS?: number,
-    wrapT?: number,
-  ): ResourceHandle<GPUSampler> {
-    const key = `${magFilter ?? "L"}|${minFilter ?? "L"}|${wrapS ?? "R"}|${wrapT ?? "R"}`;
-    return new ResourceHandle<GPUSampler>(ResourceType.Sampler, key);
-  }
-
-  // === GENERIC METHODS ===
-
-  /**
-   * Auto-creates a handle from a cache key, inferring the type from the resource.
-   * @param key The cache key
-   * @param type The resource type
-   */
-  public static fromKey<T>(key: string, type: ResourceType): ResourceHandle<T> {
-    return new ResourceHandle<T>(type, key);
   }
 
   /**
