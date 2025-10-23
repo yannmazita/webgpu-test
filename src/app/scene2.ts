@@ -50,13 +50,15 @@ async function createPillarForest(
     ResourceHandle.forMesh("PRIM:cube:size=1"),
   );
 
-  const boxMaterial = await resourceManager.createPBRMaterialInstance(
-    await resourceManager.createPBRMaterialTemplate({
+  // Use resolveMaterialSpec for consistency and proper caching
+  const boxMaterial = await resourceManager.resolveMaterialSpec({
+    type: "PBR",
+    options: {
       albedo: [0.4, 0.45, 0.5, 1],
       metallic: 0.1,
       roughness: 0.8,
-    }),
-  );
+    },
+  });
 
   const prng = new PRNG(1337); // Seeded for deterministic layout
   const SPREAD = 120;
