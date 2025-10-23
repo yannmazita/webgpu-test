@@ -22,11 +22,11 @@ import { MaterialFactory } from "@/core/resources/materialFactory";
 import { GltfSceneLoader } from "@/loaders/gltfSceneLoader";
 import { IblGenerator } from "@/core/rendering/iblGenerator";
 import {
-  ResourceCache,
   MeshCache,
   SamplerCache,
   MaterialInstanceCache,
   PBRMaterialCache,
+  MeshArrayCache,
 } from "@/core/resources/resourceCache";
 import { MeshLoaderRegistry } from "@/core/resources/mesh/meshLoaderRegistry";
 import { PrimitiveMeshLoader } from "@/loaders/mesh/primitiveMeshLoader";
@@ -74,11 +74,12 @@ export class ResourceManager {
   private supportedCompressedFormats: Set<GPUTextureFormat>;
   private iblGenerator: IblGenerator | null = null;
 
-  private meshCache: MeshCache = new ResourceCache<Mesh>();
-  private samplerCache: SamplerCache = new ResourceCache<GPUSampler>();
+  private meshCache: MeshCache = new MeshCache();
+  private meshArrayCache: MeshArrayCache = new MeshArrayCache();
+  private samplerCache: SamplerCache = new SamplerCache();
   private materialInstanceCache: MaterialInstanceCache =
-    new ResourceCache<MaterialInstance>();
-  private pbrMaterialCache: PBRMaterialCache = new ResourceCache<PBRMaterial>();
+    new MaterialInstanceCache();
+  private pbrMaterialCache: PBRMaterialCache = new PBRMaterialCache();
 
   private meshLoaderRegistry = new MeshLoaderRegistry();
 
@@ -241,7 +242,13 @@ export class ResourceManager {
    *     otherwise undefined.
    */
   public getHandleForMesh(mesh: Mesh): ResourceHandle<Mesh> | null {
-    return this.meshCache.getHandle(mesh);
+    // Try single mesh cache first
+    let handle = this.meshCache.getHandle(mesh);
+    if (handle) return handle;
+
+    // Try mesh array cache
+    handle = this.meshArrayCache.getHandle(mesh);
+    return handle;
   }
 
   /**
@@ -256,11 +263,14 @@ export class ResourceManager {
    * @returns The Mesh object if it has been loaded and cached as a single mesh, otherwise null.
    */
   public getMeshByHandleSync(handle: ResourceHandle<Mesh>): Mesh | null {
-    const cached = this.meshCache.get(handle);
+    // Try single mesh cache first
+    const mesh = this.meshCache.get(handle);
+    if (mesh) return mesh;
 
-    // Only return the result if it's a single mesh, not an array.
-    if (cached && !Array.isArray(cached)) {
-      return cached;
+    // Try mesh array cache for single-primitive results
+    const meshArray = this.meshArrayCache.get(handle);
+    if (meshArray && meshArray.length === 1) {
+      return meshArray[0];
     }
 
     return null;
@@ -275,11 +285,7 @@ export class ResourceManager {
   public getMaterialInstanceByHandleSync(
     handle: ResourceHandle<MaterialInstance>,
   ): MaterialInstance | null {
-    const cached = this.materialInstanceCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
-      return cached;
-    }
-    return null;
+    return this.materialInstanceCache.get(handle);
   }
 
   /**
@@ -320,7 +326,7 @@ export class ResourceManager {
     const handle = ResourceHandle.forPbrTemplate(isTransparent);
 
     const cached = this.pbrMaterialCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
+    if (cached) {
       return cached;
     }
 
@@ -382,7 +388,7 @@ export class ResourceManager {
     );
 
     const cached = this.materialInstanceCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
+    if (cached) {
       return cached;
     }
 
@@ -453,11 +459,10 @@ export class ResourceManager {
     cacheKey?: string,
   ): Promise<MaterialInstance> {
     const finalKey = cacheKey ?? `PBR_INSTANCE:${Date.now()}_${Math.random()}`;
-
     const handle = ResourceHandle.forPbrMaterial(finalKey);
 
     const cached = this.materialInstanceCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
+    if (cached) {
       return cached;
     }
 
@@ -508,10 +513,16 @@ export class ResourceManager {
   ): Promise<Mesh | Mesh[] | null> {
     const key = handle.key;
 
-    // Check cache for the full result (single mesh or array)
-    const cached = this.meshCache.getByKey(key);
-    if (cached) {
-      return cached;
+    // Check single mesh cache first
+    const singleCached = this.meshCache.get(handle);
+    if (singleCached) {
+      return singleCached;
+    }
+
+    // Check mesh array cache
+    const arrayCached = this.meshArrayCache.get(handle);
+    if (arrayCached) {
+      return arrayCached;
     }
 
     const [type, ...rest] = key.split(":");
@@ -530,23 +541,20 @@ export class ResourceManager {
       return null;
     }
 
-    let finalResult: Mesh | Mesh[];
+    // Cache based on result type
     if (Array.isArray(loadResult)) {
       const meshes = await Promise.all(
         loadResult.map((data, index) =>
           this.createMesh(`${key}-${index}`, data),
         ),
       );
-      finalResult = meshes;
+      this.meshArrayCache.set(handle, meshes);
+      return meshes;
     } else {
       const mesh = await this.createMesh(key, loadResult);
-      finalResult = mesh;
+      this.meshCache.set(handle, mesh);
+      return mesh;
     }
-
-    // Cache the full result (single mesh or array) using the handle.
-    this.meshCache.set(handle, finalResult);
-
-    return finalResult;
   }
 
   /**
@@ -577,7 +585,7 @@ export class ResourceManager {
     const handle = ResourceHandle.forMesh(key);
 
     const cached = this.meshCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
+    if (cached) {
       return cached;
     }
 

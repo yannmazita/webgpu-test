@@ -230,9 +230,7 @@ export class GltfSceneLoader {
       }
 
       const meshName = gltfMesh.name ?? `mesh_${node.mesh}`;
-      const meshHandle = ResourceHandle.forMesh(
-        `GLTF:${ctx.baseUri}#${meshName}`,
-      );
+      const meshHandle = ResourceHandle.forGltfMesh(ctx.baseUri, meshName);
 
       // RESOLVE ALL MESH PRIMITIVES AT ONCE
       const meshes = await this.resourceManager.resolveMeshByHandle(meshHandle);
