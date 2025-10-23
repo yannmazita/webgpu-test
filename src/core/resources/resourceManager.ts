@@ -12,14 +12,10 @@ import { PBRMaterial } from "@/core/materials/pbrMaterial";
 import { IBLComponent } from "@/core/ecs/components/iblComponent";
 import { getSupportedCompressedFormats } from "@/core/utils/webgpu";
 import { initBasis } from "@/core/wasm/basisModule";
-import { loadGLTF, ParsedGLTF } from "@/loaders/gltfLoader";
-import { Entity } from "@/core/ecs/entity";
-import { World } from "@/core/ecs/world";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { MeshFactory } from "@/core/resources/meshFactory";
 import { MaterialFactory } from "@/core/resources/materialFactory";
-import { GltfSceneLoader } from "@/loaders/gltfSceneLoader";
 import { IblGenerator } from "@/core/rendering/iblGenerator";
 import {
   MeshCache,
@@ -33,6 +29,7 @@ import { PrimitiveMeshLoader } from "@/loaders/mesh/primitiveMeshLoader";
 import { ObjMeshLoader } from "@/loaders/mesh/objMeshLoader";
 import { StlMeshLoader } from "@/loaders/mesh/stlMeshLoader";
 import { GltfMeshLoader } from "@/loaders/mesh/gltfMeshLoader";
+import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
 
 /**
  * Defines the declarative specification for a PBR material.
@@ -82,6 +79,7 @@ export class ResourceManager {
   private pbrMaterialCache: PBRMaterialCache = new PBRMaterialCache();
 
   private meshLoaderRegistry = new MeshLoaderRegistry();
+  private gltfManager: GltfResourceManager;
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
@@ -95,9 +93,50 @@ export class ResourceManager {
     );
     this.createDefaultResources();
     this.registerMeshLoaders();
+    this.gltfManager = new GltfResourceManager(this);
     initBasis("/basis_transcoder.wasm").catch((e) =>
       console.error("Failed to initialize Basis transcoder", e),
     ); // the wasm file is in the public dir, so root of the page
+  }
+
+  /**
+   * Gets the GLTF resource manager for GLTF-specific operations.
+   */
+  public getGltfManager(): GltfResourceManager {
+    return this.gltfManager;
+  }
+
+  /**
+   * Gets the renderer instance.
+   */
+  public getRenderer(): Renderer {
+    return this.renderer;
+  }
+
+  /**
+   * Gets the default sampler.
+   */
+  public getDefaultSampler(): GPUSampler {
+    return this.defaultSampler;
+  }
+
+  /**
+   * Gets a sampler by handle.
+   */
+  public getSamplerByHandle(
+    handle: ResourceHandle<GPUSampler>,
+  ): GPUSampler | null {
+    return this.samplerCache.get(handle);
+  }
+
+  /**
+   * Caches a sampler.
+   */
+  public cacheSampler(
+    handle: ResourceHandle<GPUSampler>,
+    sampler: GPUSampler,
+  ): void {
+    this.samplerCache.set(handle, sampler);
   }
 
   /**
@@ -130,102 +169,6 @@ export class ResourceManager {
       addressModeU: "repeat",
       addressModeV: "repeat",
     });
-  }
-
-  /**
-   * Retrieves or creates a cached GPUSampler from a glTF sampler definition.
-   *
-   * @remarks
-   * This method ensures that samplers with identical properties are not
-   * duplicated. It translates glTF numeric codes into WebGPU string enums
-   * and uses a string-based key for efficient caching.
-   *
-   * @param gltf - The parsed glTF asset.
-   * @param samplerIndex - The optional index of the sampler in the glTF file.
-   * If undefined, the default sampler is returned.
-   * @returns A GPUSampler matching the definition, or a default sampler.
-   */
-  public getGLTFSampler(gltf: ParsedGLTF, samplerIndex?: number): GPUSampler {
-    if (samplerIndex === undefined) {
-      return this.defaultSampler;
-    }
-
-    const gltfSampler = gltf.json.samplers?.[samplerIndex];
-    if (!gltfSampler) {
-      console.warn(
-        `[ResourceManager] glTF sampler index ${samplerIndex} not found. Using default.`,
-      );
-      return this.defaultSampler;
-    }
-
-    const handle = ResourceHandle.forGltfSampler(
-      gltfSampler.magFilter,
-      gltfSampler.minFilter,
-      gltfSampler.wrapS,
-      gltfSampler.wrapT,
-    );
-
-    // Check cache
-    const cached = this.samplerCache.get(handle);
-    if (cached && !Array.isArray(cached)) {
-      return cached;
-    }
-
-    // Helper to map glTF wrap modes to WebGPU
-    const getAddressMode = (mode?: number): GPUAddressMode => {
-      switch (mode) {
-        case 10497: // REPEAT
-          return "repeat";
-        case 33071: // CLAMP_TO_EDGE
-          return "clamp-to-edge";
-        case 33648: // MIRRORED_REPEAT
-          return "mirror-repeat";
-        default:
-          return "repeat"; // glTF default
-      }
-    };
-
-    // Helper to map glTF filter modes to WebGPU
-    const getFilterMode = (mode?: number): GPUFilterMode => {
-      switch (mode) {
-        case 9728: // NEAREST
-        case 9984: // NEAREST_MIPMAP_NEAREST
-        case 9986: // NEAREST_MIPMAP_LINEAR
-          return "nearest";
-        case 9729: // LINEAR
-        case 9985: // LINEAR_MIPMAP_NEAREST
-        case 9987: // LINEAR_MIPMAP_LINEAR
-          return "linear";
-        default:
-          return "linear"; // glTF default
-      }
-    };
-
-    // Helper to map glTF min filter to WebGPU mipmap filter
-    const getMipmapFilterMode = (mode?: number): GPUMipmapFilterMode => {
-      switch (mode) {
-        case 9984: // NEAREST_MIPMAP_NEAREST
-        case 9985: // LINEAR_MIPMAP_NEAREST
-          return "nearest";
-        case 9986: // NEAREST_MIPMAP_LINEAR
-        case 9987: // LINEAR_MIPMAP_LINEAR
-          return "linear";
-        default:
-          return "linear"; // Default for quality
-      }
-    };
-
-    const newSampler = this.renderer.device.createSampler({
-      label: `GLTF_SAMPLER_${handle.key}`,
-      addressModeU: getAddressMode(gltfSampler.wrapS),
-      addressModeV: getAddressMode(gltfSampler.wrapT),
-      magFilter: getFilterMode(gltfSampler.magFilter),
-      minFilter: getFilterMode(gltfSampler.minFilter),
-      mipmapFilter: getMipmapFilterMode(gltfSampler.minFilter),
-    });
-
-    this.samplerCache.set(handle, newSampler);
-    return newSampler;
   }
 
   /**
@@ -555,19 +498,6 @@ export class ResourceManager {
       this.meshCache.set(handle, mesh);
       return mesh;
     }
-  }
-
-  /**
-   * Loads a glTF file and instantiates its scene graph into the ECS world.
-   *
-   * @param world The World instance where the scene entities will be created.
-   * @param url The URL of the `.gltf` or `.glb` file to load.
-   * @returns A promise that resolves to the root Entity of the new hierarchy.
-   */
-  public async loadSceneFromGLTF(world: World, url: string): Promise<Entity> {
-    const { parsedGltf, baseUri } = await loadGLTF(url);
-    const sceneLoader = new GltfSceneLoader(world, this);
-    return sceneLoader.load(parsedGltf, baseUri);
   }
 
   /**

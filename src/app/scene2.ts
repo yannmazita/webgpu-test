@@ -311,10 +311,9 @@ export async function createScene(
 
   // --- Texture Ball ---
   {
-    const textureBallEntity = await resourceManager.loadSceneFromGLTF(
-      world,
-      "/assets/textures/snow_02_4k/snow_02_4k.gltf",
-    );
+    const textureBallEntity = await resourceManager
+      .getGltfManager()
+      .loadSceneFromGLTF(world, "/assets/textures/snow_02_4k/snow_02_4k.gltf");
     const textureBallTransform = new TransformComponent();
     textureBallTransform.setPosition(0, 2, 0);
     world.addComponent(textureBallEntity, textureBallTransform);
