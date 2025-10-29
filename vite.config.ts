@@ -7,10 +7,6 @@ import wasm from "vite-plugin-wasm";
 import topLevelAwait from "vite-plugin-top-level-await";
 import { vitePluginBasisTranscoderEsm } from "./vite-plugin-basis";
 
-const ReactCompilerConfig = {
-  /* ... */
-};
-
 export default defineConfig({
   plugins: [
     glsl({
