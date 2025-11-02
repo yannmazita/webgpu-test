@@ -1,6 +1,5 @@
 // src/app/prefabs.ts
 import { World } from "@/core/ecs/world";
-import { ResourceManager } from "@/core/resources/resourceManager";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { Entity } from "@/core/ecs/entity";
 import { createPlayerPrefab } from "@/app/scene2";
@@ -9,15 +8,13 @@ import { IEntityFactory } from "@/core/ecs/systems/respawnSystem";
 /**
  * A function that creates a specific type of entity (a "prefab").
  * @remarks
- * It takes the necessary contexts and an initial transform, creates an entity,
- * adds all its required components, and returns the entity's ID.
- * This function can be asynchronous to allow for resource loading.
+ * It takes the world and an initial transform, creates an entity with all its
+ * required components, and returns the entity's ID.
  */
 export type PrefabFn = (
   world: World,
-  resourceManager: ResourceManager,
   transform: TransformComponent,
-) => Promise<Entity>;
+) => Promise<Entity> | Entity;
 
 /**
  * Manages the registration and creation of entity prefabs.
@@ -31,18 +28,14 @@ export class PrefabFactory implements IEntityFactory {
 
   /**
    * Creates an instance of PrefabFactory.
-   * @param world The ECS world.
-   * @param resourceManager The resource manager for asset loading.
+   * @param world - The ECS world.
    */
-  constructor(
-    private world: World,
-    private resourceManager: ResourceManager,
-  ) {}
+  constructor(private world: World) {}
 
   /**
    * Registers a prefab function under a unique ID.
-   * @param prefabId The unique string identifier for the prefab.
-   * @param factoryFn The function that creates the entity.
+   * @param prefabId - The unique string identifier for the prefab.
+   * @param factoryFn - The function that creates the entity.
    */
   public register(prefabId: string, factoryFn: PrefabFn): void {
     if (this.prefabs.has(prefabId)) {
@@ -53,10 +46,9 @@ export class PrefabFactory implements IEntityFactory {
 
   /**
    * Creates a new entity instance from a registered prefab.
-   * @param prefabId The ID of the prefab to instantiate.
-   * @param transform The initial transform for the new entity.
-   * @returns A promise that resolves to the new entity's ID, or rejects if
-   *   the prefab ID is not found.
+   * @param prefabId - The ID of the prefab to instantiate.
+   * @param transform - The initial transform for the new entity.
+   * @returns A promise that resolves to the new entity's ID.
    */
   public async create(
     prefabId: string,
@@ -69,7 +61,8 @@ export class PrefabFactory implements IEntityFactory {
       );
     }
 
-    return factoryFn(this.world, this.resourceManager, transform);
+    // Await the result, whether it's a promise or a direct value
+    return await factoryFn(this.world, transform);
   }
 }
 
@@ -78,7 +71,7 @@ export class PrefabFactory implements IEntityFactory {
  * @remarks
  * This function should be called once during engine initialization. It serves
  * as the single source of truth for all prefab definitions.
- * @param factory The PrefabFactory instance to register with.
+ * @param factory - The PrefabFactory instance to register with.
  */
 export function registerPrefabs(factory: PrefabFactory): void {
   factory.register("player", createPlayerPrefab);

@@ -50,6 +50,23 @@ export class World {
   }
 
   /**
+   * Gets a global, singleton-like component from the world. If it doesn't
+   * exist, it creates a new instance using the provided constructor and adds it.
+   * @param componentType - The type of the component to retrieve or create.
+   * @returns The component instance.
+   */
+  public getOrAddResource<T extends IComponent>(
+    componentType: new (...args: unknown[]) => T,
+  ): T {
+    let resource = this.getComponent(this.globalEntity, componentType);
+    if (!resource) {
+      resource = new componentType();
+      this.addComponent(this.globalEntity, resource);
+    }
+    return resource;
+  }
+
+  /**
    * Removes a global resource component from the world.
    * @param componentType The type of the component to remove.
    */

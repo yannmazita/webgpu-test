@@ -936,6 +936,22 @@ export class Renderer {
   }
 
   /**
+   * Gets the default 1x1 white fallback texture.
+   * @returns The fallback GPUTexture.
+   */
+  public getDummyTexture(): GPUTexture {
+    return this.dummyTexture;
+  }
+
+  /**
+   * Gets the default texture sampler.
+   * @returns The default GPUSampler.
+   */
+  public getDefaultSampler(): GPUSampler {
+    return this.defaultSampler;
+  }
+
+  /**
    * Returns the rendering statistics for the most recently completed frame.
    *
    * @returns An object containing performance metrics like draw counts,

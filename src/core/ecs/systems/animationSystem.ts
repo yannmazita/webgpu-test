@@ -1,11 +1,15 @@
 // src/core/ecs/systems/animationSystem.ts
-
 import { World } from "@/core/ecs/world";
 import { AnimationComponent } from "@/core/ecs/components/animationComponent";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
-import { AnimationChannel, AnimationSampler } from "@/core/types/animation";
+import {
+  AnimationChannel,
+  AnimationPath,
+  AnimationSampler,
+} from "@/core/types/animation";
 import { quat, Quat } from "wgpu-matrix";
-import { MeshRendererComponent } from "../components/meshRendererComponent";
+import { MeshRendererComponent } from "@/core/ecs/components/render/meshRendererComponent";
+import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
 
 /**
  * Finds the index of the keyframe that precedes or is at the given time `t`.
@@ -14,7 +18,6 @@ import { MeshRendererComponent } from "../components/meshRendererComponent";
  * @param times A sorted array of keyframe times.
  * @param t The current animation time to find the keyframe for.
  * @return The index `i` such that `times[i] <= t`.
- * @private
  */
 function findKeyframeIndex(times: Float32Array, t: number): number {
   const n = times.length;
@@ -43,7 +46,6 @@ function findKeyframeIndex(times: Float32Array, t: number): number {
  * @param t1 The time of the second keyframe.
  * @param t The current animation time.
  * @return The interpolated vec3 value.
- * @private
  */
 function sampleVec3Linear(
   values: Float32Array,
@@ -105,6 +107,7 @@ function sampleQuatLinear(
 
 function sampleSampler(
   s: AnimationSampler,
+  path: AnimationPath,
   t: number,
   outValue: Float32Array,
 ): void {
@@ -153,7 +156,7 @@ function sampleSampler(
       default: {
         // LINEAR
         // Check if it's a quaternion or just a vec4 (like color)
-        if (s.path === "rotation") {
+        if (path.property === "rotation") {
           const q = sampleQuatLinear(s.values, i0, i1, t0, t1, t);
           outValue[0] = q[0];
           outValue[1] = q[1];
@@ -187,7 +190,7 @@ function applyChannel(
   const component = world.getComponent(channel.targetEntity, path.component);
   if (!component) return;
 
-  sampleSampler(channel.sampler, t, tmpValue);
+  sampleSampler(channel.sampler, path, t, tmpValue);
 
   if (component instanceof TransformComponent) {
     switch (path.property) {
@@ -202,22 +205,31 @@ function applyChannel(
         break;
     }
   } else if (component instanceof MeshRendererComponent) {
-    // This assumes the property is a uniform on the material instance.
-    component.material.updateUniform(path.property, tmpValue);
+    const cache = world.getResource(ResourceCacheComponent);
+    if (!cache) return;
+
+    // Resolve the material handle from the cache
+    const material = cache.getMaterial(component.materialHandle.key);
+
+    // If the material is loaded, update its uniform.
+    if (material) {
+      material.updateUniform(path.property, tmpValue);
+    }
   }
 }
 
 /**
  * Updates all active animations in the world.
  *
+ * @remarks
  * This system queries for entities with an `AnimationComponent`, advances their
  * playback time, and applies the interpolated keyframe values from the active
- * animation clip to the `TransformComponent` of the target entities. It should
- * be run before the `transformSystem` to ensure that transform matrices are
- * updated based on the new animated values.
+ * animation clip to the target components. It should be run before the
+ * `transformSystem` to ensure that transform matrices are updated based on the
+ * new animated values.
  *
- * @param world The world containing the entities.
- * @param deltaTime The time elapsed since the last frame in seconds.
+ * @param world - The world containing the entities.
+ * @param deltaTime - The time elapsed since the last frame in seconds.
  */
 export function animationSystem(world: World, deltaTime: number): void {
   const entities = world.query([AnimationComponent]);

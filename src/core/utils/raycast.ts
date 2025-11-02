@@ -4,7 +4,7 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3, vec4, Vec3, mat4 } from "wgpu-matrix";
 import { World } from "@/core/ecs/world";
 import { Entity } from "@/core/ecs/entity";
-import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
+import { MeshRendererComponent } from "@/core/ecs/components/render/meshRendererComponent";
 import { intersectRayWithAABB, transformAABB } from "@/core/utils/bounds";
 import { AABB } from "@/core/types/gpu";
 

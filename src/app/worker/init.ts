@@ -1,7 +1,6 @@
 // src/app/worker/init.ts
 import { state } from "@/app/worker/state";
 import { Renderer } from "@/core/rendering/renderer";
-import { ResourceManager } from "@/core/resources/resourceManager";
 import { World } from "@/core/ecs/world";
 import { SceneRenderData } from "@/core/types/rendering";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
@@ -16,6 +15,8 @@ import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
 import { RespawnSystem } from "@/core/ecs/systems/respawnSystem";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
+import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
+import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
 import {
   createInputContext,
   isKeyDown,
@@ -83,7 +84,9 @@ export async function initWorker(
   await state.renderer.init();
   console.log("[Worker] Renderer initialized.");
 
-  state.resourceManager = new ResourceManager(state.renderer);
+  // Initialize Resource Loading System
+  state.resourceLoadingSystem = new ResourceLoadingSystem(state.renderer);
+  await state.resourceLoadingSystem.init();
 
   // Setup input context
   state.inputContext = createInputContext(sharedInputBuffer, false);
@@ -170,6 +173,7 @@ export async function initWorker(
   initializePhysicsHeaders(state.physicsCtx);
 
   state.world = new World();
+  state.world.addResource(new ResourceCacheComponent());
   state.sceneRenderData = new SceneRenderData();
 
   // Setup raycast contexts
@@ -182,7 +186,7 @@ export async function initWorker(
   };
 
   // --- Step 3: Setup Prefab Factory ---
-  state.prefabFactory = new PrefabFactory(state.world, state.resourceManager);
+  state.prefabFactory = new PrefabFactory(state.world);
   registerPrefabs(state.prefabFactory);
 
   // --- Step 4: Create All Game Systems ---
@@ -219,7 +223,6 @@ export async function initWorker(
   );
   state.weaponSystem = new WeaponSystem(
     state.world,
-    state.resourceManager,
     state.physicsCtx,
     state.raycastResultsCtx,
     state.eventManager,
@@ -234,7 +237,10 @@ export async function initWorker(
   // Create default scene
   try {
     console.log("[Worker] Creating default scene...");
-    const sceneEntities = await createScene(state.world, state.resourceManager);
+    const sceneEntities = await createScene(
+      state.world,
+      state.resourceLoadingSystem,
+    );
     state.cameraEntity = sceneEntities.cameraEntity;
     console.log("[Worker] Scene created successfully");
   } catch (error) {

@@ -1,6 +1,5 @@
 // src/app/worker/state.ts
 import { Renderer } from "@/core/rendering/renderer";
-import { ResourceManager } from "@/core/resources/resourceManager";
 import { World } from "@/core/ecs/world";
 import { SceneRenderData } from "@/core/types/rendering";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
@@ -23,6 +22,7 @@ import { EventManager } from "@/core/ecs/events/eventManager";
 import { PrefabFactory } from "@/app/prefabs";
 import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
+import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
 
 /**
  * Shared state for the render worker.
@@ -33,7 +33,7 @@ import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 export interface WorkerState {
   // Core systems
   renderer: Renderer | null;
-  resourceManager: ResourceManager | null;
+  resourceLoadingSystem: ResourceLoadingSystem | null;
   world: World | null;
   sceneRenderData: SceneRenderData | null;
   eventManager: EventManager | null;
@@ -89,7 +89,7 @@ export interface WorkerState {
  */
 export const state: WorkerState = {
   renderer: null,
-  resourceManager: null,
+  resourceLoadingSystem: null,
   world: null,
   sceneRenderData: null,
   eventManager: null,

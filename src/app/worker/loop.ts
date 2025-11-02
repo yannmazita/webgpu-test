@@ -2,7 +2,7 @@
 import { state } from "@/app/worker/state";
 import { cameraSystem } from "@/core/ecs/systems/cameraSystem";
 import { transformSystem } from "@/core/ecs/systems/transformSystem";
-import { renderSystem } from "@/core/ecs/systems/renderSystem";
+import { renderSystem } from "@/core/ecs/systems/render/renderSystem";
 import { animationSystem } from "@/core/ecs/systems/animationSystem";
 import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
 import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
@@ -44,7 +44,8 @@ export function frame(now: number): void {
     !state.interactionSystem ||
     !state.pickupSystem ||
     !state.inventorySystem ||
-    !state.respawnSystem
+    !state.respawnSystem ||
+    !state.resourceLoadingSystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -62,6 +63,9 @@ export function frame(now: number): void {
   if (dt > MAX_PAUSE_SECONDS) {
     dt = MAX_PAUSE_SECONDS;
   }
+
+  // Update resource loading early in the frame
+  state.resourceLoadingSystem.update(state.world);
 
   // Handle camera mode toggle
   if (state.actionController.wasPressed("toggle_camera_mode")) {
