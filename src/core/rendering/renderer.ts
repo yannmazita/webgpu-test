@@ -250,8 +250,8 @@ export class Renderer {
 
     this.skyboxPass = new SkyboxPass();
     this.opaquePass = new OpaquePass();
-    this.transparentPass = new TransparentPass(this.device);
-    this.uiPass = new UIPass();
+    this.transparentPass = new TransparentPass();
+    this.uiPass = new UIPass(this.device, this.canvasFormat);
 
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",

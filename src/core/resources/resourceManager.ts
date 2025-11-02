@@ -27,7 +27,11 @@ import { GltfMeshLoader } from "@/loaders/mesh/gltfMeshLoader";
 import { GltfResourceManager } from "@/core/resources/gltf/gltfResourceManager";
 import { ResourceType } from "@/core/resources/resourceHandle";
 import { MeshFactory } from "@/core/resources/meshFactory";
-import { MeshData } from "@//core/types/mesh";
+import { MeshData } from "@/core/types/mesh";
+import { UITexture } from "@/core/types/ui";
+import { UITextureFactory } from "./uiTextureFactory";
+import { UITextComponent } from "../ecs/components/ui/uiRenderComponent";
+import { UIResourceManager } from "./ui/uiResourceManager";
 
 /**
  * Defines the declarative specification for a PBR material.
@@ -79,10 +83,12 @@ export class ResourceManager {
   private pbrMaterialCache = new ResourceCache<PBRMaterial>(
     ResourceType.MaterialTemplate,
   );
+  private uiTextureCache = new ResourceCache<UITexture>(ResourceType.UITexture);
 
   // Delegates for actual resource creation
   private meshLoaderRegistry = new MeshLoaderRegistry();
   private gltfManager: GltfResourceManager;
+  private uiResourceManager: UIResourceManager;
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
@@ -99,6 +105,7 @@ export class ResourceManager {
 
     // Initialize GLTF manager
     this.gltfManager = new GltfResourceManager(this);
+    this.uiResourceManager = new UIResourceManager(this);
 
     initBasis("/basis_transcoder.wasm").catch((e) =>
       console.error("Failed to initialize Basis transcoder", e),
@@ -147,6 +154,13 @@ export class ResourceManager {
    */
   public getGltfManager(): GltfResourceManager {
     return this.gltfManager;
+  }
+
+  /**
+   * Gets the GLTF resource manager for GLTF-specific operations.
+   */
+  public getUiResourceManager(): UIResourceManager {
+    return this.uiResourceManager;
   }
 
   /**
@@ -535,5 +549,61 @@ export class ResourceManager {
 
     this.materialInstanceCache.set(handle, instance);
     return instance;
+  }
+
+  /**
+   * Resolves a UI texture by key, loading from URL if not cached.
+   */
+  public async resolveUITexture(key: string, url: string): Promise<UITexture> {
+    const handle = ResourceHandle.forUITexture(key);
+
+    const cached = this.uiTextureCache.get(handle);
+    if (cached) return cached;
+
+    // Delegate to factory
+    const texture = await UITextureFactory.createFromURL(
+      this.renderer.device,
+      url,
+    );
+
+    this.uiTextureCache.set(handle, texture);
+    return texture;
+  }
+
+  /**
+   * Resolves a text texture, generating if not cached.
+   */
+  public resolveTextTexture(textComponent: UITextComponent): UITexture {
+    const cacheKey = UITextureFactory.generateTextCacheKey(textComponent);
+    const handle = ResourceHandle.forUITexture(cacheKey);
+
+    const cached = this.uiTextureCache.get(handle);
+    if (cached) return cached;
+
+    // Delegate to factory
+    const texture = UITextureFactory.createFromText(
+      this.renderer.device,
+      textComponent,
+    );
+
+    this.uiTextureCache.set(handle, texture);
+    return texture;
+  }
+
+  /**
+   * Gets a UI texture by key from cache.
+   */
+  public getUITextureByKey(key: string): UITexture | null {
+    const handle = ResourceHandle.forUITexture(key);
+    return this.uiTextureCache.get(handle);
+  }
+
+  /**
+   * Gets a UI texture by handle from cache.
+   */
+  public getUITextureByHandle(
+    handle: ResourceHandle<UITexture>,
+  ): UITexture | null {
+    return this.uiTextureCache.get(handle);
   }
 }

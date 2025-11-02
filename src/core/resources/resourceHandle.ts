@@ -3,6 +3,7 @@ import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { Material } from "@/core/materials/material";
 import { PBRMaterial } from "@/core/materials/pbrMaterial";
+import { UITexture } from "../types/ui";
 
 // src/core/resources/resourceHandle.ts
 
@@ -16,6 +17,7 @@ export enum ResourceType {
   Sampler,
   Texture,
   EnvironmentMap,
+  UITexture,
 }
 
 /**
@@ -110,7 +112,7 @@ export class ResourceHandle<T> {
     return new ResourceHandle<Material>(ResourceType.MaterialTemplate, key);
   }
 
-  // === SIMPLIFIED SAMPLER HANDLES ===
+  // === SAMPLER HANDLES ===
 
   /**
    * Creates a handle for a sampler resource.
@@ -125,13 +127,23 @@ export class ResourceHandle<T> {
     return new ResourceHandle<GPUSampler>(ResourceType.Sampler, key);
   }
 
+  // === UI HANDLES ===
+
+  /**
+   * Creates a handle for a UI texture resource.
+   * @param key The texture identifier
+   */
+  public static forUITexture(key: string): ResourceHandle<UITexture> {
+    return new ResourceHandle<UITexture>(ResourceType.UITexture, key);
+  }
+
   // === CONVENIENCE HELPERS ===
 
   /**
    * Creates a handle for a PBR material template.
    *
    * @remarks
-   * This is kept as it's commonly used and has a standardized format.
+   * It's commonly used and has a standardized format.
    *
    * @param isTransparent Whether the template is for transparent materials
    */
@@ -146,7 +158,7 @@ export class ResourceHandle<T> {
    * Creates a handle for an unlit ground material.
    *
    * @remarks
-   * This is kept as it has a specific format used by the ground material system.
+   * This  has a specific format used by the ground material system.
    *
    * @param textureUrl Optional texture URL
    * @param color Optional color array
