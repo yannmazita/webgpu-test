@@ -11,19 +11,14 @@ import { syncEngineState } from "@/core/engineState";
 import { updatePreviousActionState } from "@/core/input/action";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { STATES_PHYSICS_STEP_TIME_MS_OFFSET } from "@/core/sharedPhysicsLayout";
+import { uiLayoutSystem } from "@/core/ecs/systems/ui/uiLayoutSystem";
+import { uiButtonStyleSystem } from "@/core/ecs/systems/ui/uiButtonStyleSystem";
 
 /**
  * Executes one frame of the game loop.
  *
  * @remarks
  * The execution order is critical for data consistency:
- * 1. Sync state from editor and apply physics snapshot
- * 2. Handle input and camera mode toggling
- * 3. Update controllers and process input events
- * 4. Run gameplay systems (weapons, damage, etc.)
- * 5. Process all queued events
- * 6. Update core ECS systems (animation, transforms)
- * 7. Render the scene
  *
  * @param now - Current high-resolution timestamp from requestAnimationFrame
  */
@@ -45,7 +40,8 @@ export function frame(now: number): void {
     !state.pickupSystem ||
     !state.inventorySystem ||
     !state.respawnSystem ||
-    !state.resourceLoadingSystem
+    !state.resourceLoadingSystem ||
+    !state.uiRenderSystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -64,10 +60,10 @@ export function frame(now: number): void {
     dt = MAX_PAUSE_SECONDS;
   }
 
-  // Update resource loading early in the frame
+  // --- Resource Loading ---
   state.resourceLoadingSystem.update(state.world);
 
-  // Handle camera mode toggle
+  // --- Input & Controllers ---
   if (state.actionController.wasPressed("toggle_camera_mode")) {
     state.isFreeCameraActive = !state.isFreeCameraActive;
     if (state.isFreeCameraActive) {
@@ -80,7 +76,6 @@ export function frame(now: number): void {
       }
     }
   }
-
   // Update active controller
   if (state.isFreeCameraActive) {
     state.cameraControllerSystem.update(state.world, dt);
@@ -88,13 +83,11 @@ export function frame(now: number): void {
     state.playerControllerSystem.update(state.world, dt);
   }
 
-  // Process input events
   playerInputSystem(state.world, state.actionController, state.eventManager);
 
-  // Apply physics snapshot (handled in physics.ts)
-  // This is called from the main frame function
+  // info: physics snapshot is called from the main frame function
 
-  // Update gameplay systems
+  // --- Gameplay Systems ---
   state.interactionSystem.update();
   state.weaponSystem?.update(dt);
   state.projectileSystem?.update();
@@ -103,23 +96,43 @@ export function frame(now: number): void {
   state.damageSystem.update(state.world);
   state.respawnSystem.update(now);
 
-  // Process all queued events
+  // --- UI Systems ---
+  uiLayoutSystem(
+    state.world,
+    state.renderer.getCanvas().width,
+    state.renderer.getCanvas().height,
+  );
+  uiButtonStyleSystem(state.world);
+
+  // --- Event Processing ---
   state.eventManager.update();
 
-  // Update core ECS systems
+  // --- Core Transform & Camera Systems ---
   animationSystem(state.world, dt);
   transformSystem(state.world);
-
-  // Camera follow only when not in free camera mode
   if (!state.isFreeCameraActive) {
     cameraFollowSystem(state.world);
   }
-
-  // Update physics commands and camera
   state.physicsCommandSystem?.update(state.world);
   cameraSystem(state.world);
-  renderSystem(state.world, state.renderer, state.sceneRenderData);
 
+  // --- Physics ---
+  state.physicsCommandSystem?.update(state.world);
+
+  // --- Rendering ---
+  renderSystem(state.world, state.renderer, state.sceneRenderData);
+  // UI rendering happens after the main scene render
+  const commandEncoder = state.renderer.device.createCommandEncoder();
+  state.uiRenderSystem.execute(
+    state.world,
+    commandEncoder,
+    state.renderer.getContext().getCurrentTexture().createView(),
+    state.renderer.getCanvas().width,
+    state.renderer.getCanvas().height,
+  );
+  state.renderer.device.queue.submit([commandEncoder.finish()]);
+
+  // --- Frame End ---
   // Update input state for next frame
   updatePreviousActionState(
     state.actionController,

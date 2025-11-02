@@ -33,13 +33,12 @@ import { ResourceHandle } from "@/core/resources/resourceHandle";
  * @param renderer - The main renderer instance that will draw the scene.
  * @param sceneData - A pre-allocated data structure to be filled with this
  *     frame's renderable objects and scene properties.
- * @param postSceneDrawCallback - An optional callback for post-scene drawing.
  */
 export function renderSystem(
   world: World,
   renderer: Renderer,
   sceneData: SceneRenderData,
-  postSceneDrawCallback?: (passEncoder: GPURenderPassEncoder) => void,
+  commandEncoder: GPUCommandEncoder,
 ): void {
   // Find the main camera
   const cameraQuery = world.query([CameraComponent, MainCameraTagComponent]);
@@ -172,7 +171,7 @@ export function renderSystem(
   renderer.render(
     cameraComponent,
     sceneData,
-    postSceneDrawCallback,
+    commandEncoder,
     sun,
     shadowSettings,
   );

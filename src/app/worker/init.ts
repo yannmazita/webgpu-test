@@ -17,6 +17,8 @@ import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
 import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
+import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
+import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import {
   createInputContext,
   isKeyDown,
@@ -232,6 +234,13 @@ export async function initWorker(
     state.eventManager,
     state.damageSystem,
   );
+
+  state.uiRenderSystem = new UIRenderSystem(
+    state.renderer.device,
+    new ShaderPreprocessor(),
+    state.renderer.canvasFormat,
+  );
+  await state.uiRenderSystem.init();
 
   // --- Step 5: Create Default Scene ---
   // Create default scene

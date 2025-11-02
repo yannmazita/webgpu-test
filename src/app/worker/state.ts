@@ -23,6 +23,7 @@ import { PrefabFactory } from "@/app/prefabs";
 import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
+import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
 
 /**
  * Shared state for the render worker.
@@ -63,6 +64,7 @@ export interface WorkerState {
   respawnSystem: RespawnSystem | null;
   physicsCommandSystem: PhysicsCommandSystem | null;
   prefabFactory: PrefabFactory | null;
+  uiRenderSystem: UIRenderSystem | null;
 
   // Shared contexts
   engineStateCtx: EngineStateContext | null;
@@ -113,6 +115,7 @@ export const state: WorkerState = {
   respawnSystem: null,
   physicsCommandSystem: null,
   prefabFactory: null,
+  uiRenderSystem: null,
   engineStateCtx: null,
   physicsCtx: null,
   raycastResultsCtx: null,

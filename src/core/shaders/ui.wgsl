@@ -49,13 +49,16 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-  var color = in.color;
+  let texColor = textureSample(tex, texSampler, in.uv);
+
+  // The final color is a mix between the instance color (for solid rects)
+  // and the instance color modulated by the texture color (for images/text).
+  let texturedResult = in.color * texColor;
+
+  let useTexture = step(0.0, in.params.w);
+
+  // mix(a, b, t) is equivalent to a * (1.0 - t) + b * t.
+  let finalColor = mix(in.color, texturedResult, useTexture);
   
-  // If textureIndex >= 0, sample texture
-  if (in.params.w >= 0.0) {
-    let texColor = textureSample(tex, texSampler, in.uv);
-    color = color * texColor;
-  }
-  
-  return color;
+  return finalColor;
 }

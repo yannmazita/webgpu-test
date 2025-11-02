@@ -15,7 +15,6 @@ import {
 } from "@/core/ecs/components/sunComponent";
 import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
-import { UIPass } from "@/core/rendering/passes/uiPass";
 import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";
 
 /**
@@ -64,7 +63,6 @@ export class Renderer {
   private skyboxPass!: SkyboxPass;
   private opaquePass!: OpaquePass;
   private transparentPass!: TransparentPass;
-  private uiPass!: UIPass;
 
   // Per-frame data
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -251,7 +249,6 @@ export class Renderer {
     this.skyboxPass = new SkyboxPass();
     this.opaquePass = new OpaquePass();
     this.transparentPass = new TransparentPass();
-    this.uiPass = new UIPass(this.device, this.canvasFormat);
 
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",
@@ -721,31 +718,17 @@ export class Renderer {
    * @remarks
    * This is the main entry point for the render loop. It orchestrates the
    * entire frame pipeline in this sequence:
-   * 1. Handles any pending resize events.
-   * 2. Updates global GPU uniform buffers for the camera, scene, and lights.
-   * 3. Performs frustum culling to get a list of potentially visible objects.
-   * 4. Delegates to the `InstanceBufferManager` to pack all instance data
-   *    (model matrices, flags) for all render queues (shadows, opaques,
-   *    transparents) into a single GPU buffer with one upload.
-   * 5. Constructs the immutable `RenderContext` for the frame.
-   * 6. Executes the sequence of render passes: `ClusterPass` and `ShadowPass`
-   *    run first, followed by the main scene passes (`SkyboxPass`,
-   *    `OpaquePass`, `TransparentPass`) which draw into the canvas.
-   * 7. If provided, invokes a callback to allow for custom UI rendering on top
-   *    of the scene.
-   * 8. Submits all recorded GPU commands for execution.
    *
    * @param camera The camera to render from.
    * @param sceneData The data for the scene to render.
-   * @param postSceneDrawCallback An optional callback to render UI or other
-   *   content after the main scene has been drawn.
+   * @param commandEncoder
    * @param sun The scene's directional sun component.
    * @param shadowSettings The current shadow quality settings.
    */
   public render(
     camera: CameraComponent,
     sceneData: SceneRenderData,
-    postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
+    commandEncoder: GPUCommandEncoder,
     sun?: SceneSunComponent,
     shadowSettings?: ShadowSettingsComponent,
   ): void {
@@ -813,10 +796,6 @@ export class Renderer {
     );
     Profiler.end("Render.PackInstanceBuffer");
 
-    // 4. Create an immutable context for the frame's render passes
-    const commandEncoder = this.device.createCommandEncoder({
-      label: "MAIN_FRAME_ENCODER",
-    });
     const context: RenderContext = {
       // Pass the culled list of renderables to the context
       sceneData: { ...sceneData, renderables: visibleRenderables },
@@ -840,7 +819,7 @@ export class Renderer {
       canvasHeight: this.canvas.height,
     };
 
-    // 5. Execute passes
+    // 4. Execute passes
     this.clusterPass.execute(context);
     this.shadowPass.execute(context);
 
@@ -902,23 +881,9 @@ export class Renderer {
 
     scenePassEncoder.end();
 
-    if (postSceneDrawCallback) {
-      this.uiPass.record(
-        context.commandEncoder,
-        context.canvasView,
-        context.canvasWidth,
-        context.canvasHeight,
-        postSceneDrawCallback,
-      );
-    }
-
-    // 6. Submit
-    Profiler.begin("Render.Submit");
-    this.device.queue.submit([commandEncoder.finish()]);
     this.clusterPass.onSubmitted();
-    Profiler.end("Render.Submit");
 
-    // 7. Update Stats
+    // 5. Update Stats
     this.stats.visibleOpaque = opaqueRenderables.length;
     this.stats.visibleTransparent = transparentRenderables.length;
     this.stats.instancesOpaque = opaqueRenderables.length;
@@ -949,6 +914,14 @@ export class Renderer {
    */
   public getDefaultSampler(): GPUSampler {
     return this.defaultSampler;
+  }
+
+  public getCanvas(): HTMLCanvasElement | OffscreenCanvas {
+    return this.canvas;
+  }
+
+  public getContext(): GPUCanvasContext {
+    return this.context;
   }
 
   /**
