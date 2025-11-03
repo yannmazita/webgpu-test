@@ -733,11 +733,9 @@ export class Renderer {
     shadowSettings?: ShadowSettingsComponent,
   ): void {
     const tStart = performance.now();
-
     Profiler.begin("Render.Total");
-    Profiler.begin("Render.HandleResize");
+
     this._handleResize(camera);
-    Profiler.end("Render.HandleResize");
 
     if (this.canvas.width === 0 || this.canvas.height === 0) {
       this.stats.canvasWidth = this.canvas.width;
@@ -750,7 +748,6 @@ export class Renderer {
       return;
     }
 
-    Profiler.begin("Render.UpdateUniforms");
     this._updateFrameUniforms(
       camera,
       sceneData.lights,
@@ -758,26 +755,17 @@ export class Renderer {
       sun,
       shadowSettings,
     );
-    Profiler.end("Render.UpdateUniforms");
 
-    // 1. Frustum Culling
-    Profiler.begin("Render.FrustumCull");
     const visibleRenderables = sceneData.renderables.filter((r) =>
       this._isInFrustum(r, camera),
     );
-    Profiler.end("Render.FrustumCull");
 
-    // 2. Separate by render queue
-    Profiler.begin("Render.Separate");
-    const opaqueRenderables: Renderable[] = [];
-    const transparentRenderables: Renderable[] = [];
-    for (const r of visibleRenderables) {
-      if (r.material.material.isTransparent) {
-        transparentRenderables.push(r);
-      } else {
-        opaqueRenderables.push(r);
-      }
-    }
+    const opaqueRenderables = visibleRenderables.filter(
+      (r) => !r.material.material.isTransparent,
+    );
+    const transparentRenderables = visibleRenderables.filter(
+      (r) => r.material.material.isTransparent,
+    );
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
@@ -785,19 +773,14 @@ export class Renderer {
               r.castShadows !== false && !r.material.material.isTransparent,
           )
         : [];
-    Profiler.end("Render.Separate");
 
-    // 3. Pack all instance data for the frame into a single buffer
-    Profiler.begin("Render.PackInstanceBuffer");
     const instanceAllocations = this.instanceBufferManager.packAndUpload(
       shadowCasters,
       opaqueRenderables,
       transparentRenderables,
     );
-    Profiler.end("Render.PackInstanceBuffer");
 
     const context: RenderContext = {
-      // Pass the culled list of renderables to the context
       sceneData: { ...sceneData, renderables: visibleRenderables },
       camera,
       sun,
@@ -819,14 +802,14 @@ export class Renderer {
       canvasHeight: this.canvas.height,
     };
 
-    // 4. Execute passes
+    // Execute compute passes first
     this.clusterPass.execute(context);
     this.shadowPass.execute(context);
 
+    // Now execute render passes
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
       (this.depthFormat as string) === "depth32float-stencil8";
-
     const depthAttachment: GPURenderPassDepthStencilAttachment = {
       view: context.depthView,
       depthClearValue: 1.0,
@@ -867,23 +850,16 @@ export class Renderer {
     );
     scenePassEncoder.setBindGroup(0, context.frameBindGroup);
 
-    // Execute passes that render into the main scene pass
     this.skyboxPass.execute(context, scenePassEncoder);
-    Profiler.begin("Render.OpaquePass");
     this.stats.drawsOpaque = this.opaquePass.execute(context, scenePassEncoder);
-    Profiler.end("Render.OpaquePass");
-    Profiler.begin("Render.TransparentPass");
     this.stats.drawsTransparent = this.transparentPass.execute(
       context,
       scenePassEncoder,
     );
-    Profiler.end("Render.TransparentPass");
 
     scenePassEncoder.end();
 
-    this.clusterPass.onSubmitted();
-
-    // 5. Update Stats
+    // Update stats
     this.stats.visibleOpaque = opaqueRenderables.length;
     this.stats.visibleTransparent = transparentRenderables.length;
     this.stats.instancesOpaque = opaqueRenderables.length;
@@ -892,12 +868,21 @@ export class Renderer {
     this.stats.canvasWidth = context.canvasWidth;
     this.stats.canvasHeight = context.canvasHeight;
     this.clusterPass.updateStats(this.stats);
-
     this.stats.cpuTotalUs = Math.max(
       0,
       Math.round((performance.now() - tStart) * 1000),
     );
     Profiler.end("Render.Total");
+  }
+
+  /**
+   * Notifies internal subsystems that the frame's command buffer has been submitted.
+   * @remarks
+   * This must be called after `device.queue.submit()` to allow subsystems like
+   * the cluster builder to safely initiate asynchronous GPU readback operations.
+   */
+  public onFrameSubmitted(): void {
+    this.clusterPass.onSubmitted();
   }
 
   /**

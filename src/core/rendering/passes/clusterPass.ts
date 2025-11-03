@@ -30,7 +30,7 @@ export class ClusterPass implements RenderPass {
   private clusterBuilder: ClusterBuilder;
 
   /**
-   * @param device The active GPUDevice.
+   * @param device - The active GPUDevice.
    */
   constructor(device: GPUDevice) {
     this.device = device;
@@ -74,7 +74,7 @@ export class ClusterPass implements RenderPass {
    * as the camera and light data, and directs the `ClusterBuilder` to record
    * its compute commands into the context's command encoder.
    *
-   * @param context The immutable render context for the current frame.
+   * @param context - The immutable render context for the current frame.
    */
   public execute(context: RenderContext): void {
     const lightCount = context.sceneData.lights.length;
@@ -85,8 +85,11 @@ export class ClusterPass implements RenderPass {
       context.canvasWidth,
       context.canvasHeight,
     );
-    this.clusterBuilder.createComputeBindGroup(lightStorageBuffer);
-    this.clusterBuilder.record(context.commandEncoder, lightCount);
+    this.clusterBuilder.record(
+      context.commandEncoder,
+      lightCount,
+      lightStorageBuffer,
+    );
   }
 
   /**
@@ -97,7 +100,7 @@ export class ClusterPass implements RenderPass {
    * The statistics are read from the GPU periodically, so they may not be
    * updated every single frame.
    *
-   * @param stats The renderer statistics object to populate.
+   * @param stats - The renderer statistics object to populate.
    */
   public updateStats(stats: RendererStats): void {
     const cls = this.clusterBuilder.getLastStats();
@@ -105,7 +108,6 @@ export class ClusterPass implements RenderPass {
     stats.clusterMaxLpc = cls.maxLpc;
     stats.clusterOverflows = cls.overflow;
   }
-
   /**
    * Notifies the underlying ClusterBuilder that the frame's command buffers
    * have been submitted.

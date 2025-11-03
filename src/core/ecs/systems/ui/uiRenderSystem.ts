@@ -297,7 +297,7 @@ export class UIRenderSystem {
     passEncoder.end();
   }
 
-  private uploadInstances(instances: UIInstance[]): void {
+  private uploadInstances = (instances: UIInstance[]): void => {
     if (instances.length > this.instanceCapacity) {
       this.instanceBuffer.destroy();
       this.instanceCapacity = Math.ceil(instances.length * 1.5);
@@ -318,5 +318,5 @@ export class UIRenderSystem {
       data.set(inst.params, base + 12);
     }
     this.device.queue.writeBuffer(this.instanceBuffer, 0, data);
-  }
+  };
 }

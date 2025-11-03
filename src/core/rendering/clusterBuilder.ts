@@ -3,45 +3,69 @@ import clusterUrl from "@/core/shaders/cluster.wgsl?url";
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
+/**
+ * Defines the configuration for the 3D cluster grid.
+ */
 export interface ClusterConfig {
+  /** The number of clusters along the X-axis of the screen. */
   gridX: number;
+  /** The number of clusters along the Y-axis of the screen. */
   gridY: number;
+  /** The number of clusters along the Z-axis (depth) of the view frustum. */
   gridZ: number;
+  /** The maximum number of lights that can be assigned to a single cluster. */
   maxPerCluster: number;
 }
 
+/**
+ * Manages the GPU-side resources and compute passes for clustered forward lighting.
+ *
+ * @remarks
+ * This class is the core of the light culling system. It creates and manages
+ * the GPU buffers for the cluster grid and orchestrates the compute shaders
+ * that assign lights to clusters each frame. It is designed to be owned and
+ * operated by the `ClusterPass`.
+ */
 export class ClusterBuilder {
   private device: GPUDevice;
   private preprocessor = new ShaderPreprocessor();
 
-  // Buffers shared with render pass
+  // Buffers shared with the main render pass via the frame bind group
   public clusterParamsBuffer!: GPUBuffer;
   public clusterCountsBuffer!: GPUBuffer;
   public clusterIndicesBuffer!: GPUBuffer;
 
-  // Sizes
+  // Configuration and size tracking
   private cfg: ClusterConfig;
   private countsSize = 0;
   private indicesSize = 0;
 
-  // Compute pipelines and bind group layout
+  // Compute pipelines and layouts
   private clearPipeline!: GPUComputePipeline;
   private assignPipeline!: GPUComputePipeline;
   private computeBindGroupLayout!: GPUBindGroupLayout;
-  private clearBindGroup!: GPUBindGroup;
-  private assignBindGroup!: GPUBindGroup;
 
+  // Internally managed bind group to avoid per-frame creation
+  private computeBindGroup: GPUBindGroup | null = null;
+  private lastLightsBuffer: GPUBuffer | null = null;
+
+  // Resources for periodic statistics readback
   private readbackBuffer!: GPUBuffer;
   private readbackPending = false;
   private frameCounter = 0;
-  private readonly READBACK_PERIOD = 8; // every N frames
-  private lastAvgLpcX1000 = 0; // average lights per cluster * 1000 (int)
-  private lastMaxLpc = 0; // max lights in any cluster
-  private lastOverflowCount = 0; // sum of (count - maxPerCluster) over clusters
+  private readonly READBACK_PERIOD = 8; // Read back stats every N frames
+  private lastAvgLpcX1000 = 0;
+  private lastMaxLpc = 0;
+  private lastOverflowCount = 0;
 
+  // Viewport dimensions
   private viewportW = 1;
   private viewportH = 1;
 
+  /**
+   * @param device - The active GPUDevice.
+   * @param cfg - The configuration for the cluster grid.
+   */
   constructor(device: GPUDevice, cfg: ClusterConfig) {
     this.device = device;
     this.cfg = cfg;
@@ -50,6 +74,7 @@ export class ClusterBuilder {
   /**
    * Initializes the cluster builder.
    *
+   * @remarks
    * This method creates the necessary GPU resources, including buffers and
    * compute pipelines, for the clustered forward rendering implementation. It
    * must be called before the cluster builder can be used.
@@ -57,20 +82,18 @@ export class ClusterBuilder {
   public async init(): Promise<void> {
     this.clusterParamsBuffer = this.device.createBuffer({
       label: "CLUSTER_PARAMS_BUFFER",
-      size: 16 * 16, // 256 bytes to cover the struct comfortably
+      size: 192, // Sufficient for the ClusterParams struct
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.allocateClusterBuffers();
 
-    // Create readback buffer for counts (MAP_READ | COPY_DST)
     this.readbackBuffer = this.device.createBuffer({
       label: "CLUSTER_COUNTS_READBACK",
       size: this.countsSize,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
 
-    // Load/compile compute shader
     const code = await this.preprocessor.process(clusterUrl);
     const module = this.device.createShaderModule({
       label: "CLUSTER_COMPUTE_MODULE",
@@ -84,22 +107,22 @@ export class ClusterBuilder {
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
           buffer: { type: "uniform" },
-        }, // params
+        },
         {
           binding: 1,
           visibility: GPUShaderStage.COMPUTE,
           buffer: { type: "read-only-storage" },
-        }, // lights
+        },
         {
           binding: 2,
           visibility: GPUShaderStage.COMPUTE,
           buffer: { type: "storage" },
-        }, // counts (RW)
+        },
         {
           binding: 3,
           visibility: GPUShaderStage.COMPUTE,
           buffer: { type: "storage" },
-        }, // indices (RW)
+        },
       ],
     });
 
@@ -108,22 +131,16 @@ export class ClusterBuilder {
       bindGroupLayouts: [this.computeBindGroupLayout],
     });
 
-    this.clearPipeline = this.device.createComputePipeline({
+    this.clearPipeline = await this.device.createComputePipelineAsync({
       label: "CLUSTER_CLEAR_PIPELINE",
       layout: pipelineLayout,
-      compute: {
-        module,
-        entryPoint: "cs_clear_counts",
-      },
+      compute: { module, entryPoint: "cs_clear_counts" },
     });
 
-    this.assignPipeline = this.device.createComputePipeline({
+    this.assignPipeline = await this.device.createComputePipelineAsync({
       label: "CLUSTER_ASSIGN_PIPELINE",
       layout: pipelineLayout,
-      compute: {
-        module,
-        entryPoint: "cs_assign_lights",
-      },
+      compute: { module, entryPoint: "cs_assign_lights" },
     });
   }
 
@@ -139,29 +156,26 @@ export class ClusterBuilder {
         GPUBufferUsage.COPY_DST |
         GPUBufferUsage.COPY_SRC,
     });
-
     this.indicesSize = numClusters * this.cfg.maxPerCluster * 4;
     if (this.clusterIndicesBuffer) this.clusterIndicesBuffer.destroy();
     this.clusterIndicesBuffer = this.device.createBuffer({
       label: "CLUSTER_INDICES_BUFFER",
       size: this.indicesSize,
-      usage:
-        GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_DST |
-        GPUBufferUsage.COPY_SRC,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
   }
 
   /**
    * Updates the cluster parameters uniform buffer.
    *
+   * @remarks
    * This method packs camera and viewport data into a uniform buffer that is
    * used by the compute shaders to assign lights to clusters. It
    * should be called every frame before the `record` method.
    *
-   * @param camera The camera component.
-   * @param viewportW The width of the viewport.
-   * @param viewportH The height of the viewport.
+   * @param camera - The camera component.
+   * @param viewportW - The width of the viewport.
+   * @param viewportH - The height of the viewport.
    */
   public updateParams(
     camera: CameraComponent,
@@ -169,11 +183,7 @@ export class ClusterBuilder {
     viewportH: number,
   ): void {
     this.setViewport(viewportW, viewportH);
-
-    // Camera basis from inverseViewMatrix (world transform of camera)
     const m = camera.inverseViewMatrix;
-
-    // Right = col0, Up = col1, Forward = -col2 (normalize)
     let rx = m[0],
       ry = m[1],
       rz = m[2];
@@ -183,11 +193,9 @@ export class ClusterBuilder {
     let fx = -m[8],
       fy = -m[9],
       fz = -m[10];
-
     const rl = Math.hypot(rx, ry, rz) || 1.0;
     const ul = Math.hypot(ux, uy, uz) || 1.0;
     const fl = Math.hypot(fx, fy, fz) || 1.0;
-
     rx /= rl;
     ry /= rl;
     rz /= rl;
@@ -197,78 +205,44 @@ export class ClusterBuilder {
     fx /= fl;
     fy /= fl;
     fz /= fl;
-
     const near = camera.near;
     const far = camera.far;
     const invZRange = 1.0 / Math.max(far - near, 1e-6);
     const tanHalfFovY = Math.tan(camera.fovYRadians * 0.5);
     const aspect = camera.aspectRatio;
-
-    // Pack ClusterParams as 16 vec4-aligned floats (we use a generous buffer size)
-    const arr = new Float32Array(48); // 192B used
+    const arr = new Float32Array(48);
     const u32 = new Uint32Array(arr.buffer);
-
-    // u32 gridX, gridY, gridZ, maxPerCluster
-    u32[0] = this.cfg.gridX >>> 0;
-    u32[1] = this.cfg.gridY >>> 0;
-    u32[2] = this.cfg.gridZ >>> 0;
-    u32[3] = this.cfg.maxPerCluster >>> 0;
-
-    // viewportSize, invViewportSize
+    u32[0] = this.cfg.gridX;
+    u32[1] = this.cfg.gridY;
+    u32[2] = this.cfg.gridZ;
+    u32[3] = this.cfg.maxPerCluster;
     arr[4] = this.viewportW;
     arr[5] = this.viewportH;
     arr[6] = 1.0 / this.viewportW;
     arr[7] = 1.0 / this.viewportH;
-
-    // near, far, invZRange, tanHalfFovY
     arr[8] = near;
     arr[9] = far;
     arr[10] = invZRange;
     arr[11] = tanHalfFovY;
-
-    // aspect, padding
     arr[12] = aspect;
-    arr[13] = 0.0;
-    arr[14] = 0.0;
-    arr[15] = 0.0;
-
-    // cameraRight.xyz
     arr[16] = rx;
     arr[17] = ry;
     arr[18] = rz;
-    arr[19] = 0.0;
-    // cameraUp.xyz
     arr[20] = ux;
     arr[21] = uy;
     arr[22] = uz;
-    arr[23] = 0.0;
-    // cameraForward.xyz
     arr[24] = fx;
     arr[25] = fy;
     arr[26] = fz;
-    arr[27] = 0.0;
-    // cameraPos.xyz
     arr[28] = m[12];
     arr[29] = m[13];
     arr[30] = m[14];
-    arr[31] = 1.0;
-
-    // Uploading the packed data to the GPU buffer
     this.device.queue.writeBuffer(this.clusterParamsBuffer, 0, arr);
   }
 
-  /**
-   * Creates the bind group for the compute shaders.
-   *
-   * This method creates a bind group that contains all the resources needed
-   * by the compute shaders, including the cluster parameters, the light list,
-   * and the cluster counts and indices buffers.
-   *
-   * @param lightsBuffer The buffer containing the light data.
-   */
-  public createComputeBindGroup(lightsBuffer: GPUBuffer): void {
-    this.clearBindGroup = this.device.createBindGroup({
-      label: "CLUSTER_CLEAR_BG",
+  private createComputeBindGroup(lightsBuffer: GPUBuffer): void {
+    this.computeBindGroup = this.device.createBindGroup({
+      label: "CLUSTER_COMPUTE_BG",
       layout: this.computeBindGroupLayout,
       entries: [
         { binding: 0, resource: { buffer: this.clusterParamsBuffer } },
@@ -277,11 +251,18 @@ export class ClusterBuilder {
         { binding: 3, resource: { buffer: this.clusterIndicesBuffer } },
       ],
     });
-
-    this.assignBindGroup = this.clearBindGroup; // same bindings
+    this.lastLightsBuffer = lightsBuffer;
   }
 
   private async computeStatsFromReadback(): Promise<void> {
+    if (this.readbackBuffer.mapState !== "unmapped") {
+      console.warn(
+        "[ClusterBuilder] Readback buffer is not in 'unmapped' state, skipping stats computation for this frame.",
+      );
+      return;
+    }
+    this.readbackPending = false; // Consume the pending flag now that we are attempting to map.
+
     try {
       await this.readbackBuffer.mapAsync(GPUMapMode.READ);
       const data = new Uint32Array(this.readbackBuffer.getMappedRange());
@@ -289,81 +270,79 @@ export class ClusterBuilder {
       let sum = 0;
       let max = 0;
       let overflow = 0;
-      const maxPer = this.cfg.maxPerCluster >>> 0;
+      const maxPer = this.cfg.maxPerCluster;
       for (let i = 0; i < numClusters; i++) {
-        const c = data[i] >>> 0;
+        const c = data[i];
         sum += c;
         if (c > max) max = c;
         if (c > maxPer) overflow += c - maxPer;
       }
-      this.readbackBuffer.unmap();
-      // Store as ints for metrics
+
       const avg = numClusters > 0 ? sum / numClusters : 0;
-      this.lastAvgLpcX1000 = Math.min(0x7fffffff, Math.round(avg * 1000));
+      this.lastAvgLpcX1000 = Math.round(avg * 1000);
       this.lastMaxLpc = max;
       this.lastOverflowCount = overflow;
-    } catch {
-      // Mapping may fail if GPU timeline not ready; ignore this cycle
+    } catch (err) {
+      console.error("[ClusterBuilder] Failed to map readback buffer:", err);
     } finally {
-      this.readbackPending = false;
+      // Ensure unmap is always called if the buffer was successfully mapped.
+      if (this.readbackBuffer.mapState !== "unmapped") {
+        this.readbackBuffer.unmap();
+      }
     }
   }
 
-  /**
-   * Notifies the cluster builder that a command buffer has been submitted.
-   *
-   * This method is called by the renderer after it has submitted a command
-   * buffer that includes a copy operation to the readback buffer. This
-   * allows the cluster builder to start the asynchronous process of mapping
-   * the readback buffer and computing statistics.
-   */
   public onSubmitted(): void {
-    // Kick off async map+read once a copy has been enqueued in the same frame
-    if (this.readbackPending) {
-      // Schedule compute; do not await
+    // Only attempt to process the readback if one is pending AND the buffer is free.
+    if (this.readbackPending && this.readbackBuffer.mapState === "unmapped") {
       void this.computeStatsFromReadback();
     }
   }
 
   /**
    * Records the compute passes for clearing and assigning lights to clusters.
-   *
-   * This method records two compute passes: one to clear the cluster counts
-   * from the previous frame, and another to assign the current frame's
-   * lights to their corresponding clusters. It also periodically records a
-   * copy operation to a readback buffer for statistics.
-   *
-   * @param commandEncoder The command encoder to record the passes into.
-   * @param lightCount The number of lights in the scene.
+   * @remarks
+   * This method now also manages the lifecycle of the compute bind group,
+   * recreating it only when the underlying lights buffer has changed.
+   * @param commandEncoder - The command encoder to record the passes into.
+   * @param lightCount - The number of lights in the scene.
+   * @param lightsBuffer - The GPU buffer containing the scene's light data.
    */
-  public record(commandEncoder: GPUCommandEncoder, lightCount: number): void {
-    // Clear counts
-    {
-      const pass = commandEncoder.beginComputePass({
-        label: "CLUSTER_CLEAR_PASS",
-      });
-      pass.setPipeline(this.clearPipeline);
-      pass.setBindGroup(0, this.clearBindGroup);
-      const total = this.cfg.gridX * this.cfg.gridY * this.cfg.gridZ;
-      const wg = Math.ceil(total / 64);
-      pass.dispatchWorkgroups(wg);
-      pass.end();
-    }
-    // Assign lights
-    if (lightCount > 0) {
-      const pass = commandEncoder.beginComputePass({
-        label: "CLUSTER_ASSIGN_PASS",
-      });
-      pass.setPipeline(this.assignPipeline);
-      pass.setBindGroup(0, this.assignBindGroup);
-      const wg = Math.ceil(lightCount / 64);
-      pass.dispatchWorkgroups(wg);
-      pass.end();
+  public record(
+    commandEncoder: GPUCommandEncoder,
+    lightCount: number,
+    lightsBuffer: GPUBuffer,
+  ): void {
+    if (lightsBuffer !== this.lastLightsBuffer) {
+      this.createComputeBindGroup(lightsBuffer);
     }
 
-    // Periodic readback copy of counts to staging buffer
+    if (!this.computeBindGroup) return; // Guard if bind group hasn't been created
+
+    const pass = commandEncoder.beginComputePass({
+      label: "CLUSTER_CLEAR_PASS",
+    });
+    pass.setPipeline(this.clearPipeline);
+    pass.setBindGroup(0, this.computeBindGroup);
+    const total = this.cfg.gridX * this.cfg.gridY * this.cfg.gridZ;
+    pass.dispatchWorkgroups(Math.ceil(total / 64));
+    pass.end();
+
+    if (lightCount > 0) {
+      const assignPass = commandEncoder.beginComputePass({
+        label: "CLUSTER_ASSIGN_PASS",
+      });
+      assignPass.setPipeline(this.assignPipeline);
+      assignPass.setBindGroup(0, this.computeBindGroup);
+      assignPass.dispatchWorkgroups(Math.ceil(lightCount / 64));
+      assignPass.end();
+    }
+
     this.frameCounter++;
-    if (this.frameCounter % this.READBACK_PERIOD === 0) {
+    if (
+      this.frameCounter % this.READBACK_PERIOD === 0 &&
+      !this.readbackPending
+    ) {
       commandEncoder.copyBufferToBuffer(
         this.clusterCountsBuffer,
         0,
@@ -385,8 +364,8 @@ export class ClusterBuilder {
 
   /**
    * Sets the viewport dimensions.
-   * @param width The width of the viewport.
-   * @param height The height of the viewport.
+   * @param width - The width of the viewport.
+   * @param height - The height of the viewport.
    */
   public setViewport(width: number, height: number): void {
     this.viewportW = Math.max(1, Math.floor(width));
@@ -395,10 +374,9 @@ export class ClusterBuilder {
 
   /**
    * Gets the latest statistics from the cluster builder.
-   *
+   * @remarks
    * The statistics are read back from the GPU periodically, so they may not
    * be updated every frame.
-   *
    * @returns The latest cluster statistics.
    */
   public getLastStats(): {

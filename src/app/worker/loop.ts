@@ -10,20 +10,39 @@ import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
 import { syncEngineState } from "@/core/engineState";
 import { updatePreviousActionState } from "@/core/input/action";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
-import { STATES_PHYSICS_STEP_TIME_MS_OFFSET } from "@/core/sharedPhysicsLayout";
 import { uiLayoutSystem } from "@/core/ecs/systems/ui/uiLayoutSystem";
 import { uiButtonStyleSystem } from "@/core/ecs/systems/ui/uiButtonStyleSystem";
 
 /**
- * Executes one frame of the game loop.
+ * Executes one frame of the game loop for the render worker.
  *
  * @remarks
- * The execution order is critical for data consistency:
+ * This function orchestrates the entire frame's logic in a specific, critical
+ * order to ensure data consistency and correct rendering.
  *
- * @param now - Current high-resolution timestamp from requestAnimationFrame
+ * 1.  **State Sync & Time:** Calculates delta time and syncs state from the
+ *     editor.
+ * 2.  **Resource Loading:** The `ResourceLoadingSystem` processes pending asset
+ *     loads.
+ * 3.  **Input & Controllers:** The active controller (free camera or player) is
+ *     updated, and player input is translated into gameplay events.
+ * 4.  **Gameplay Systems:** Core game logic such as interactions, combat,
+ *     physics events, and lifecycles are processed.
+ * 5.  **UI Systems:** The layout for all in-game UI elements is calculated, and
+ *     button styles are updated based on interaction states.
+ * 6.  **Event Processing:** The central `EventManager` dispatches all queued
+ *     events to their subscribers.
+ * 7.  **Core ECS Systems:** Animation and transform hierarchies are updated,
+ *     preparing all objects for rendering.
+ * 8.  **Rendering:** A single `GPUCommandEncoder` is created. The main 3D scene
+ *     and the in-game UI are rendered into it in sequence. Finally, all
+ *     commands for the frame are submitted to the GPU in a single batch.
+ * 9.  **Frame End:** Input state is updated for the next frame's `wasPressed`
+ *     checks, and a `FRAME_DONE` message is sent to the main thread.
+ *
+ * @param now - The current high-resolution timestamp from `requestAnimationFrame`.
  */
 export function frame(now: number): void {
-  // Guard clause for uninitialized systems
   if (
     !state.renderer ||
     !state.world ||
@@ -76,16 +95,13 @@ export function frame(now: number): void {
       }
     }
   }
-  // Update active controller
+
   if (state.isFreeCameraActive) {
     state.cameraControllerSystem.update(state.world, dt);
   } else {
     state.playerControllerSystem.update(state.world, dt);
   }
-
   playerInputSystem(state.world, state.actionController, state.eventManager);
-
-  // info: physics snapshot is called from the main frame function
 
   // --- Gameplay Systems ---
   state.interactionSystem.update();
@@ -97,11 +113,8 @@ export function frame(now: number): void {
   state.respawnSystem.update(now);
 
   // --- UI Systems ---
-  uiLayoutSystem(
-    state.world,
-    state.renderer.getCanvas().width,
-    state.renderer.getCanvas().height,
-  );
+  const canvas = state.renderer.getCanvas();
+  uiLayoutSystem(state.world, canvas.width, canvas.height);
   uiButtonStyleSystem(state.world);
 
   // --- Event Processing ---
@@ -116,43 +129,37 @@ export function frame(now: number): void {
   state.physicsCommandSystem?.update(state.world);
   cameraSystem(state.world);
 
-  // --- Physics ---
-  state.physicsCommandSystem?.update(state.world);
-
   // --- Rendering ---
-  renderSystem(state.world, state.renderer, state.sceneRenderData);
-  // UI rendering happens after the main scene render
-  const commandEncoder = state.renderer.device.createCommandEncoder();
+  const commandEncoder = state.renderer.device.createCommandEncoder({
+    label: "WORKER_FRAME_ENCODER",
+  });
+
+  // 1. Render the main 3D scene.
+  renderSystem(
+    state.world,
+    state.renderer,
+    state.sceneRenderData,
+    commandEncoder,
+  );
+
+  // 2. Render the in-game UI on top of the 3D scene.
   state.uiRenderSystem.execute(
     state.world,
     commandEncoder,
     state.renderer.getContext().getCurrentTexture().createView(),
-    state.renderer.getCanvas().width,
-    state.renderer.getCanvas().height,
+    canvas.width,
+    canvas.height,
   );
+
+  // 3. Submit all recorded commands at once.
   state.renderer.device.queue.submit([commandEncoder.finish()]);
 
   // --- Frame End ---
-  // Update input state for next frame
   updatePreviousActionState(
     state.actionController,
     state.previousActionState,
     state.actionMap,
   );
-
-  // Publish performance metrics
-  if (state.renderer) {
-    let physicsTimeUs = 0;
-    if (state.physicsCtx) {
-      const physicsTimeMs =
-        state.physicsCtx.statesF32[STATES_PHYSICS_STEP_TIME_MS_OFFSET >> 2];
-      physicsTimeUs = Math.round(physicsTimeMs * 1000);
-    }
-    // The previous block is used to get a physicsTimeMs from the physics thread,
-    // however it no longer is wired to anything
-    // todo: tidy up the remnants of the old metrics logic,
-    // maybe with a dedicated metricsSystem
-  }
 
   self.postMessage({ type: "FRAME_DONE" });
 }
