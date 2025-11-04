@@ -75,8 +75,13 @@ export interface RenderPass {
    * Executes the render pass.
    * @param context The immutable render context for the frame.
    * @param passEncoder An optional encoder for passes that render into the main scene render pass.
+   * @param callback Optional callback for custom drawing (debug UI, external libraries etc)
    */
-  execute(context: RenderContext, passEncoder?: GPURenderPassEncoder): void;
+  execute(
+    context: RenderContext,
+    passEncoder?: GPURenderPassEncoder,
+    callback?: (passEncoder: GPURenderPassEncoder) => void,
+  ): void;
 }
 
 /**

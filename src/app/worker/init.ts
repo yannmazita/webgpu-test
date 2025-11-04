@@ -1,7 +1,6 @@
 // src/app/worker/init.ts
 import { state } from "@/app/worker/state";
 import { Renderer } from "@/core/rendering/renderer";
-import { ResourceManager } from "@/core/resources/resourceManager";
 import { World } from "@/core/ecs/world";
 import { SceneRenderData } from "@/core/types/rendering";
 import { CameraControllerSystem } from "@/core/ecs/systems/cameraControllerSystem";
@@ -16,6 +15,11 @@ import { InventorySystem } from "@/core/ecs/systems/inventorySystem";
 import { RespawnSystem } from "@/core/ecs/systems/respawnSystem";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
+import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
+import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
+import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
+import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
+import { IBLIntegrationSystem } from "@/core/ecs/systems/ressources/iblIntegrationSystem";
 import {
   createInputContext,
   isKeyDown,
@@ -24,7 +28,6 @@ import {
   getMousePosition,
   isPointerLocked,
 } from "@/core/input/manager";
-import { createMetricsContext, initializeMetrics } from "@/core/metrics";
 import {
   createEngineStateContext as createEngineStateCtx,
   publishSnapshotFromWorld,
@@ -53,14 +56,13 @@ import {
  * @remarks
  * This function orchestrates the complete setup process:
  * - Creates WebGPU renderer and resource manager
- * - Sets up shared memory contexts for input, metrics, engine state, and physics
+ * - Sets up shared memory contexts for input, engine state, physics etc
  * - Initializes ECS world and all game systems
  * - Spawns and configures the physics worker
  * - Creates the default scene
  *
  * @param offscreen - OffscreenCanvas for WebGPU rendering
  * @param sharedInputBuffer - SharedArrayBuffer for input state
- * @param sharedMetricsBuffer - SharedArrayBuffer for performance metrics
  * @param sharedEngineStateBuffer - SharedArrayBuffer for editor state sync
  * @param sharedRaycastResultsBuffer - SharedArrayBuffer for weapon raycast results
  * @param sharedInteractionRaycastResultsBuffer - SharedArrayBuffer for interaction raycast results
@@ -71,7 +73,6 @@ import {
 export async function initWorker(
   offscreen: OffscreenCanvas,
   sharedInputBuffer: SharedArrayBuffer,
-  sharedMetricsBuffer: SharedArrayBuffer,
   sharedEngineStateBuffer: SharedArrayBuffer,
   sharedRaycastResultsBuffer: SharedArrayBuffer,
   sharedInteractionRaycastResultsBuffer: SharedArrayBuffer,
@@ -80,15 +81,18 @@ export async function initWorker(
 ): Promise<void> {
   console.log("[Worker] Initializing...");
 
-  // Initialize renderer
+  // --- Step 1: Initialize Core Renderer and Contexts ---
   state.renderer = new Renderer(offscreen);
   console.log("[Worker] Awaiting renderer init...");
   await state.renderer.init();
   console.log("[Worker] Renderer initialized.");
 
-  // Setup metrics context
-  state.metricsContext = createMetricsContext(sharedMetricsBuffer);
-  initializeMetrics(state.metricsContext);
+  // Initialize Resource Loading System
+  state.resourceLoadingSystem = new ResourceLoadingSystem(state.renderer);
+  await state.resourceLoadingSystem.init();
+
+  // Initialize IBL integration system
+  state.iblIntegrationSystem = new IBLIntegrationSystem();
 
   // Setup input context
   state.inputContext = createInputContext(sharedInputBuffer, false);
@@ -161,30 +165,8 @@ export async function initWorker(
     state.engineStateCtx = null;
   }
 
-  // Create core systems
-  state.cameraControllerSystem = new CameraControllerSystem(
-    state.actionController,
-  );
-  state.resourceManager = new ResourceManager(state.renderer);
-  state.world = new World();
-  state.sceneRenderData = new SceneRenderData();
-
-  // Setup prefab factory
-  state.prefabFactory = new PrefabFactory(state.world, state.resourceManager);
-  registerPrefabs(state.prefabFactory);
-
-  // Create default scene
-  try {
-    console.log("[Worker] Creating default scene...");
-    const sceneEntities = await createScene(state.world, state.resourceManager);
-    state.cameraEntity = sceneEntities.cameraEntity;
-    console.log("[Worker] Scene created successfully");
-  } catch (error) {
-    console.error("[Worker] Failed to create scene:", error);
-    throw error;
-  }
-
-  // Setup physics
+  // --- Step 2: Initialize Physics and World Contexts ---
+  // These must be created before systems that depend on them.
   console.log("[Worker] Setting up physics...");
   const commandsBuffer = new SharedArrayBuffer(COMMANDS_BUFFER_SIZE);
   const statesBuffer = new SharedArrayBuffer(STATES_BUFFER_SIZE);
@@ -196,6 +178,10 @@ export async function initWorker(
   );
   initializePhysicsHeaders(state.physicsCtx);
 
+  state.world = new World();
+  state.world.addResource(new ResourceCacheComponent());
+  state.sceneRenderData = new SceneRenderData();
+
   // Setup raycast contexts
   state.raycastResultsCtx = {
     i32: new Int32Array(sharedRaycastResultsBuffer),
@@ -205,6 +191,77 @@ export async function initWorker(
     i32: new Int32Array(sharedInteractionRaycastResultsBuffer),
   };
 
+  // --- Step 3: Setup Prefab Factory ---
+  state.prefabFactory = new PrefabFactory(state.world);
+  registerPrefabs(state.prefabFactory);
+
+  // --- Step 4: Create All Game Systems ---
+  // Now that all dependencies (world, physicsCtx, resourceManager, prefabFactory) are available,
+  // we can safely instantiate all systems.
+  state.cameraControllerSystem = new CameraControllerSystem(
+    state.actionController,
+  );
+  state.physicsCommandSystem = new PhysicsCommandSystem(state.physicsCtx);
+  state.playerControllerSystem = new PlayerControllerSystem(
+    state.actionController,
+    state.physicsCtx,
+  );
+  state.damageSystem = new DamageSystem(state.eventManager);
+  state.interactionSystem = new InteractionSystem(
+    state.world,
+    state.actionController,
+    state.eventManager,
+    state.physicsCtx,
+    state.interactionRaycastResultsCtx,
+  );
+  state.pickupSystem = new PickupSystem(state.world, state.eventManager);
+  state.inventorySystem = new InventorySystem(state.world, state.eventManager);
+  state.collisionEventSystem = new CollisionEventSystem(
+    state.world,
+    state.physicsCtx,
+    state.eventManager,
+  );
+  state.deathSystem = new DeathSystem(state.world, state.eventManager);
+  state.respawnSystem = new RespawnSystem(
+    state.world,
+    state.eventManager,
+    state.prefabFactory,
+  );
+  state.weaponSystem = new WeaponSystem(
+    state.world,
+    state.physicsCtx,
+    state.raycastResultsCtx,
+    state.eventManager,
+  );
+  state.projectileSystem = new ProjectileSystem(
+    state.world,
+    state.eventManager,
+    state.damageSystem,
+  );
+
+  state.uiRenderSystem = new UIRenderSystem(
+    state.renderer.device,
+    new ShaderPreprocessor(),
+    state.renderer.canvasFormat,
+  );
+  await state.uiRenderSystem.init();
+
+  // --- Step 5: Create Default Scene ---
+  // Create default scene
+  try {
+    console.log("[Worker] Creating default scene...");
+    const sceneEntities = await createScene(
+      state.world,
+      state.resourceLoadingSystem,
+    );
+    state.cameraEntity = sceneEntities.cameraEntity;
+    console.log("[Worker] Scene created successfully");
+  } catch (error) {
+    console.error("[Worker] Failed to create scene:", error);
+    throw error;
+  }
+
+  // --- Step 6: Initialize and Start Physics Worker ---
   // Create physics worker
   state.physicsWorker = new Worker(
     new URL("../physicsWorker/physicsWorker.ts", import.meta.url),
@@ -240,50 +297,7 @@ export async function initWorker(
   };
   state.physicsWorker.postMessage(initMsg);
 
-  // Create game systems
-  state.physicsCommandSystem = new PhysicsCommandSystem(state.physicsCtx);
-  state.playerControllerSystem = new PlayerControllerSystem(
-    state.actionController,
-    state.physicsCtx,
-  );
-  state.damageSystem = new DamageSystem(state.eventManager);
-  state.interactionSystem = new InteractionSystem(
-    state.world,
-    state.actionController,
-    state.eventManager,
-    state.physicsCtx,
-    state.interactionRaycastResultsCtx,
-  );
-  state.pickupSystem = new PickupSystem(state.world, state.eventManager);
-  state.inventorySystem = new InventorySystem(state.world, state.eventManager);
-
-  if (state.resourceManager) {
-    state.weaponSystem = new WeaponSystem(
-      state.world,
-      state.resourceManager,
-      state.physicsCtx,
-      state.raycastResultsCtx,
-      state.eventManager,
-    );
-  }
-
-  state.collisionEventSystem = new CollisionEventSystem(
-    state.world,
-    state.physicsCtx,
-    state.eventManager,
-  );
-  state.deathSystem = new DeathSystem(state.world, state.eventManager);
-  state.projectileSystem = new ProjectileSystem(
-    state.world,
-    state.eventManager,
-    state.damageSystem,
-  );
-  state.respawnSystem = new RespawnSystem(
-    state.world,
-    state.eventManager,
-    state.prefabFactory,
-  );
-
+  // --- Step 7: Final State Snapshot ---
   // Publish initial engine state snapshot
   if (state.engineStateCtx) {
     if ((state.engineStateCtx.i32.length | 0) >= 4) {

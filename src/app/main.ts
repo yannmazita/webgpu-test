@@ -1,15 +1,17 @@
 // src/app/main.ts
 import "@/style.css";
 import { SHARED_BUFFER_SIZE } from "@/core/sharedInputLayout";
-import { METRICS_BUFFER_SIZE } from "@/core/sharedMetricsLayout";
-import { createMetricsContext } from "@/core/metrics";
 import { createInputContext } from "@/core/input/manager";
 import { SHARED_ENGINE_STATE_BUFFER_SIZE } from "@/core/sharedEngineStateLayout";
 import {
   createEngineStateContext as createEngineStateCtx,
   initializeEngineStateHeader,
 } from "@/core/engineState";
-import { init as initUIElements, initUI, tickUI } from "./ui";
+import {
+  init as initEditor,
+  initGPU as initEditorGPU,
+  update as tickUI,
+} from "@/app/editor";
 import {
   CHAR_CONTROLLER_EVENTS_BUFFER_SIZE,
   INTERACTION_RAYCAST_RESULTS_BUFFER_SIZE,
@@ -21,15 +23,9 @@ if (!canvas) throw new Error("Canvas element not found");
 const uiCanvas = document.querySelector<HTMLCanvasElement>("#ui-canvas");
 if (!uiCanvas) throw new Error("UI Canvas element not found");
 
-const hud = document.querySelector<HTMLDivElement>("#hud");
-if (!hud) throw new Error("HUD element not found");
-
 // Setup shared memory and contexts
 const inputBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
 const inputContext = createInputContext(inputBuffer, true);
-
-const metricsBuffer = new SharedArrayBuffer(METRICS_BUFFER_SIZE);
-const metricsContext = createMetricsContext(metricsBuffer);
 
 const engineStateBuffer = new SharedArrayBuffer(
   SHARED_ENGINE_STATE_BUFFER_SIZE,
@@ -56,15 +52,7 @@ const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 
-initUIElements(
-  canvas,
-  uiCanvas,
-  hud,
-  inputContext,
-  metricsContext,
-  engineStateCtx,
-  worker,
-);
+initEditor(canvas, uiCanvas, inputContext, engineStateCtx, worker);
 
 const offscreen = canvas.transferControlToOffscreen();
 worker.postMessage(
@@ -72,7 +60,6 @@ worker.postMessage(
     type: "INIT",
     canvas: offscreen,
     sharedInputBuffer: inputBuffer,
-    sharedMetricsBuffer: metricsBuffer,
     sharedEngineStateBuffer: engineStateBuffer,
     sharedRaycastResultsBuffer: raycastResultsBuffer,
     sharedCollisionEventsBuffer: collisionEventsBuffer,
@@ -134,7 +121,8 @@ worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
 
 const tick = (now: number) => {
   // Always check for resize at the start of a frame.
-  // todo: refactor resizing (dumpster fire performance)
+  // todo: refactor resizing (dumpster fire performance - (only on firefox apparently))
+  // todo2: don't do on-the-fly resize, app (via UI) should be setting render and window (canvas) resolution
   sendResize();
 
   if (canSendFrame) {
@@ -146,9 +134,9 @@ const tick = (now: number) => {
       now,
     });
   }
-  tickUI(now);
+  tickUI();
   requestAnimationFrame(tick);
 };
 
-await initUI();
+await initEditorGPU();
 requestAnimationFrame(tick);

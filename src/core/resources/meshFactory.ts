@@ -139,19 +139,27 @@ function validateMeshData(
 
 /**
  * A stateless factory for creating Mesh objects from raw data.
- * It handles tangent generation, validation, and GPU buffer creation.
+ *
+ * @remarks
+ * It handles tangent generation using MikkTSpace, mesh validation, and the
+ * creation of all necessary GPU vertex and index buffers. This class centralizes
+ * the complex logic of converting abstract mesh data into a renderable format.
  */
 export class MeshFactory {
   /**
    * Creates a new mesh from the given mesh data.
    *
    * @remarks
-   * This is a low-level method that takes raw mesh data, processes it
-   * (ie generates tangents), and creates the necessary GPU buffers.
+   * This is a low-level method that takes raw mesh data, processes it, and
+   * creates the necessary GPU buffers. The processing includes:
+   * - De-indexing geometry for MikkTSpace tangent generation.
+   * - Generating tangents.
+   * - Re-indexing the geometry to optimize vertex count.
+   * - Creating and populating all required GPU vertex buffers.
    *
    * @param device The WebGPU device.
    * @param key A unique key to identify the mesh for debugging.
-   * @param data The mesh data, including positions, normals, indices, and texture coordinates.
+   * @param data The mesh data, including positions, normals, etc.
    * @returns A promise that resolves to the created mesh.
    */
   public static async createMesh(

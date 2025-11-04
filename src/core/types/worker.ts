@@ -40,8 +40,6 @@ export interface InitMsg {
   canvas: OffscreenCanvas;
   /** The `SharedArrayBuffer` for user input. */
   sharedInputBuffer: SharedArrayBuffer;
-  /** The `SharedArrayBuffer` for performance metrics. */
-  sharedMetricsBuffer: SharedArrayBuffer;
   /** The `SharedArrayBuffer` for engine state controlled by the UI. */
   sharedEngineStateBuffer: SharedArrayBuffer;
   /** The `SharedArrayBuffer` for receiving raycast hit results from the physics worker. */

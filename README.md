@@ -11,7 +11,7 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
 ### Core Architecture
 
 - **Three-Threaded Design:** Work is split across three threads:
-  - **Main Thread:** Handles user input, the editor UI (ImGui) and the HUD metrics.
+  - **Main Thread:** Handles user input and the environment editor UI (ImGui).
   - **Render Thread (Worker):** Manages the scene graph (ECS), runs all systems, and submits rendering commands to the GPU.
   - **Physics Thread (Worker):** Runs the Rapier3D physics simulation at a fixed timestep, decoupled from the render framerate.
 - **Lock-Free State Synchronization:** Utilizes `SharedArrayBuffer` for high-frequency, zero-copy state sharing between threads for:
