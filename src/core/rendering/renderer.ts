@@ -160,6 +160,8 @@ export class Renderer {
     this.defaultSampler = this.device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "repeat",
     });
 
     // Create a 1x1 white texture for non-textured materials
