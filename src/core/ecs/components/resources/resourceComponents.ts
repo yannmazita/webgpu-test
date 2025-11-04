@@ -28,6 +28,9 @@ export abstract class BaseResourceComponent implements IComponent {
   /** Reference count for automatic cleanup. */
   public refCount = 1;
 
+  /** Optional metadata for storing additional state or flags. */
+  public metadata?: unknown;
+
   /**
    * @param handle - The resource handle.
    */

@@ -4,7 +4,6 @@ import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { MeshRendererComponent } from "@/core/ecs/components/render/meshRendererComponent";
-import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,

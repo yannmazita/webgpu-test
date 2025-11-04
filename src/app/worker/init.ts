@@ -19,6 +19,7 @@ import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoa
 import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
 import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
+import { IBLIntegrationSystem } from "@/core/ecs/systems/ressources/iblIntegrationSystem";
 import {
   createInputContext,
   isKeyDown,
@@ -89,6 +90,9 @@ export async function initWorker(
   // Initialize Resource Loading System
   state.resourceLoadingSystem = new ResourceLoadingSystem(state.renderer);
   await state.resourceLoadingSystem.init();
+
+  // Initialize IBL integration system
+  state.iblIntegrationSystem = new IBLIntegrationSystem();
 
   // Setup input context
   state.inputContext = createInputContext(sharedInputBuffer, false);

@@ -60,6 +60,7 @@ export function frame(now: number): void {
     !state.inventorySystem ||
     !state.respawnSystem ||
     !state.resourceLoadingSystem ||
+    !state.iblIntegrationSystem ||
     !state.uiRenderSystem
   ) {
     self.postMessage({ type: "FRAME_DONE" });
@@ -81,6 +82,7 @@ export function frame(now: number): void {
 
   // --- Resource Loading ---
   state.resourceLoadingSystem.update(state.world);
+  state.iblIntegrationSystem.update(state.world);
 
   // --- Input & Controllers ---
   if (state.actionController.wasPressed("toggle_camera_mode")) {
@@ -153,6 +155,9 @@ export function frame(now: number): void {
 
   // 3. Submit all recorded commands at once.
   state.renderer.device.queue.submit([commandEncoder.finish()]);
+
+  // 4. Notify subsystems that the frame has been submitted.
+  state.renderer.onFrameSubmitted();
 
   // --- Frame End ---
   updatePreviousActionState(
