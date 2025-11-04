@@ -231,6 +231,90 @@ export async function createScene(
     new PhysicsColliderComponent(1, [100, 0.001, 100]),
   );
 
+  // --- Dynamic Physics Objects ---
+  // Create a stack of cubes for the player to interact with.
+  {
+    const cubeMeshHandle = ResourceHandle.forMesh("PRIM:cube:size=1");
+    const cubeMeshEntity = world.createEntity("cube_mesh_resource");
+    world.addComponent(
+      cubeMeshEntity,
+      new MeshResourceComponent(cubeMeshHandle),
+    );
+
+    const whiteMaterialSpec: PBRMaterialSpec = {
+      type: "PBR",
+      options: { albedo: [0.9, 0.8, 0.9, 1], metallic: 0, roughness: 0.8 },
+    };
+    const whiteMaterialKey = createMaterialSpecKey(whiteMaterialSpec);
+    const whiteMaterialHandle = ResourceHandle.forMaterial(whiteMaterialKey);
+    const whiteMatEntity = world.createEntity("white_material_resource");
+    world.addComponent(
+      whiteMatEntity,
+      new PBRMaterialSpecComponent(whiteMaterialSpec),
+    );
+    world.addComponent(whiteMatEntity, new MaterialResourceComponent());
+
+    // Create the stack of cubes.
+    const CUBE_COUNT = 8;
+    for (let i = 0; i < CUBE_COUNT; i++) {
+      const cube = world.createEntity(`dynamic_cube_${i}`);
+      const t = new TransformComponent();
+      t.setPosition(5, 0.5 + i * 1.01, 5);
+      world.addComponent(cube, t);
+
+      world.addComponent(
+        cube,
+        new MeshRendererComponent(cubeMeshHandle, whiteMaterialHandle),
+      );
+
+      world.addComponent(cube, new PhysicsBodyComponent("dynamic"));
+      world.addComponent(
+        cube,
+        new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
+      );
+      world.addComponent(cube, new HealthComponent(50));
+    }
+
+    const greenMaterialSpec: PBRMaterialSpec = {
+      type: "PBR",
+      options: {
+        albedo: [0.1, 0.8, 0.2, 1.0],
+        emissive: [0.1, 0.8, 0.2],
+        emissiveStrength: 5,
+      },
+    };
+    const greenMaterialKey = createMaterialSpecKey(greenMaterialSpec);
+    const greenMaterialHandle = ResourceHandle.forMaterial(greenMaterialKey);
+    const greenMatEntity = world.createEntity("green_material_resource");
+    world.addComponent(
+      greenMatEntity,
+      new PBRMaterialSpecComponent(greenMaterialSpec),
+    );
+    world.addComponent(greenMatEntity, new MaterialResourceComponent());
+
+    // Create the special "pickup" cube.
+    const pickupCube = world.createEntity("pickup_cube_health");
+    const t = new TransformComponent();
+    t.setPosition(-3, 0.5, 2);
+    world.addComponent(pickupCube, t);
+
+    world.addComponent(
+      pickupCube,
+      new MeshRendererComponent(cubeMeshHandle, greenMaterialHandle),
+    );
+
+    world.addComponent(pickupCube, new PhysicsBodyComponent("dynamic"));
+    world.addComponent(
+      pickupCube,
+      new PhysicsColliderComponent(1, [0.5, 0.5, 0.5]),
+    );
+    world.addComponent(
+      pickupCube,
+      new InteractableComponent("Press [E] to pick up Health Pack", 8.0),
+    );
+    world.addComponent(pickupCube, new PickupComponent("health_pack", 25));
+  }
+
   // --- Global Sun and Shadow Settings ---
   world.addResource(new SceneSunComponent());
   world.addResource(new ShadowSettingsComponent());
