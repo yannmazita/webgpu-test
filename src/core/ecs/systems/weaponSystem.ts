@@ -16,12 +16,12 @@ import {
   PhysicsBodyComponent,
   PhysicsColliderComponent,
 } from "@/core/ecs/components/physicsComponents";
-import { MeshRendererComponent } from "@/core/ecs/components/meshRendererComponent";
-import { ResourceManager } from "@/core/resources/resourceManager";
+import { MeshRendererComponent } from "@/core/ecs/components/render/meshRendererComponent";
 import { LifetimeComponent } from "@/core/ecs/components/lifetimeComponent";
 import { EventManager } from "@/core/ecs/events/eventManager";
 import { GameEvent } from "@/core/ecs/events/gameEvent";
 import { ProjectileComponent } from "@/core/ecs/components/projectileComponent";
+import { ResourceCacheComponent } from "../components/resources/resourceCacheComponent";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();
@@ -37,14 +37,19 @@ const projectileVelocity = vec3.create();
  * 3. Publishing combat events for weapon actions
  * 4. Processing hitscan results and publishing hit events
  *
- * Projectile impacts are handled by ProjectileSystem.
+ * It consumes pre-loaded projectile assets from the global `ResourceCacheComponent`.
  */
 export class WeaponSystem {
   private lastRaycastGen = 0;
 
+  /**
+   * @param world - The ECS world.
+   * @param physCtx - The shared physics context.
+   * @param raycastResultsCtx - The shared buffer for raycast results.
+   * @param eventManager - The global event manager.
+   */
   constructor(
     private world: World,
-    private resourceManager: ResourceManager,
     private physCtx: PhysicsContext,
     private raycastResultsCtx: { i32: Int32Array; f32: Float32Array },
     private eventManager: EventManager,
@@ -52,9 +57,6 @@ export class WeaponSystem {
     this.eventManager.subscribe("fire-weapon", this.onFireWeapon.bind(this));
   }
 
-  /**
-   * The listener function for `FireWeaponEvent`.
-   */
   private onFireWeapon(event: GameEvent): void {
     if (event.type !== "fire-weapon") return;
 
@@ -69,13 +71,9 @@ export class WeaponSystem {
 
     // Check ammo
     if (weapon.usesAmmo && weapon.currentMagazineAmmo <= 0) {
-      // Publish weapon empty event
       this.eventManager.publish({
         type: "weapon-empty",
-        payload: {
-          entity: firingEntity,
-          weaponType: weapon.weaponType,
-        },
+        payload: { entity: firingEntity, weaponType: weapon.weaponType },
       });
       return;
     }
@@ -86,8 +84,6 @@ export class WeaponSystem {
     // Consume ammo
     if (weapon.usesAmmo) {
       weapon.currentMagazineAmmo--;
-
-      // Publish ammo changed event
       this.eventManager.publish({
         type: "ammo-changed",
         payload: {
@@ -99,7 +95,6 @@ export class WeaponSystem {
       });
     }
 
-    // Find the main camera for ray origin and direction
     const cameraQuery = this.world.query([
       MainCameraTagComponent,
       CameraComponent,
@@ -112,15 +107,12 @@ export class WeaponSystem {
     );
     if (!cameraTransform) return;
 
-    // Ray originates from the camera's world position
     vec3.set(
       cameraTransform.worldMatrix[12],
       cameraTransform.worldMatrix[13],
       cameraTransform.worldMatrix[14],
       rayOrigin,
     );
-
-    // Ray direction is the camera's forward vector (-Z axis)
     vec3.set(
       -cameraTransform.worldMatrix[8],
       -cameraTransform.worldMatrix[9],
@@ -131,7 +123,6 @@ export class WeaponSystem {
 
     if (weapon.isHitscan) {
       // --- Hitscan Logic ---
-      // Publish hitscan fired event
       this.eventManager.publish({
         type: "hitscan-fired",
         payload: {
@@ -142,7 +133,6 @@ export class WeaponSystem {
           range: weapon.range,
         },
       });
-
       tryEnqueueCommand(this.physCtx, CMD_WEAPON_RAYCAST, firingEntity, [
         rayOrigin[0],
         rayOrigin[1],
@@ -154,10 +144,6 @@ export class WeaponSystem {
       ]);
     } else {
       // --- Projectile Spawning Logic ---
-      console.log(
-        `[WeaponSystem] Firing projectile weapon for entity ${firingEntity}`,
-      );
-
       if (!weapon.projectileMeshHandle || !weapon.projectileMaterialHandle) {
         console.warn(
           "[WeaponSystem] Attempted to fire projectile weapon without projectile mesh/material handles.",
@@ -165,51 +151,48 @@ export class WeaponSystem {
         return;
       }
 
-      const mesh = this.resourceManager.getMeshByHandleSync(
-        weapon.projectileMeshHandle,
-      );
-      const material = this.resourceManager.getMaterialInstanceByHandleSync(
-        weapon.projectileMaterialHandle,
-      );
+      // Get resources from the global cache
+      const cache = this.world.getResource(ResourceCacheComponent);
+      if (!cache) {
+        console.error(
+          "[WeaponSystem] ResourceCacheComponent not found in world. Firing aborted.",
+        );
+        return;
+      }
+      const mesh = cache.getMesh(weapon.projectileMeshHandle.key);
+      const material = cache.getMaterial(weapon.projectileMaterialHandle.key);
 
       if (!mesh || !material) {
         console.error(
-          `[WeaponSystem] Projectile resources not pre-loaded for handles: ${weapon.projectileMeshHandle}, ${weapon.projectileMaterialHandle}. Firing aborted.`,
+          `[WeaponSystem] Projectile resources not pre-loaded for handles: ${weapon.projectileMeshHandle.key}, ${weapon.projectileMaterialHandle.key}. Firing aborted.`,
         );
         return;
       }
 
       const projectileEntity = this.world.createEntity();
-      console.log(
-        `[WeaponSystem] Created projectile entity ${projectileEntity}`,
-      );
-
       const startPosition = vec3.add(rayOrigin, vec3.scale(rayDirection, 1.0));
       const transform = new TransformComponent();
       transform.setPosition(startPosition);
       this.world.addComponent(projectileEntity, transform);
 
+      // Use the handles directly in the MeshRendererComponent
       this.world.addComponent(
         projectileEntity,
-        new MeshRendererComponent(mesh, material),
+        new MeshRendererComponent(
+          weapon.projectileMeshHandle,
+          weapon.projectileMaterialHandle,
+        ),
       );
 
-      // Gameplay - pass weapon damage to projectile
-      console.log(
-        `[WeaponSystem] Adding ProjectileComponent with damage ${weapon.damage}`,
-      );
       this.world.addComponent(
         projectileEntity,
         new ProjectileComponent(firingEntity, weapon.damage),
       );
-
-      // Lifetime
       this.world.addComponent(
         projectileEntity,
         new LifetimeComponent(weapon.projectileLifetime),
       );
 
-      // Physics
       vec3.scale(rayDirection, weapon.projectileSpeed, projectileVelocity);
       this.world.addComponent(
         projectileEntity,
@@ -219,9 +202,8 @@ export class WeaponSystem {
       collider.setSphere(weapon.projectileRadius);
       this.world.addComponent(projectileEntity, collider);
 
-      // Publish projectile spawned event
-      const spawnedEvent = {
-        type: "projectile-spawned" as const,
+      this.eventManager.publish({
+        type: "projectile-spawned",
         payload: {
           projectile: projectileEntity,
           owner: firingEntity,
@@ -229,18 +211,10 @@ export class WeaponSystem {
           velocity: vec3.clone(projectileVelocity),
           weaponType: weapon.weaponType,
         },
-      };
-      console.log(
-        `[WeaponSystem] Publishing projectile-spawned event:`,
-        spawnedEvent.payload,
-      );
-      this.eventManager.publish(spawnedEvent);
+      });
     }
   }
 
-  /**
-   * Updates the system every frame.
-   */
   public update(deltaTime: number): void {
     // 1. Update cooldown timers for all weapons
     const allWeaponsQuery = this.world.query([WeaponComponent]);

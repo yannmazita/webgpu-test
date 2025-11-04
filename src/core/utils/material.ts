@@ -1,65 +1,34 @@
 // src/core/utils/material.ts
-import { PBRMaterialOptions } from "@/core/types/gpu";
-import { MaterialInstanceCache } from "../resources/resourceCache";
-import { MaterialInstance } from "../materials/materialInstance";
-import { PBRMaterialSpec } from "../resources/resourceManager";
+import { PBRMaterialSpec } from "@/core/types/material";
 
 /**
- * Creates a deterministic, unique cache key for a PBR material based on its options.
+ * Creates a stable, canonical string key from a PBR material specification.
  *
  * @remarks
- * This function serializes the most important properties of a material into a
- * string, ensuring that materials with the same visual properties map to the
- * same cache key. This is crucial for efficient caching and avoiding
- * redundant GPU resource creation.
+ * This function is used to generate a unique key for caching material instances.
+ * It sorts texture keys and serializes all options to ensure that two
+ * identical specs produce the same key, regardless of property order.
  *
- * @param options The PBR material options.
- * @returns A string key suitable for caching.
+ * @param spec - The PBR material specification.
+ * @returns A unique string key for caching.
  */
-export function createMaterialCacheKey(options: PBRMaterialOptions): string {
-  // Use a sorted list of keys to ensure consistent ordering
-  const keys = [
-    "albedo",
-    "albedoMap",
-    "metallic",
-    "roughness",
-    "metallicRoughnessMap",
-    "normalMap",
-    "normalIntensity",
-    "emissive",
-    "emissiveMap",
-    "emissiveStrength",
-    "emissiveUV",
-    "occlusionMap",
-    "occlusionStrength",
-    "occlusionUV",
-    "specularFactor",
-    "specularColorFactor",
-    "specularFactorMap",
-    "specularColorMap",
-    "uvScale",
-    "albedoUV",
-    "metallicRoughnessUV",
-    "normalUV",
-    "usePackedOcclusion",
-  ] as const;
+export function createMaterialSpecKey(spec: PBRMaterialSpec): string {
+  const { options } = spec;
+  const parts: string[] = ["PBR"];
 
-  const parts: string[] = [];
-  for (const key of keys) {
-    const value = options[key as any];
-    if (value !== undefined && value !== null) {
+  // Sort keys to ensure canonical representation
+  const sortedKeys = Object.keys(options).sort() as (keyof typeof options)[];
+
+  for (const key of sortedKeys) {
+    const value = options[key];
+    if (value !== undefined) {
       if (Array.isArray(value)) {
-        parts.push(`${key}:[${value.join(",")}]`);
-      } else if (typeof value === "object") {
-        // Handle vec3 or other simple objects
-        parts.push(`${key}:{${JSON.stringify(value)}}`);
+        parts.push(`${key}:${value.join(",")}`);
       } else {
-        parts.push(`${key}:${value}`);
+        parts.push(`${key}:${String(value)}`);
       }
     }
   }
 
-  // Sort parts to ensure the key is always the same for the same options
-  parts.sort();
   return parts.join("|");
 }

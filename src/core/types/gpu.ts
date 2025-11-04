@@ -215,6 +215,11 @@ export interface PBRMaterialOptions {
    * Default: [1, 1]
    */
   uvScale?: [number, number];
+
+  samplerAddressModeU?: GPUAddressMode;
+  samplerAddressModeV?: GPUAddressMode;
+  samplerMagFilter?: GPUFilterMode;
+  samplerMinFilter?: GPUFilterMode;
 }
 
 /**
@@ -226,4 +231,9 @@ export interface UnlitGroundMaterialOptions {
   textureUrl?: string;
   /** A solid color to apply [R, G, B, A]. Used if `textureUrl` is not provided. */
   color?: [number, number, number, number];
+
+  samplerAddressModeU?: GPUAddressMode;
+  samplerAddressModeV?: GPUAddressMode;
+  samplerMagFilter?: GPUFilterMode;
+  samplerMinFilter?: GPUFilterMode;
 }

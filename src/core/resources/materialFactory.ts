@@ -66,7 +66,6 @@ export class MaterialFactory {
    * @param dummyTexture A fallback 1x1 GPU texture.
    * @param materialTemplate The shared `PBRMaterial` template.
    * @param options An object containing material properties and texture URLs.
-   * @param sampler The `GPUSampler` to be used for all textures.
    * @returns A promise that resolves to a new `MaterialInstance`.
    */
   public static async createPBRInstance(
@@ -75,8 +74,15 @@ export class MaterialFactory {
     dummyTexture: GPUTexture,
     materialTemplate: PBRMaterial,
     options: PBRMaterialOptions = {},
-    sampler: GPUSampler,
   ): Promise<MaterialInstance> {
+    const sampler = device.createSampler({
+      addressModeU: options.samplerAddressModeU ?? "clamp-to-edge",
+      addressModeV: options.samplerAddressModeV ?? "clamp-to-edge",
+      magFilter: options.samplerMagFilter ?? "linear",
+      minFilter: options.samplerMinFilter ?? "linear",
+      mipmapFilter: "linear",
+    });
+
     const loadTexture = (
       url: string | undefined,
       format: GPUTextureFormat,
@@ -136,7 +142,6 @@ export class MaterialFactory {
    * @param device The WebGPU device used for resource creation.
    * @param preprocessor The shader preprocessor for shader compilation.
    * @param dummyTexture A fallback GPU texture.
-   * @param defaultSampler The default `GPUSampler` to use.
    * @param options An object containing the material's properties.
    * @returns A promise that resolves to a new `MaterialInstance`.
    */
@@ -144,13 +149,20 @@ export class MaterialFactory {
     device: GPUDevice,
     preprocessor: ShaderPreprocessor,
     dummyTexture: GPUTexture,
-    defaultSampler: GPUSampler,
     options: UnlitGroundMaterialOptions,
   ): Promise<MaterialInstance> {
     if (!this.unlitGroundInitialized) {
       await UnlitGroundMaterial.initialize(device, preprocessor);
       this.unlitGroundInitialized = true;
     }
+
+    const sampler = device.createSampler({
+      addressModeU: options.samplerAddressModeU ?? "clamp-to-edge",
+      addressModeV: options.samplerAddressModeV ?? "clamp-to-edge",
+      magFilter: options.samplerMagFilter ?? "linear",
+      minFilter: options.samplerMinFilter ?? "linear",
+      mipmapFilter: "linear",
+    });
 
     const texture = options.textureUrl
       ? await createTextureFromImage(
@@ -161,7 +173,7 @@ export class MaterialFactory {
       : dummyTexture;
 
     const template = UnlitGroundMaterial.getTemplate(device);
-    return template.createInstance(options, texture, defaultSampler);
+    return template.createInstance(options, texture, sampler);
   }
 
   /**
@@ -184,7 +196,6 @@ export class MaterialFactory {
     device: GPUDevice,
     supportedCompressedFormats: Set<GPUTextureFormat>,
     dummyTexture: GPUTexture,
-    defaultSampler: GPUSampler,
     preprocessor: ShaderPreprocessor,
     options: PBRMaterialOptions = {},
   ): Promise<MaterialInstance> {
@@ -202,7 +213,6 @@ export class MaterialFactory {
       dummyTexture,
       template,
       options,
-      defaultSampler,
     );
   }
 }

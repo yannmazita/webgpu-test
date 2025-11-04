@@ -15,7 +15,6 @@ import {
 } from "@/core/ecs/components/sunComponent";
 import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
-import { UIPass } from "@/core/rendering/passes/uiPass";
 import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";
 
 /**
@@ -64,7 +63,6 @@ export class Renderer {
   private skyboxPass!: SkyboxPass;
   private opaquePass!: OpaquePass;
   private transparentPass!: TransparentPass;
-  private uiPass!: UIPass;
 
   // Per-frame data
   private frameBindGroupLayout!: GPUBindGroupLayout;
@@ -250,8 +248,7 @@ export class Renderer {
 
     this.skyboxPass = new SkyboxPass();
     this.opaquePass = new OpaquePass();
-    this.transparentPass = new TransparentPass(this.device);
-    this.uiPass = new UIPass();
+    this.transparentPass = new TransparentPass();
 
     this.frameBindGroupLayout = this.device.createBindGroupLayout({
       label: "FRAME_BIND_GROUP_LAYOUT",
@@ -721,40 +718,24 @@ export class Renderer {
    * @remarks
    * This is the main entry point for the render loop. It orchestrates the
    * entire frame pipeline in this sequence:
-   * 1. Handles any pending resize events.
-   * 2. Updates global GPU uniform buffers for the camera, scene, and lights.
-   * 3. Performs frustum culling to get a list of potentially visible objects.
-   * 4. Delegates to the `InstanceBufferManager` to pack all instance data
-   *    (model matrices, flags) for all render queues (shadows, opaques,
-   *    transparents) into a single GPU buffer with one upload.
-   * 5. Constructs the immutable `RenderContext` for the frame.
-   * 6. Executes the sequence of render passes: `ClusterPass` and `ShadowPass`
-   *    run first, followed by the main scene passes (`SkyboxPass`,
-   *    `OpaquePass`, `TransparentPass`) which draw into the canvas.
-   * 7. If provided, invokes a callback to allow for custom UI rendering on top
-   *    of the scene.
-   * 8. Submits all recorded GPU commands for execution.
    *
    * @param camera The camera to render from.
    * @param sceneData The data for the scene to render.
-   * @param postSceneDrawCallback An optional callback to render UI or other
-   *   content after the main scene has been drawn.
+   * @param commandEncoder
    * @param sun The scene's directional sun component.
    * @param shadowSettings The current shadow quality settings.
    */
   public render(
     camera: CameraComponent,
     sceneData: SceneRenderData,
-    postSceneDrawCallback?: (scenePassEncoder: GPURenderPassEncoder) => void,
+    commandEncoder: GPUCommandEncoder,
     sun?: SceneSunComponent,
     shadowSettings?: ShadowSettingsComponent,
   ): void {
     const tStart = performance.now();
-
     Profiler.begin("Render.Total");
-    Profiler.begin("Render.HandleResize");
+
     this._handleResize(camera);
-    Profiler.end("Render.HandleResize");
 
     if (this.canvas.width === 0 || this.canvas.height === 0) {
       this.stats.canvasWidth = this.canvas.width;
@@ -767,7 +748,6 @@ export class Renderer {
       return;
     }
 
-    Profiler.begin("Render.UpdateUniforms");
     this._updateFrameUniforms(
       camera,
       sceneData.lights,
@@ -775,26 +755,17 @@ export class Renderer {
       sun,
       shadowSettings,
     );
-    Profiler.end("Render.UpdateUniforms");
 
-    // 1. Frustum Culling
-    Profiler.begin("Render.FrustumCull");
     const visibleRenderables = sceneData.renderables.filter((r) =>
       this._isInFrustum(r, camera),
     );
-    Profiler.end("Render.FrustumCull");
 
-    // 2. Separate by render queue
-    Profiler.begin("Render.Separate");
-    const opaqueRenderables: Renderable[] = [];
-    const transparentRenderables: Renderable[] = [];
-    for (const r of visibleRenderables) {
-      if (r.material.material.isTransparent) {
-        transparentRenderables.push(r);
-      } else {
-        opaqueRenderables.push(r);
-      }
-    }
+    const opaqueRenderables = visibleRenderables.filter(
+      (r) => !r.material.material.isTransparent,
+    );
+    const transparentRenderables = visibleRenderables.filter(
+      (r) => r.material.material.isTransparent,
+    );
     const shadowCasters =
       sun && sun.enabled && sun.castsShadows && shadowSettings
         ? sceneData.renderables.filter(
@@ -802,23 +773,14 @@ export class Renderer {
               r.castShadows !== false && !r.material.material.isTransparent,
           )
         : [];
-    Profiler.end("Render.Separate");
 
-    // 3. Pack all instance data for the frame into a single buffer
-    Profiler.begin("Render.PackInstanceBuffer");
     const instanceAllocations = this.instanceBufferManager.packAndUpload(
       shadowCasters,
       opaqueRenderables,
       transparentRenderables,
     );
-    Profiler.end("Render.PackInstanceBuffer");
 
-    // 4. Create an immutable context for the frame's render passes
-    const commandEncoder = this.device.createCommandEncoder({
-      label: "MAIN_FRAME_ENCODER",
-    });
     const context: RenderContext = {
-      // Pass the culled list of renderables to the context
       sceneData: { ...sceneData, renderables: visibleRenderables },
       camera,
       sun,
@@ -840,14 +802,14 @@ export class Renderer {
       canvasHeight: this.canvas.height,
     };
 
-    // 5. Execute passes
+    // Execute compute passes first
     this.clusterPass.execute(context);
     this.shadowPass.execute(context);
 
+    // Now execute render passes
     const hasStencil =
       this.depthFormat === "depth24plus-stencil8" ||
       (this.depthFormat as string) === "depth32float-stencil8";
-
     const depthAttachment: GPURenderPassDepthStencilAttachment = {
       view: context.depthView,
       depthClearValue: 1.0,
@@ -888,37 +850,16 @@ export class Renderer {
     );
     scenePassEncoder.setBindGroup(0, context.frameBindGroup);
 
-    // Execute passes that render into the main scene pass
     this.skyboxPass.execute(context, scenePassEncoder);
-    Profiler.begin("Render.OpaquePass");
     this.stats.drawsOpaque = this.opaquePass.execute(context, scenePassEncoder);
-    Profiler.end("Render.OpaquePass");
-    Profiler.begin("Render.TransparentPass");
     this.stats.drawsTransparent = this.transparentPass.execute(
       context,
       scenePassEncoder,
     );
-    Profiler.end("Render.TransparentPass");
 
     scenePassEncoder.end();
 
-    if (postSceneDrawCallback) {
-      this.uiPass.record(
-        context.commandEncoder,
-        context.canvasView,
-        context.canvasWidth,
-        context.canvasHeight,
-        postSceneDrawCallback,
-      );
-    }
-
-    // 6. Submit
-    Profiler.begin("Render.Submit");
-    this.device.queue.submit([commandEncoder.finish()]);
-    this.clusterPass.onSubmitted();
-    Profiler.end("Render.Submit");
-
-    // 7. Update Stats
+    // Update stats
     this.stats.visibleOpaque = opaqueRenderables.length;
     this.stats.visibleTransparent = transparentRenderables.length;
     this.stats.instancesOpaque = opaqueRenderables.length;
@@ -927,12 +868,45 @@ export class Renderer {
     this.stats.canvasWidth = context.canvasWidth;
     this.stats.canvasHeight = context.canvasHeight;
     this.clusterPass.updateStats(this.stats);
-
     this.stats.cpuTotalUs = Math.max(
       0,
       Math.round((performance.now() - tStart) * 1000),
     );
     Profiler.end("Render.Total");
+  }
+
+  /**
+   * Notifies internal subsystems that the frame's command buffer has been submitted.
+   * @remarks
+   * This must be called after `device.queue.submit()` to allow subsystems like
+   * the cluster builder to safely initiate asynchronous GPU readback operations.
+   */
+  public onFrameSubmitted(): void {
+    this.clusterPass.onSubmitted();
+  }
+
+  /**
+   * Gets the default 1x1 white fallback texture.
+   * @returns The fallback GPUTexture.
+   */
+  public getDummyTexture(): GPUTexture {
+    return this.dummyTexture;
+  }
+
+  /**
+   * Gets the default texture sampler.
+   * @returns The default GPUSampler.
+   */
+  public getDefaultSampler(): GPUSampler {
+    return this.defaultSampler;
+  }
+
+  public getCanvas(): HTMLCanvasElement | OffscreenCanvas {
+    return this.canvas;
+  }
+
+  public getContext(): GPUCanvasContext {
+    return this.context;
   }
 
   /**
