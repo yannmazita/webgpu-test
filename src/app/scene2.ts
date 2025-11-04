@@ -164,10 +164,22 @@ export async function createScene(
 
   // --- Spawn Points ---
   const spawnPoint1 = world.createEntity("spawn_point_1");
-  const spawnPoint1Transform = new TransformComponent();
-  spawnPoint1Transform.setPosition(0, 1, 10);
-  world.addComponent(spawnPoint1, spawnPoint1Transform);
+  const t1 = new TransformComponent();
+  t1.setPosition(0, 1, 10);
+  world.addComponent(spawnPoint1, t1);
   world.addComponent(spawnPoint1, new SpawnPointComponent("player_spawn"));
+
+  const spawnPoint2 = world.createEntity("spawn_point_2");
+  const t2 = new TransformComponent();
+  t2.setPosition(15, 1, 15);
+  world.addComponent(spawnPoint2, t2);
+  world.addComponent(spawnPoint2, new SpawnPointComponent("player_spawn"));
+
+  const spawnPoint3 = world.createEntity("spawn_point_3");
+  const t3 = new TransformComponent();
+  t3.setPosition(-15, 1, -15);
+  world.addComponent(spawnPoint3, t3);
+  world.addComponent(spawnPoint3, new SpawnPointComponent("player_spawn"));
 
   // --- Fog ---
   const fog = new FogComponent();
