@@ -371,13 +371,11 @@ export class ResourceLoadingSystem {
       this.renderer.device,
     );
     const dummyTexture = this.renderer.getDummyTexture();
-    const defaultSampler = this.renderer.getDefaultSampler();
 
     return MaterialFactory.resolvePBRMaterial(
       this.renderer.device,
       supportedFormats,
       dummyTexture,
-      defaultSampler,
       this.preprocessor,
       spec.options,
     );

@@ -25,7 +25,7 @@ export function createMaterialSpecKey(spec: PBRMaterialSpec): string {
       if (Array.isArray(value)) {
         parts.push(`${key}:${value.join(",")}`);
       } else {
-        parts.push(`${key}:${value}`);
+        parts.push(`${key}:${String(value)}`);
       }
     }
   }

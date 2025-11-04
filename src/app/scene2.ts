@@ -194,6 +194,8 @@ export async function createScene(
         "/assets/textures/snow_02_4k/textures/snow_02_rough_4k.jpg",
       metallic: 0.0,
       uvScale: [5, 5],
+      samplerAddressModeU: "repeat",
+      samplerAddressModeV: "repeat",
     },
   };
   const groundMaterialKey = createMaterialSpecKey(groundMaterialSpec);
