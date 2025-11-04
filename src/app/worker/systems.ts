@@ -1,7 +1,7 @@
 // src/app/worker/systems.ts
 import { state } from "@/app/worker/state";
-import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { IBLResourceComponent } from "@/core/ecs/components/resources/resourceComponents";
+import { ResourceHandle, ResourceType } from "@/core/resources/resourceHandle";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 
 /**
@@ -52,35 +52,47 @@ export function handleToneMappingChange(enabled: boolean): void {
 }
 
 /**
- * Handles environment map changes.
+ * Handles environment map changes by updating the IBL resource component.
  *
  * @remarks
- * Loads a new HDR environment map and updates the global IBL and skybox
- * resources. Replaces existing environment components in the world.
+ * This function finds or creates an entity with an `IBLResourceComponent` and
+ * updates its properties to match the new request. The `ResourceLoadingSystem`
+ * will then detect this change and trigger the asynchronous loading and
+ * generation of the new environment map.
  *
- * @param url - URL of the HDR environment map to load
- * @param size - Desired resolution for the environment cubemap
+ * @param url - URL of the HDR environment map to load.
+ * @param size - Desired resolution for the environment cubemap.
  */
 export async function handleEnvironmentChange(
   url: string,
   size: number,
 ): Promise<void> {
-  if (!state.resourceManager || !state.world) return;
+  if (!state.world) return;
 
   try {
-    const env = await state.resourceManager.createEnvironmentMap(
-      String(url),
+    const world = state.world;
+    const query = world.query([IBLResourceComponent]);
+    const iblEntity =
+      query.length > 0 ? query[0] : world.createEntity("ibl_resource");
+
+    // Create a new handle and component to trigger a reload.
+    const newHandle = ResourceHandle.create(ResourceType.EnvironmentMap, url);
+    const newComponent = new IBLResourceComponent(
+      newHandle,
+      url,
       Math.max(16, Math.min(4096, Number(size) | 0)),
     );
 
-    // Replace global resources
-    state.world.removeResource(SkyboxComponent);
-    state.world.addResource(new SkyboxComponent(env.skyboxMaterial));
-    state.world.removeResource(IBLComponent);
-    state.world.addResource(env.iblComponent);
+    // Replace or add the component on the entity.
+    world.addComponent(iblEntity, newComponent);
 
-    console.log("[Worker] Environment updated:", url, "size=", size);
+    console.log(
+      "[Worker] Environment change requested for:",
+      url,
+      "size=",
+      size,
+    );
   } catch (e) {
-    console.error("[Worker] Failed to update environment:", e);
+    console.error("[Worker] Failed to handle environment change request:", e);
   }
 }

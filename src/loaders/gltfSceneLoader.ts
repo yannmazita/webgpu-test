@@ -32,19 +32,26 @@ interface NodeInstantiationContext {
   gltf: ParsedGLTF;
   baseUri: string;
   nodeToEntityMap: Map<number, Entity>;
+  animatedMaterialIndices: Set<number>;
+  materialToEntitiesMap: Map<number, Entity[]>;
 }
 
 /**
  * Handles the instantiation of a parsed GLTF asset into an ECS scene.
  * @remarks
- * This class traverses the glTF scene graph, creating corresponding entities
- * and components. It uses the new ECS resource pattern, creating entities with
- * resource components (`MeshResourceComponent`, `PBRMaterialSpecComponent`) to
- * declaratively trigger asset loading via the `ResourceLoadingSystem`.
+ * This class is responsible for traversing the glTF scene graph, creating
+ * corresponding entities in the world, and attaching the necessary components
+ * like Transforms, MeshRenderers, and Animations. It uses the ECS resource
+ * pattern, creating entities with resource components to declaratively trigger
+ * asset loading via the `ResourceLoadingSystem`.
  */
 export class GltfSceneLoader {
   private world: World;
 
+  /**
+   * @param world - The ECS World where entities will be created.
+   * @param renderer - The main renderer instance, used for device access.
+   */
   constructor(world: World) {
     this.world = world;
   }
@@ -54,6 +61,23 @@ export class GltfSceneLoader {
     const scene = gltf.json.scenes?.[sceneIndex];
     if (!scene) throw new Error(`Scene not found in glTF file.`);
 
+    // --- Pre-analysis for Material Animations ---
+    const animatedMaterialIndices = new Set<number>();
+    if (gltf.json.animations) {
+      for (const anim of gltf.json.animations) {
+        for (const channel of anim.channels) {
+          const pointer =
+            channel.target.extensions?.KHR_animation_pointer?.pointer;
+          if (pointer?.startsWith("/materials/")) {
+            const parts = pointer.split("/");
+            if (parts.length >= 3) {
+              animatedMaterialIndices.add(parseInt(parts[2], 10));
+            }
+          }
+        }
+      }
+    }
+
     const sceneRootEntity = this.world.createEntity("gltf_scene_root");
     this.world.addComponent(sceneRootEntity, new TransformComponent());
 
@@ -61,6 +85,8 @@ export class GltfSceneLoader {
       gltf,
       baseUri,
       nodeToEntityMap: new Map<number, Entity>(),
+      animatedMaterialIndices,
+      materialToEntitiesMap: new Map<number, Entity[]>(),
     };
 
     for (const nodeIndex of scene.nodes) {
@@ -86,18 +112,13 @@ export class GltfSceneLoader {
     if (node.matrix) {
       mat4.getTranslation(node.matrix, transform.position);
       mat4.getScaling(node.matrix, transform.scale);
-
-      // Decompose rotation by removing scale from the 3x3 part of the matrix
       const rotationMatrix = mat3.fromMat4(node.matrix);
-      // Create an inverse scale vector to normalize the matrix axes
       const invScale = vec3.create(
         1.0 / transform.scale[0],
         1.0 / transform.scale[1],
         1.0 / transform.scale[2],
       );
-      // Apply the inverse scale to get a pure rotation matrix
       mat3.scale(rotationMatrix, invScale, rotationMatrix);
-      // Convert the 3x3 rotation matrix to a quaternion
       quat.fromMat(rotationMatrix, transform.rotation);
     } else {
       if (node.translation)
@@ -117,8 +138,6 @@ export class GltfSceneLoader {
       const meshHandle = ResourceHandle.forMesh(
         `GLTF:${ctx.baseUri}#${meshName}`,
       );
-
-      // Trigger mesh loading by adding the component
       this.world.addComponent(entity, new MeshResourceComponent(meshHandle));
 
       const materialHandles: ResourceHandle<MaterialInstance>[] = [];
@@ -139,7 +158,6 @@ export class GltfSceneLoader {
           const key = createMaterialSpecKey(spec);
           materialHandle = ResourceHandle.forMaterial(key);
 
-          // Check if a resource entity for this material already exists
           const cache = this.world.getResource(ResourceCacheComponent);
           if (!cache?.has(key)) {
             const matEntity = this.world.createEntity(
@@ -151,8 +169,13 @@ export class GltfSceneLoader {
             );
             this.world.addComponent(matEntity, new MaterialResourceComponent());
           }
+
+          // Track which entities use this material for animation targeting
+          if (!ctx.materialToEntitiesMap.has(matIndex)) {
+            ctx.materialToEntitiesMap.set(matIndex, []);
+          }
+          ctx.materialToEntitiesMap.get(matIndex)?.push(entity);
         } else {
-          // Create a default material
           const defaultSpec: PBRMaterialSpec = {
             type: "PBR",
             options: { albedo: [0.8, 0.8, 0.8, 1.0] },
@@ -182,7 +205,6 @@ export class GltfSceneLoader {
       for (let i = 1; i < materialHandles.length; i++) {
         materialOverrides.set(i, materialHandles[i]);
       }
-
       this.world.addComponent(
         entity,
         new MeshRendererComponent(
@@ -220,12 +242,6 @@ export class GltfSceneLoader {
         const outAccessor = ctx.gltf.json.accessors![s.output];
         const stride =
           outAccessor.type === "VEC3" ? 3 : outAccessor.type === "VEC4" ? 4 : 3;
-        samplerCache.push({
-          times,
-          values,
-          interpolation: s.interpolation ?? "LINEAR",
-          valueStride: stride,
-        });
         return {
           times,
           values,
@@ -239,9 +255,22 @@ export class GltfSceneLoader {
         const pointer = ch.target.extensions?.KHR_animation_pointer?.pointer;
 
         if (pointer) {
-          // KHR_animation_pointer for material properties
-          // This part is more complex now and would require mapping the material spec to the loaded material instance.
-          // For now, we will skip material animations as they require a more involved setup.
+          // RESTORED: KHR_animation_pointer for material properties
+          const parts = pointer.split("/");
+          if (parts[1] === "materials" && parts.length >= 4) {
+            const matIndex = parseInt(parts[2], 10);
+            const property = parts.slice(3).join("/");
+            const targetEntities = ctx.materialToEntitiesMap.get(matIndex);
+            if (targetEntities) {
+              for (const targetEntity of targetEntities) {
+                channels.push({
+                  targetEntity,
+                  path: { component: MeshRendererComponent, property },
+                  sampler,
+                });
+              }
+            }
+          }
         } else if (ch.target.node !== undefined) {
           // Standard transform animations
           const targetEntity = ctx.nodeToEntityMap.get(ch.target.node);
