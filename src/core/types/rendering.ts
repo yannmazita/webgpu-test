@@ -2,12 +2,12 @@
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
+} from "@/core/ecs/components/resources/sunComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { ClusterBuilder } from "@/core/rendering/clusterBuilder";
 import { InstanceAllocations } from "@/core/rendering/instanceBufferManager";
 import { ShadowSubsystem } from "@/core/rendering/shadow";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { Light, Renderable } from "@/core/types/gpu";
 import { vec4, Vec4 } from "wgpu-matrix";

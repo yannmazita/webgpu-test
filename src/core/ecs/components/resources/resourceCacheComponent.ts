@@ -3,7 +3,7 @@ import { IComponent } from "@/core/ecs/component";
 import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { UITexture } from "@/core/types/ui";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
 
 /**
  * A container for the result of loading an IBL resource.

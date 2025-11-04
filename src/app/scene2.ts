@@ -7,8 +7,8 @@ import { MeshRendererComponent } from "@/core/ecs/components/render/meshRenderer
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
-import { FogComponent } from "@/core/ecs/components/fogComponent";
+} from "@/core/ecs/components/resources/sunComponent";
+import { FogComponent } from "@/core/ecs/components/resources/fogComponent";
 import {
   PhysicsBodyComponent,
   PhysicsColliderComponent,

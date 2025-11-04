@@ -1,5 +1,5 @@
-// src/core/ecs/components/iblComponent.ts
-import { IComponent } from "../component";
+// src/core/ecs/components/resources/iblComponent.ts
+import { IComponent } from "@/core/ecs/component";
 
 /**
  * A world resource component that holds the pre-computed textures for

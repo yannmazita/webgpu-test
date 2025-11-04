@@ -12,7 +12,7 @@ import { RendererStats } from "@/core/types/renderer";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
+} from "@/core/ecs/components/resources/sunComponent";
 import { OpaquePass } from "@/core/rendering/passes/opaquePass";
 import { TransparentPass } from "@/core/rendering/passes/transparentPass";
 import { InstanceBufferManager } from "@/core/rendering/instanceBufferManager";

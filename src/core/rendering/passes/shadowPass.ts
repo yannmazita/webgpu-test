@@ -4,7 +4,7 @@ import { Renderer } from "@/core/rendering/renderer";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
+} from "@/core/ecs/components/resources/sunComponent";
 import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import { RenderContext, RenderPass } from "@/core/types/rendering";
 

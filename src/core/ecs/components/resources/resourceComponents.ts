@@ -4,7 +4,7 @@ import { ResourceHandle } from "@/core/resources/resourceHandle";
 import { Mesh } from "@/core/types/gpu";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { UITexture } from "@/core/types/ui";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
 
 /**
  * Base component for all managed resources.

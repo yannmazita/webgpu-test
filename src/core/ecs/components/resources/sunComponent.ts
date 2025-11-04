@@ -1,5 +1,5 @@
-// src/core/ecs/components/sunComponent.ts
-import { IComponent } from "../component";
+// src/core/ecs/components/resources/sunComponent.ts
+import { IComponent } from "@/core/ecs/component";
 import { Vec3, vec3, Vec4, vec4 } from "wgpu-matrix";
 
 /**
