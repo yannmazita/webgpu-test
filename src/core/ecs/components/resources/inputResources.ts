@@ -75,7 +75,7 @@ export class MouseInput implements IComponent {
   /** The current position of the mouse in screen coordinates. */
   public position = { x: 0, y: 0 };
   /** The change in the mouse wheel scroll since the last frame. */
-  public wheel = { deltaX: 0, deltaY: 0, deltaZ: 0 };
+  public wheel = { deltaX: 0, deltaY: 0, deltaZ: 0 }; // todo: implement is shared buffer
   /** The current pointer lock state. */
   public isPointerLocked = false;
 }

@@ -12,10 +12,10 @@ import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { vec3 } from "wgpu-matrix";
 import { EventManager } from "@/core/ecs/events/eventManager";
-import { IActionController } from "@/core/input/action";
 import { Entity } from "@/core/ecs/entity";
 import { InteractableComponent } from "@/core/ecs/components/interactableComponent";
 import { PlayerControllerComponent } from "@/core/ecs/components/playerControllerComponent";
+import { ActionState } from "../components/resources/inputResources";
 
 // Reusable temporaries
 const rayOrigin = vec3.create();
@@ -36,13 +36,15 @@ export class InteractionSystem {
 
   constructor(
     private world: World,
-    private actions: IActionController,
     private eventManager: EventManager,
     private physCtx: PhysicsContext,
     private interactionRaycastResultsCtx: { i32: Int32Array },
   ) {}
 
   public update(): void {
+    const actionState = this.world.getResource(ActionState);
+    if (!actionState) return;
+
     // 1. Find player and camera for raycasting
     const playerQuery = this.world.query([PlayerControllerComponent]);
     if (playerQuery.length === 0) return;
@@ -143,7 +145,7 @@ export class InteractionSystem {
     }
 
     // 5. Check for interaction input
-    if (this.actions.wasPressed("interact") && this.currentTarget) {
+    if (actionState.justPressed.has("interact") && this.currentTarget) {
       this.eventManager.publish({
         type: "interact",
         payload: {

@@ -20,14 +20,7 @@ import { ResourceCacheComponent } from "@/core/ecs/components/resources/resource
 import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
 import { ShaderPreprocessor } from "@/core/shaders/preprocessor";
 import { IBLIntegrationSystem } from "@/core/ecs/systems/ressources/iblIntegrationSystem";
-import {
-  createInputContext,
-  isKeyDown,
-  isMouseButtonDown,
-  getAndResetMouseDelta,
-  getMousePosition,
-  isPointerLocked,
-} from "@/core/input/manager";
+import { createInputContext } from "@/core/input/manager";
 import {
   createEngineStateContext as createEngineStateCtx,
   publishSnapshotFromWorld,
@@ -44,11 +37,18 @@ import { PhysicsInitMsg, PhysicsMessage } from "@/core/types/physics";
 import { createScene } from "@/app/scene2";
 import { PrefabFactory, registerPrefabs } from "@/app/prefabs";
 import { EventManager } from "@/core/ecs/events/eventManager";
+import { KeyCode } from "@/core/input/keycodes";
+import { RawInputSystem } from "@/core/ecs/systems/input/rawInputSystem";
+import { InputToActionSystem } from "@/core/ecs/systems/input/inputToActionSystem";
 import {
-  getAxisValue,
-  isActionPressed,
-  wasActionPressed,
-} from "@/core/input/action";
+  ActionMap,
+  ActionMapConfig,
+  ActionState,
+  GamepadInput,
+  Input,
+  MouseButton,
+  MouseInput,
+} from "@/core/ecs/components/resources/inputResources";
 
 /**
  * Initializes the render worker with all necessary contexts and systems.
@@ -96,18 +96,9 @@ export async function initWorker(
 
   // Setup input context
   state.inputContext = createInputContext(sharedInputBuffer, false);
-  state.inputReader = {
-    isKeyDown: (code: string) => isKeyDown(state.inputContext!, code),
-    isMouseButtonDown: (button: number) =>
-      isMouseButtonDown(state.inputContext!, button),
-    getMouseDelta: () => getAndResetMouseDelta(state.inputContext!),
-    getMousePosition: () => getMousePosition(state.inputContext!),
-    isPointerLocked: () => isPointerLocked(state.inputContext!),
-    lateUpdate: () => {},
-  };
 
   // Configure action mappings
-  state.actionMap = {
+  const actionMapConfig: ActionMapConfig = {
     move_vertical: { type: "axis", positiveKey: "KeyW", negativeKey: "KeyS" },
     move_horizontal: { type: "axis", positiveKey: "KeyD", negativeKey: "KeyA" },
     move_y_axis: {
@@ -119,23 +110,6 @@ export async function initWorker(
     jump: { type: "button", keys: ["Space"] },
     fire: { type: "button", mouseButtons: [0] },
     interact: { type: "button", keys: ["KeyE"] },
-  };
-
-  // Create action controller
-  state.actionController = {
-    isPressed: (name: string) =>
-      isActionPressed(state.actionMap!, state.inputReader!, name),
-    wasPressed: (name: string) =>
-      wasActionPressed(
-        state.actionMap!,
-        state.inputReader!,
-        name,
-        state.previousActionState,
-      ),
-    getAxis: (name: string) =>
-      getAxisValue(state.actionMap!, state.inputReader!, name),
-    getMouseDelta: () => state.inputReader!.getMouseDelta(),
-    isPointerLocked: () => state.inputReader!.isPointerLocked(),
   };
 
   // Setup event manager
@@ -180,6 +154,13 @@ export async function initWorker(
 
   state.world = new World();
   state.world.addResource(new ResourceCacheComponent());
+  state.world.addResource(new Input<KeyCode>());
+  state.world.addResource(new Input<MouseButton>());
+  state.world.addResource(new MouseInput());
+  state.world.addResource(new GamepadInput());
+  state.world.addResource(new ActionState());
+  state.world.addResource(new ActionMap(actionMapConfig));
+
   state.sceneRenderData = new SceneRenderData();
 
   // Setup raycast contexts
@@ -196,20 +177,18 @@ export async function initWorker(
   registerPrefabs(state.prefabFactory);
 
   // --- Step 4: Create All Game Systems ---
-  // Now that all dependencies (world, physicsCtx, resourceManager, prefabFactory) are available,
-  // we can safely instantiate all systems.
-  state.cameraControllerSystem = new CameraControllerSystem(
-    state.actionController,
-  );
+  state.rawInputSystem = new RawInputSystem();
+  state.inputToActionSystem = new InputToActionSystem();
+
+  state.cameraControllerSystem = new CameraControllerSystem(state.world);
   state.physicsCommandSystem = new PhysicsCommandSystem(state.physicsCtx);
   state.playerControllerSystem = new PlayerControllerSystem(
-    state.actionController,
+    state.world,
     state.physicsCtx,
   );
   state.damageSystem = new DamageSystem(state.eventManager);
   state.interactionSystem = new InteractionSystem(
     state.world,
-    state.actionController,
     state.eventManager,
     state.physicsCtx,
     state.interactionRaycastResultsCtx,
