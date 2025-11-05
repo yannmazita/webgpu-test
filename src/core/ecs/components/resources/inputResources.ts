@@ -33,7 +33,42 @@ export type MouseButton = number;
 /** Represents a gamepad button index. */
 export type GamepadButton = number;
 
-// --- New Input Resources ---
+/**
+ * A base class for holding input state. Not to be used as a resource directly.
+ * @internal
+ */
+class BaseInput<T> {
+  /** A set of all inputs of this type that are currently held down. */
+  public readonly pressed = new Set<T>();
+  /** A set of all inputs of this type that were pressed for the first time this frame. */
+  public readonly justPressed = new Set<T>();
+  /** A set of all inputs of this type that were released this frame. */
+  public readonly justReleased = new Set<T>();
+
+  /**
+   * Clears the per-frame state (justPressed, justReleased, and pressed).
+   */
+  public clear(): void {
+    this.justPressed.clear();
+    this.justReleased.clear();
+    this.pressed.clear();
+  }
+}
+
+/** A resource holding the raw state of all keyboard inputs. */
+export class KeyboardInput extends BaseInput<KeyCode> implements IComponent {}
+
+/** A resource holding the raw state of all mouse button inputs. */
+export class MouseButtonInput
+  extends BaseInput<MouseButton>
+  implements IComponent {}
+
+/** A resource holding the raw state of all gamepad button inputs. */
+export class GamepadButtonInput
+  extends BaseInput<GamepadButton>
+  implements IComponent {}
+
+// --- Input Resources ---
 
 /**
  * A generic resource to hold the state for a category of inputs.
@@ -41,7 +76,7 @@ export type GamepadButton = number;
  * This is used to store the raw state of keyboards, mice, and gamepads.
  * The `RawInputSystem` is responsible for populating this resource each frame.
  *
- * @template T The type of the input identifier (e.g., KeyCode, MouseButton).
+ * @template T The type of the input identifier (like KeyCode, MouseButton).
  */
 export class Input<T> implements IComponent {
   /** A set of all inputs of this type that are currently held down. */
@@ -52,7 +87,7 @@ export class Input<T> implements IComponent {
   public readonly justReleased = new Set<T>();
 
   /**
-   * Clears the per-frame state (justPressed and justReleased).
+   * Clears the per-frame state (justPressed, justReleased, and pressed).
    * @remarks
    * This is called by the `RawInputSystem` at the beginning of each frame
    * before new state is calculated.
@@ -60,6 +95,7 @@ export class Input<T> implements IComponent {
   public clear(): void {
     this.justPressed.clear();
     this.justReleased.clear();
+    this.pressed.clear();
   }
 }
 
@@ -88,7 +124,7 @@ export class MouseInput implements IComponent {
 export class Gamepad {
   public id: number;
   public axes: number[] = [];
-  public buttons: Input<GamepadButton> = new Input<GamepadButton>();
+  public buttons: GamepadButtonInput = new GamepadButtonInput();
 
   constructor(id: number) {
     this.id = id;

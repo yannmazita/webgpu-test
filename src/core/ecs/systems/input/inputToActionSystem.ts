@@ -4,10 +4,9 @@ import {
   ActionMap,
   ActionState,
   GamepadInput,
-  Input,
-  MouseButton,
+  KeyboardInput,
+  MouseButtonInput,
 } from "@/core/ecs/components/resources/inputResources";
-import { KeyCode } from "@/core/input/keycodes";
 
 /**
  * System that translates raw input states into high-level gameplay actions.
@@ -30,8 +29,8 @@ export class InputToActionSystem {
   public update(world: World): void {
     const actionMap = world.getResource(ActionMap);
     const actionState = world.getResource(ActionState);
-    const keyInput = world.getResource(Input<KeyCode>);
-    const mouseButtonInput = world.getResource(Input<MouseButton>);
+    const keyInput = world.getResource(KeyboardInput);
+    const mouseButtonInput = world.getResource(MouseButtonInput);
     const gamepadInput = world.getResource(GamepadInput);
 
     if (

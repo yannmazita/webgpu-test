@@ -37,7 +37,6 @@ import { PhysicsInitMsg, PhysicsMessage } from "@/core/types/physics";
 import { createScene } from "@/app/scene2";
 import { PrefabFactory, registerPrefabs } from "@/app/prefabs";
 import { EventManager } from "@/core/ecs/events/eventManager";
-import { KeyCode } from "@/core/input/keycodes";
 import { RawInputSystem } from "@/core/ecs/systems/input/rawInputSystem";
 import { InputToActionSystem } from "@/core/ecs/systems/input/inputToActionSystem";
 import {
@@ -45,8 +44,8 @@ import {
   ActionMapConfig,
   ActionState,
   GamepadInput,
-  Input,
-  MouseButton,
+  KeyboardInput,
+  MouseButtonInput,
   MouseInput,
 } from "@/core/ecs/components/resources/inputResources";
 
@@ -154,8 +153,8 @@ export async function initWorker(
 
   state.world = new World();
   state.world.addResource(new ResourceCacheComponent());
-  state.world.addResource(new Input<KeyCode>());
-  state.world.addResource(new Input<MouseButton>());
+  state.world.addResource(new KeyboardInput());
+  state.world.addResource(new MouseButtonInput());
   state.world.addResource(new MouseInput());
   state.world.addResource(new GamepadInput());
   state.world.addResource(new ActionState());

@@ -3,12 +3,17 @@ import { World } from "@/core/ecs/world";
 import {
   Gamepad,
   GamepadInput,
-  Input,
+  KeyboardInput,
   MouseButton,
+  MouseButtonInput,
   MouseInput,
 } from "@/core/ecs/components/resources/inputResources";
 import { KeyCode, KEY_MAP } from "@/core/input/keycodes";
-import { InputContext } from "@/core/input/manager";
+import {
+  getGamepadAxis,
+  getGamepadButtons,
+  InputContext,
+} from "@/core/input/manager";
 import {
   getAndResetMouseDelta,
   getMousePosition,
@@ -21,6 +26,7 @@ import {
   MOUSE_BUTTON_MIDDLE,
   MOUSE_BUTTON_RIGHT,
 } from "@/core/input/mouseButtons";
+import { GAMEPAD_MAX_AXES, MAX_GAMEPADS } from "@/core/sharedInputLayout";
 
 /**
  * System that polls raw input sources and populates the corresponding ECS resources.
@@ -36,7 +42,7 @@ import {
 export class RawInputSystem {
   private previousKeyStates = new Set<KeyCode>();
   private previousMouseButtonStates = new Set<MouseButton>();
-  private previousGamepadButtonStates = new Map<number, Set<number>>();
+  private previousGamepadButtonStates = new Map<number, number>(); // <gamepadIndex, buttonMask>
 
   /**
    * Updates all raw input resources in the world.
@@ -46,11 +52,11 @@ export class RawInputSystem {
   public update(world: World, inputContext: InputContext): void {
     this.updateKeyboard(world, inputContext);
     this.updateMouse(world, inputContext);
-    this.updateGamepads(world);
+    this.updateGamepads(world, inputContext);
   }
 
   private updateKeyboard(world: World, context: InputContext): void {
-    const keyInput = world.getResource(Input<KeyCode>);
+    const keyInput = world.getResource(KeyboardInput);
     if (!keyInput) return;
 
     keyInput.clear();
@@ -81,7 +87,7 @@ export class RawInputSystem {
   }
 
   private updateMouse(world: World, context: InputContext): void {
-    const mouseButtonInput = world.getResource(Input<MouseButton>);
+    const mouseButtonInput = world.getResource(MouseButtonInput);
     const mouseInput = world.getResource(MouseInput);
     if (!mouseButtonInput || !mouseInput) return;
 
@@ -122,59 +128,69 @@ export class RawInputSystem {
     // Todo: Mouse wheel is not yet implemented in the shared buffer.
   }
 
-  private updateGamepads(world: World): void {
+  private updateGamepads(world: World, context: InputContext): void {
     const gamepadInput = world.getResource(GamepadInput);
     if (!gamepadInput) return;
 
-    const currentlyConnected = new Set<number>();
-    const gamepads = navigator.getGamepads();
+    const currentlyActive = new Set<number>();
 
-    for (const rawGamepad of gamepads) {
-      if (!rawGamepad) continue;
+    for (let i = 0; i < MAX_GAMEPADS; i++) {
+      const buttonMask = getGamepadButtons(context, i);
 
-      currentlyConnected.add(rawGamepad.index);
+      // A non-zero button mask or a non-zero axis value indicates an active pad
+      let isConnected = buttonMask !== 0;
+      if (!isConnected) {
+        for (let j = 0; j < GAMEPAD_MAX_AXES; j++) {
+          if (getGamepadAxis(context, i, j) !== 0) {
+            isConnected = true;
+            break;
+          }
+        }
+      }
 
-      let gamepadState = gamepadInput.gamepads.get(rawGamepad.index);
+      if (!isConnected) continue;
+
+      currentlyActive.add(i);
+
+      let gamepadState = gamepadInput.gamepads.get(i);
       if (!gamepadState) {
-        gamepadState = new Gamepad(rawGamepad.index);
-        gamepadInput.gamepads.set(rawGamepad.index, gamepadState);
+        gamepadState = new Gamepad(i);
+        gamepadInput.gamepads.set(i, gamepadState);
       }
 
       gamepadState.buttons.clear();
-      gamepadState.axes = rawGamepad.axes.map((a) => a);
 
-      const currentButtonStates = new Set<number>();
-      rawGamepad.buttons.forEach((button, index) => {
-        if (button.pressed) {
-          currentButtonStates.add(index);
-        }
-      });
-
-      const previousButtonStates =
-        this.previousGamepadButtonStates.get(rawGamepad.index) ?? new Set();
-
-      for (const buttonIndex of currentButtonStates) {
-        if (!previousButtonStates.has(buttonIndex)) {
-          gamepadState.buttons.justPressed.add(buttonIndex);
-        }
-        gamepadState.buttons.pressed.add(buttonIndex);
+      // Update axes
+      gamepadState.axes.length = GAMEPAD_MAX_AXES;
+      for (let j = 0; j < GAMEPAD_MAX_AXES; j++) {
+        gamepadState.axes[j] = getGamepadAxis(context, i, j);
       }
 
-      for (const buttonIndex of previousButtonStates) {
-        if (!currentButtonStates.has(buttonIndex)) {
-          gamepadState.buttons.justReleased.add(buttonIndex);
+      // Update buttons
+      const previousButtonMask = this.previousGamepadButtonStates.get(i) ?? 0;
+
+      for (let buttonIndex = 0; buttonIndex < 32; buttonIndex++) {
+        const currentBit = 1 << buttonIndex;
+        const isPressed = (buttonMask & currentBit) !== 0;
+        const wasPressed = (previousButtonMask & currentBit) !== 0;
+
+        if (isPressed) {
+          gamepadState.buttons.pressed.add(buttonIndex);
+          if (!wasPressed) {
+            gamepadState.buttons.justPressed.add(buttonIndex);
+          }
+        } else {
+          if (wasPressed) {
+            gamepadState.buttons.justReleased.add(buttonIndex);
+          }
         }
       }
-
-      this.previousGamepadButtonStates.set(
-        rawGamepad.index,
-        currentButtonStates,
-      );
+      this.previousGamepadButtonStates.set(i, buttonMask);
     }
 
     // Remove disconnected gamepads
     for (const index of gamepadInput.gamepads.keys()) {
-      if (!currentlyConnected.has(index)) {
+      if (!currentlyActive.has(index)) {
         gamepadInput.gamepads.delete(index);
         this.previousGamepadButtonStates.delete(index);
       }
