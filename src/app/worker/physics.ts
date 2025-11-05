@@ -1,4 +1,4 @@
-// src/app/worker/loop.ts
+// src/app/worker/physics.ts
 import { state } from "@/app/worker/state";
 import { World } from "@/core/ecs/world";
 import { PhysicsBodyComponent } from "@/core/ecs/components/physicsComponents";
