@@ -1,6 +1,6 @@
 # 'no-name' WebGPU Engine
 
-A modern 3D game engine built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts.
+A modern 3D game engine built from scratch using TypeScript and the WebGPU API. This project serves as a learning platform for advanced graphics programming concepts and modern engine architecture.
 
 **I'll find a name for it.**
 
@@ -19,7 +19,7 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
   - Physics state snapshots (positions/rotations).
   - Live editor tweaks (lighting, fog, shadows).
 - **Event-Driven Communication:** Uses `postMessage` for one-off commands and events, such as initialization, resizing, and asset loading triggers.
-- **Entity-Component-System (ECS):** Data-oriented design (`src/core/ecs`) for flexibility.
+- **Entity-Component-System (ECS):** Data-oriented design (`src/core/ecs`) for flexibility. Game logic is in systems operating on entities and their components.
 
 ### Rendering & Graphics
 
@@ -46,6 +46,17 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
   - **Mesh Compression:** Decodes meshes compressed with `EXT_meshopt_compression` for smaller file sizes and faster loading.
   - **Texture Compression:** Supports Basis Universal (`.ktx2`) textures, transcoding them on the fly to the most optimal GPU format available (BCn, ETC, ASTC).
 - **Tangent Generation:** Automatically generates MikkTSpace tangents for all loaded meshes to ensure consistent normal mapping.
+
+### Todo
+
+The engine is in very active development. I try to document everything but sometimes docs might lag behind.
+
+- Audio system driven by ECS events and components
+- AI system
+- Networking system
+- Move frustrum culling from `Renderer` to dedicated ECS system.
+- Implement additional KHR extensions
+- Scene editor (this would be a dedicated project)
 
 ## Getting Started
 
