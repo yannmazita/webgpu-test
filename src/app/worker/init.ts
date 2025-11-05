@@ -158,7 +158,11 @@ export async function initWorker(
   state.world.addResource(new MouseInput());
   state.world.addResource(new GamepadInput());
   state.world.addResource(new ActionState());
-  state.world.addResource(new ActionMap(actionMapConfig));
+
+  // create and configure ActionMap resource
+  const actionMap = new ActionMap();
+  actionMap.config = actionMapConfig;
+  state.world.addResource(actionMap);
 
   state.sceneRenderData = new SceneRenderData();
 

@@ -181,14 +181,7 @@ export class ActionState implements IComponent {
  * to perform its mapping logic.
  */
 export class ActionMap implements IComponent {
-  public config: ActionMapConfig;
-
-  /**
-   * @param config The initial action map configuration.
-   */
-  constructor(config: ActionMapConfig) {
-    this.config = config;
-  }
+  public config: ActionMapConfig = {};
 
   /**
    * Updates the binding for an existing action or adds a new one.
