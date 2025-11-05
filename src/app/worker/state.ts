@@ -16,15 +16,14 @@ import { PhysicsCommandSystem } from "@/core/ecs/systems/physicsCommandSystem";
 import { InputContext } from "@/core/input/manager";
 import { EngineStateContext } from "@/core/engineState";
 import { PhysicsContext } from "@/core/physicsState";
-import { IActionController } from "@/core/input/action";
-import { IInputSource } from "@/core/input/iinputSource";
 import { EventManager } from "@/core/ecs/events/eventManager";
 import { PrefabFactory } from "@/app/prefabs";
-import { ActionMapConfig, ActionStateMap } from "@/core/input/action";
 import { ProjectileSystem } from "@/core/ecs/systems/projectileSystem";
 import { ResourceLoadingSystem } from "@/core/ecs/systems/ressources/resourceLoadingSystem";
 import { UIRenderSystem } from "@/core/ecs/systems/ui/uiRenderSystem";
 import { IBLIntegrationSystem } from "@/core/ecs/systems/ressources/iblIntegrationSystem";
+import { RawInputSystem } from "@/core/ecs/systems/input/rawInputSystem";
+import { InputToActionSystem } from "@/core/ecs/systems/input/inputToActionSystem";
 
 /**
  * Shared state for the render worker.
@@ -49,10 +48,8 @@ export interface WorkerState {
 
   // Input
   inputContext: InputContext | null;
-  inputReader: IInputSource | null;
-  actionController: IActionController | null;
-  actionMap: ActionMapConfig | null;
-  previousActionState: ActionStateMap;
+  rawInputSystem: RawInputSystem | null;
+  inputToActionSystem: InputToActionSystem | null;
 
   // Game systems
   damageSystem: DamageSystem | null;
@@ -103,10 +100,8 @@ export const state: WorkerState = {
   playerControllerSystem: null,
   isFreeCameraActive: false,
   inputContext: null,
-  inputReader: null,
-  actionController: null,
-  actionMap: null,
-  previousActionState: new Map(),
+  rawInputSystem: null,
+  inputToActionSystem: null,
   damageSystem: null,
   collisionEventSystem: null,
   deathSystem: null,

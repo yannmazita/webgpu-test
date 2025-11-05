@@ -8,13 +8,13 @@ import { MeshRendererComponent } from "@/core/ecs/components/render/meshRenderer
 import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { World } from "@/core/ecs/world";
-import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { SkyboxComponent } from "@/core/ecs/components/resources/skyboxComponent";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
-import { FogComponent } from "@/core/ecs/components/fogComponent";
+} from "@/core/ecs/components/resources/sunComponent";
+import { FogComponent } from "@/core/ecs/components/resources/fogComponent";
 import { ResourceCacheComponent } from "@/core/ecs/components/resources/resourceCacheComponent";
 import { MaterialInstance } from "@/core/materials/materialInstance";
 import { ResourceHandle } from "@/core/resources/resourceHandle";

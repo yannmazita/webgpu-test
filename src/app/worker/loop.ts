@@ -8,10 +8,10 @@ import { lifetimeSystem } from "@/core/ecs/systems/lifetimeSystem";
 import { cameraFollowSystem } from "@/core/ecs/systems/cameraFollowSystem";
 import { playerInputSystem } from "@/core/ecs/systems/playerInputSystem";
 import { syncEngineState } from "@/core/engineState";
-import { updatePreviousActionState } from "@/core/input/action";
 import { TransformComponent } from "@/core/ecs/components/transformComponent";
 import { uiLayoutSystem } from "@/core/ecs/systems/ui/uiLayoutSystem";
 import { uiButtonStyleSystem } from "@/core/ecs/systems/ui/uiButtonStyleSystem";
+import { ActionState } from "@/core/ecs/components/resources/inputResources";
 
 /**
  * Executes one frame of the game loop for the render worker.
@@ -48,20 +48,21 @@ export function frame(now: number): void {
     !state.world ||
     !state.sceneRenderData ||
     !state.cameraControllerSystem ||
-    !state.actionController ||
     !state.playerControllerSystem ||
     !state.damageSystem ||
     !state.collisionEventSystem ||
     !state.deathSystem ||
     !state.eventManager ||
-    !state.actionMap ||
     !state.interactionSystem ||
     !state.pickupSystem ||
     !state.inventorySystem ||
     !state.respawnSystem ||
     !state.resourceLoadingSystem ||
     !state.iblIntegrationSystem ||
-    !state.uiRenderSystem
+    !state.uiRenderSystem ||
+    !state.rawInputSystem ||
+    !state.inputToActionSystem ||
+    !state.inputContext
   ) {
     self.postMessage({ type: "FRAME_DONE" });
     return;
@@ -80,12 +81,17 @@ export function frame(now: number): void {
     dt = MAX_PAUSE_SECONDS;
   }
 
+  // --- Input Systems ---
+  state.rawInputSystem.update(state.world, state.inputContext);
+  state.inputToActionSystem.update(state.world);
+
   // --- Resource Loading ---
   state.resourceLoadingSystem.update(state.world);
   state.iblIntegrationSystem.update(state.world);
 
-  // --- Input & Controllers ---
-  if (state.actionController.wasPressed("toggle_camera_mode")) {
+  // --- Controllers ---
+  const actionState = state.world.getResource(ActionState);
+  if (actionState?.justPressed.has("toggle_camera_mode")) {
     state.isFreeCameraActive = !state.isFreeCameraActive;
     if (state.isFreeCameraActive) {
       const cameraTransform = state.world.getComponent(
@@ -99,11 +105,11 @@ export function frame(now: number): void {
   }
 
   if (state.isFreeCameraActive) {
-    state.cameraControllerSystem.update(state.world, dt);
+    state.cameraControllerSystem.update(dt);
   } else {
-    state.playerControllerSystem.update(state.world, dt);
+    state.playerControllerSystem.update(dt);
   }
-  playerInputSystem(state.world, state.actionController, state.eventManager);
+  playerInputSystem(state.world, state.eventManager);
 
   // --- Gameplay Systems ---
   state.interactionSystem.update();
@@ -158,13 +164,6 @@ export function frame(now: number): void {
 
   // 4. Notify subsystems that the frame has been submitted.
   state.renderer.onFrameSubmitted();
-
-  // --- Frame End ---
-  updatePreviousActionState(
-    state.actionController,
-    state.previousActionState,
-    state.actionMap,
-  );
 
   self.postMessage({ type: "FRAME_DONE" });
 }

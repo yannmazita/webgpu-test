@@ -1,9 +1,12 @@
 // src/core/ecs/systems/cameraControllerSystem.ts
-import { IActionController } from "@/core/input/action";
-import { MainCameraTagComponent } from "../components/tagComponents";
-import { TransformComponent } from "../components/transformComponent";
-import { World } from "../world";
+import { MainCameraTagComponent } from "@/core/ecs/components/tagComponents";
+import { TransformComponent } from "@/core/ecs/components/transformComponent";
+import { World } from "@/core/ecs/world";
 import { vec3, quat, mat4, Mat4 } from "wgpu-matrix";
+import {
+  ActionState,
+  MouseInput,
+} from "@/core/ecs/components/resources/inputResources";
 
 export class CameraControllerSystem {
   public moveSpeed = 5.0;
@@ -12,7 +15,7 @@ export class CameraControllerSystem {
   private pitch = 0;
   private yaw = 0;
 
-  private actions: IActionController;
+  private world: World;
 
   // Reusable temporaries
   private tmpForward = vec3.create();
@@ -22,8 +25,8 @@ export class CameraControllerSystem {
   private tmpQuat = quat.identity();
   private tmpRotMat: Mat4 = mat4.identity();
 
-  constructor(actions: IActionController) {
-    this.actions = actions;
+  constructor(world: World) {
+    this.world = world;
   }
 
   /**
@@ -65,26 +68,31 @@ export class CameraControllerSystem {
    *
    * This method implements a first-person-style camera control scheme. It
    * translates abstract user actions (like 'move_forward', mouse movement)
-   * into changes in the camera's TransformComponent. This system is designed
-   * to be frame-rate independent by using a delta time value for all
-   * movements.
+   * into changes in the camera's TransformComponent.
    *
-   * @param world The ECS world, used to query for the main camera entity.
-   * @param deltaTime The time elapsed since the last frame, in seconds. This
-   *     ensures that camera movement is smooth and independent of the
-   *     frame rate.
+   * @param deltaTime The time elapsed since the last frame, in seconds.
    */
-  public update(world: World, deltaTime: number): void {
-    const query = world.query([MainCameraTagComponent, TransformComponent]);
+  public update(deltaTime: number): void {
+    const actionState = this.world.getResource(ActionState);
+    const mouseInput = this.world.getResource(MouseInput);
+    if (!actionState || !mouseInput) return;
+
+    const query = this.world.query([
+      MainCameraTagComponent,
+      TransformComponent,
+    ]);
     if (query.length === 0) return;
 
     const mainCameraEntity = query[0];
-    const transform = world.getComponent(mainCameraEntity, TransformComponent);
+    const transform = this.world.getComponent(
+      mainCameraEntity,
+      TransformComponent,
+    );
     if (!transform) return;
 
     // Mouse look
-    if (this.actions.isPointerLocked()) {
-      const mouseDelta = this.actions.getMouseDelta();
+    if (mouseInput.isPointerLocked) {
+      const mouseDelta = mouseInput.delta;
       this.yaw -= mouseDelta.x * this.mouseSensitivity;
       this.pitch -= mouseDelta.y * this.mouseSensitivity;
 
@@ -99,9 +107,9 @@ export class CameraControllerSystem {
     }
 
     // Movement input
-    const mv = this.actions.getAxis("move_vertical");
-    const mh = this.actions.getAxis("move_horizontal");
-    const my = this.actions.getAxis("move_y_axis");
+    const mv = actionState.axes.get("move_vertical") ?? 0;
+    const mh = actionState.axes.get("move_horizontal") ?? 0;
+    const my = actionState.axes.get("move_y_axis") ?? 0;
     if (mv === 0 && mh === 0 && my === 0) return;
 
     // Derive axes from rotation matrix to match worldMatrix convention:

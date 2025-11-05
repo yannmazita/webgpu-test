@@ -6,9 +6,9 @@ import { CameraComponent } from "@/core/ecs/components/cameraComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
+} from "@/core/ecs/components/resources/sunComponent";
 import { mat4, Mat4, vec3, Vec3, vec4, Vec4 } from "wgpu-matrix";
-import { Shader } from "../shaders/shader";
+import { Shader } from "@/core/shaders/shader";
 
 export class ShadowSubsystem {
   private device: GPUDevice;

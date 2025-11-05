@@ -77,11 +77,35 @@ export const KEY_STATE_COUNT = 256;
 export const KEY_STATE_SIZE = KEY_STATE_COUNT; // 256 bytes
 
 /* ==========================================================================================
+ * Gamepad block
+ * Layout (bytes):
+ *   [288] GAMEPAD_STATE[4] - Block for 4 gamepads
+ *
+ * Each gamepad slot (36 bytes):
+ *   [0]  BUTTONS (u32)     - Bitmask for up to 32 buttons
+ *   [4]  AXES[8] (f32)     - 8 axes, 4 bytes per axis (32 bytes total)
+ *
+ * Notes:
+ * - A gamepad is considered "connected" if its button mask is non-zero or any
+ *   axis has a non-zero value. The worker thread can check this to avoid
+ *   processing disconnected pads.
+ * ======================================================================================== */
+
+export const MAX_GAMEPADS = 4;
+export const GAMEPAD_MAX_AXES = 8;
+export const GAMEPAD_BUTTONS_OFFSET = 0; // Relative to slot start
+export const GAMEPAD_AXES_OFFSET = 4; // Relative to slot start
+export const GAMEPAD_SLOT_SIZE = GAMEPAD_AXES_OFFSET + GAMEPAD_MAX_AXES * 4; // 4 + 8*4 = 36 bytes per gamepad
+
+export const GAMEPAD_STATE_OFFSET = KEY_STATE_OFFSET + KEY_STATE_SIZE; // Starts after keyboard block
+export const GAMEPAD_STATE_SIZE = MAX_GAMEPADS * GAMEPAD_SLOT_SIZE; // 4 * 36 = 144 bytes
+
+/* ==========================================================================================
  * Total buffer sizing
  * ======================================================================================== */
 
 /** Total buffer size (bytes). Keep contiguous for simple views. */
-export const SHARED_BUFFER_SIZE = KEY_STATE_OFFSET + KEY_STATE_SIZE;
+export const SHARED_BUFFER_SIZE = GAMEPAD_STATE_OFFSET + GAMEPAD_STATE_SIZE; // 288 + 144 = 432 bytes
 
 /* ==========================================================================================
  * Usage Notes:

@@ -46,11 +46,11 @@ import {
   DF_SUN_CASTS_SHADOWS,
 } from "@/core/sharedEngineStateLayout";
 import { World } from "@/core/ecs/world";
-import { FogComponent } from "@/core/ecs/components/fogComponent";
+import { FogComponent } from "@/core/ecs/components/resources/fogComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
-} from "@/core/ecs/components/sunComponent";
+} from "@/core/ecs/components/resources/sunComponent";
 
 /**
  * Context that wraps typed-array views into the shared editor state buffer.

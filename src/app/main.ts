@@ -1,7 +1,11 @@
 // src/app/main.ts
 import "@/style.css";
-import { SHARED_BUFFER_SIZE } from "@/core/sharedInputLayout";
-import { createInputContext } from "@/core/input/manager";
+import { MAX_GAMEPADS, SHARED_BUFFER_SIZE } from "@/core/sharedInputLayout";
+import {
+  clearGamepadState,
+  createInputContext,
+  updateGamepadState,
+} from "@/core/input/manager";
 import { SHARED_ENGINE_STATE_BUFFER_SIZE } from "@/core/sharedEngineStateLayout";
 import {
   createEngineStateContext as createEngineStateCtx,
@@ -119,11 +123,40 @@ worker.addEventListener("message", (ev: MessageEvent<WorkerMessage>) => {
   }
 });
 
+const pollGamepads = () => {
+  const gamepads = navigator.getGamepads();
+  const connectedPads = new Set<number>();
+
+  for (const gamepad of gamepads) {
+    if (gamepad) {
+      connectedPads.add(gamepad.index);
+      let buttonMask = 0;
+      gamepad.buttons.forEach((button, index) => {
+        if (button.pressed) {
+          buttonMask |= 1 << index;
+        }
+      });
+      updateGamepadState(inputContext, gamepad.index, buttonMask, gamepad.axes);
+    }
+  }
+
+  // Clear state for disconnected pads
+  for (let i = 0; i < MAX_GAMEPADS; i++) {
+    if (!connectedPads.has(i)) {
+      clearGamepadState(inputContext, i);
+    }
+  }
+};
+
 const tick = (now: number) => {
   // Always check for resize at the start of a frame.
   // todo: refactor resizing (dumpster fire performance - (only on firefox apparently))
   // todo2: don't do on-the-fly resize, app (via UI) should be setting render and window (canvas) resolution
+  // todo3: actually do it it's ridiculous
   sendResize();
+
+  // Poll gamepads and update shared buffer
+  pollGamepads();
 
   if (canSendFrame) {
     canSendFrame = false;

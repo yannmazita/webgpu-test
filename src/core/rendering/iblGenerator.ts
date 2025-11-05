@@ -9,9 +9,9 @@ import {
 } from "@/core/rendering/ibl";
 import { loadEXR } from "@/loaders/exrLoader";
 import { loadHDR } from "@/loaders/hdrLoader";
-import { MaterialInstance } from "../materials/materialInstance";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
-import { SkyboxMaterial } from "../materials/skyboxMaterial";
+import { MaterialInstance } from "@/core/materials/materialInstance";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
+import { SkyboxMaterial } from "@/core/materials/skyboxMaterial";
 
 export interface EnvironmentMapResult {
   skyboxMaterial: MaterialInstance;

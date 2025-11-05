@@ -12,12 +12,20 @@ import {
   MOUSE_X_OFFSET,
   MOUSE_Y_OFFSET,
   MOUSE_BUTTONS_OFFSET,
+  GAMEPAD_STATE_OFFSET,
+  GAMEPAD_SLOT_SIZE,
+  GAMEPAD_BUTTONS_OFFSET,
+  GAMEPAD_AXES_OFFSET,
+  MAX_GAMEPADS,
+  GAMEPAD_MAX_AXES,
 } from "@/core/sharedInputLayout";
+import { KEY_MAP, KeyCode } from "@/core/input/keycodes";
 
 /** The context object holding views for the input buffer. */
 export interface InputContext {
   int32View: Int32Array;
   uint8View: Uint8Array;
+  float32View: Float32Array;
 }
 
 /**
@@ -30,7 +38,9 @@ export function createInputContext(
   isWriter: boolean,
 ): InputContext {
   if (buffer.byteLength !== SHARED_BUFFER_SIZE) {
-    throw new Error("Invalid input buffer size");
+    throw new Error(
+      `Invalid input buffer size. Expected ${SHARED_BUFFER_SIZE}, got ${buffer.byteLength}`,
+    );
   }
   const int32View = new Int32Array(buffer);
 
@@ -49,12 +59,11 @@ export function createInputContext(
   return {
     int32View,
     uint8View: new Uint8Array(buffer),
+    float32View: new Float32Array(buffer),
   };
 }
 
 // --- Writer Functions (for Main Thread) ---
-
-import { KEY_MAP } from "./keycodes";
 
 /**
  * Updates the state of a key in the shared buffer.
@@ -67,7 +76,7 @@ export function updateKeyState(
   code: string,
   isDown: boolean,
 ): void {
-  const keyIndex = KEY_MAP.get(code);
+  const keyIndex = KEY_MAP.get(code as KeyCode);
   if (keyIndex !== undefined) {
     Atomics.store(ctx.uint8View, KEY_STATE_OFFSET + keyIndex, isDown ? 1 : 0);
   }
@@ -131,6 +140,54 @@ export function updateMouseButtonState(
   }
 }
 
+/**
+ * Updates the state of a gamepad in the shared buffer.
+ * @param ctx The input context.
+ * @param gamepadIndex The index of the gamepad (0-3).
+ * @param buttonMask A bitmask of the pressed buttons.
+ * @param axes An array of the axis values.
+ */
+export function updateGamepadState(
+  ctx: InputContext,
+  gamepadIndex: number,
+  buttonMask: number,
+  axes: readonly number[],
+): void {
+  if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) {
+    return;
+  }
+
+  const slotOffset = GAMEPAD_STATE_OFFSET + gamepadIndex * GAMEPAD_SLOT_SIZE;
+  const buttonsOffsetI32 = (slotOffset + GAMEPAD_BUTTONS_OFFSET) >> 2;
+  const axesOffsetF32 = (slotOffset + GAMEPAD_AXES_OFFSET) >> 2;
+
+  Atomics.store(ctx.int32View, buttonsOffsetI32, buttonMask);
+
+  for (let i = 0; i < GAMEPAD_MAX_AXES; i++) {
+    const value = axes[i] ?? 0;
+    // We can use non-atomic stores here because the main thread is the only writer
+    // and the worker only reads. This is safe as long as we assume the worker
+    // might see a partially-updated state for a single frame, which is acceptable for gamepad axes.
+    ctx.float32View[axesOffsetF32 + i] = value;
+  }
+}
+
+/**
+ * Clears the state for a specific gamepad slot.
+ * @param ctx The input context.
+ * @param gamepadIndex The index of the gamepad to clear.
+ */
+export function clearGamepadState(
+  ctx: InputContext,
+  gamepadIndex: number,
+): void {
+  if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) {
+    return;
+  }
+  // A button mask of 0 indicates a disconnected or inactive pad.
+  updateGamepadState(ctx, gamepadIndex, 0, []);
+}
+
 // --- Reader Functions (for Worker Thread) ---
 
 /**
@@ -140,7 +197,7 @@ export function updateMouseButtonState(
  * @returns True if the key is down, false otherwise.
  */
 export function isKeyDown(ctx: InputContext, code: string): boolean {
-  const keyIndex = KEY_MAP.get(code);
+  const keyIndex = KEY_MAP.get(code as KeyCode);
   if (keyIndex !== undefined) {
     return Atomics.load(ctx.uint8View, KEY_STATE_OFFSET + keyIndex) === 1;
   }
@@ -192,4 +249,48 @@ export function getMousePosition(ctx: InputContext): { x: number; y: number } {
  */
 export function isPointerLocked(ctx: InputContext): boolean {
   return Atomics.load(ctx.uint8View, POINTER_LOCK_OFFSET) === 1;
+}
+
+/**
+ * Gets the button bitmask for a given gamepad.
+ * @param ctx The input context.
+ * @param gamepadIndex The index of the gamepad.
+ * @returns The button bitmask.
+ */
+export function getGamepadButtons(
+  ctx: InputContext,
+  gamepadIndex: number,
+): number {
+  if (gamepadIndex < 0 || gamepadIndex >= MAX_GAMEPADS) {
+    return 0;
+  }
+  const slotOffset = GAMEPAD_STATE_OFFSET + gamepadIndex * GAMEPAD_SLOT_SIZE;
+  const buttonsOffsetI32 = (slotOffset + GAMEPAD_BUTTONS_OFFSET) >> 2;
+  return Atomics.load(ctx.int32View, buttonsOffsetI32);
+}
+
+/**
+ * Gets the value of a specific axis for a given gamepad.
+ * @param ctx The input context.
+ * @param gamepadIndex The index of the gamepad.
+ * @param axisIndex The index of the axis.
+ * @returns The axis value.
+ */
+export function getGamepadAxis(
+  ctx: InputContext,
+  gamepadIndex: number,
+  axisIndex: number,
+): number {
+  if (
+    gamepadIndex < 0 ||
+    gamepadIndex >= MAX_GAMEPADS ||
+    axisIndex < 0 ||
+    axisIndex >= GAMEPAD_MAX_AXES
+  ) {
+    return 0;
+  }
+  const slotOffset = GAMEPAD_STATE_OFFSET + gamepadIndex * GAMEPAD_SLOT_SIZE;
+  const axesOffsetF32 = (slotOffset + GAMEPAD_AXES_OFFSET) >> 2;
+  // Non-atomic load is acceptable here for the same reason as the non-atomic store.
+  return ctx.float32View[axesOffsetF32 + axisIndex];
 }

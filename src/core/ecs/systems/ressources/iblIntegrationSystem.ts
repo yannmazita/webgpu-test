@@ -1,8 +1,8 @@
 // src/core/ecs/systems/ressources/iblIntegrationSystem.ts
 import { World } from "@/core/ecs/world";
 import { IBLResourceComponent } from "@/core/ecs/components/resources/resourceComponents";
-import { SkyboxComponent } from "@/core/ecs/components/skyboxComponent";
-import { IBLComponent } from "@/core/ecs/components/iblComponent";
+import { SkyboxComponent } from "@/core/ecs/components/resources/skyboxComponent";
+import { IBLComponent } from "@/core/ecs/components/resources/iblComponent";
 
 /**
  * System that integrates loaded IBL resources into the world's global resources.
