@@ -51,6 +51,8 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
 
 The engine is in very active development. I try to document everything but sometimes docs might lag behind.
 
+- GPU skinning
+- Graphics settings (anti-aliasing, mipmapping, anisotropic filtering etc)
 - Audio system driven by ECS events and components
 - AI system
 - Networking system
