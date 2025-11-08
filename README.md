@@ -19,7 +19,7 @@ A modern 3D game engine built from scratch using TypeScript and the WebGPU API. 
   - Physics state snapshots (positions/rotations).
   - Live editor tweaks (lighting, fog, shadows).
 - **Event-Driven Communication:** Uses `postMessage` for one-off commands and events, such as initialization, resizing, and asset loading triggers.
-- **Entity-Component-System (ECS):** Data-oriented design (`src/core/ecs`) for flexibility. Game logic is in systems operating on entities and their components.
+- **Entity-Component-System (ECS):** Data-oriented design (`src/shared/ecs`) for flexibility. Game logic is in systems operating on entities and their components.
 
 ### Rendering & Graphics
 
