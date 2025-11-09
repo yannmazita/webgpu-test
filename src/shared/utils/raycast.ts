@@ -1,10 +1,10 @@
 // src/shared/utils/raycast.ts
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
 import { vec3, vec4, Vec3, mat4 } from "wgpu-matrix";
 import { World } from "@/shared/ecs/world";
 import { Entity } from "@/shared/ecs/entity";
-import { MeshRendererComponent } from "@/shared/ecs/components/render/meshRendererComponent";
+import { MeshRendererComponent } from "@/shared/ecs/components/clientOnly/meshRendererComponent";
 import { intersectRayWithAABB, transformAABB } from "@/shared/utils/bounds";
 import { AABB } from "@/shared/types/geometry";
 

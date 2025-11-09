@@ -1,9 +1,9 @@
 // src/shared/game/scene.ts
 import { World } from "@/shared/ecs/world";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
-import { MainCameraTagComponent } from "@/shared/ecs/components/tagComponents";
-import { MeshRendererComponent } from "@/shared/ecs/components/render/meshRendererComponent";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
+import { MainCameraTagComponent } from "@/shared/ecs/components/clientOnly/tagComponents";
+import { MeshRendererComponent } from "@/shared/ecs/components/clientOnly/meshRendererComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,
@@ -12,19 +12,19 @@ import { FogComponent } from "@/shared/ecs/components/resources/fogComponent";
 import {
   PhysicsBodyComponent,
   PhysicsColliderComponent,
-} from "@/shared/ecs/components/physicsComponents";
-import { PlayerControllerComponent } from "@/shared/ecs/components/playerControllerComponent";
-import { WeaponComponent } from "@/shared/ecs/components/weaponComponent";
-import { HealthComponent } from "@/shared/ecs/components/healthComponent";
+} from "@/shared/ecs/components/physics/physicsComponents";
+import { PlayerControllerComponent } from "@/shared/ecs/components/gameplay/playerControllerComponent";
+import { WeaponComponent } from "@/shared/ecs/components/gameplay/weaponComponent";
+import { HealthComponent } from "@/shared/ecs/components/gameplay/healthComponent";
 import { ResourceHandle, ResourceType } from "@/shared/resources/resourceHandle";
-import { CameraFollowComponent } from "@/shared/ecs/components/cameraFollowComponent";
+import { CameraFollowComponent } from "@/shared/ecs/components/gameplay/cameraFollowComponent";
 import { vec3 } from "wgpu-matrix";
-import { InteractableComponent } from "@/shared/ecs/components/interactableComponent";
-import { PickupComponent } from "@/shared/ecs/components/pickupComponent";
+import { InteractableComponent } from "@/shared/ecs/components/gameplay/interactableComponent";
+import { PickupComponent } from "@/shared/ecs/components/gameplay/pickupComponent";
 import { Entity } from "@/shared/ecs/entity";
-import { RespawnComponent } from "@/shared/ecs/components/respawnComponent";
-import { SpawnPointComponent } from "@/shared/ecs/components/spawnPointComponent";
-import { ResourceLoadingSystem } from "@/shared/ecs/systems/ressources/resourceLoadingSystem";
+import { RespawnComponent } from "@/shared/ecs/components/gameplay/respawnComponent";
+import { SpawnPointComponent } from "@/shared/ecs/components/gameplay/spawnPointComponent";
+import { ResourceLoadingSystem } from "@/shared/ecs/systems/clientOnly/ressources/resourceLoadingSystem";
 import { PBRMaterialSpec } from "@/shared/types/material";
 import { createMaterialSpecKey } from "@/shared/utils/material";
 import {

@@ -1,5 +1,5 @@
 // src/shared/ecs/utils/hierarchy.ts
-import { HierarchyComponent } from "../components/hierarchyComponent";
+import { HierarchyComponent } from "../components/gameplay/hierarchyComponent";
 import { Entity } from "../entity";
 import { World } from "../world";
 

@@ -1,6 +1,6 @@
 // src/client/rendering/uniformManager.ts
 import { Vec4, mat4 } from "wgpu-matrix";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 
 /**
  * Manages the creation, packing, and updating of CPU-side data for uniform and

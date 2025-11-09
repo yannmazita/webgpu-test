@@ -1,7 +1,7 @@
 // src/shared/ecs/systems/playerControllerSystem.ts
-import { PlayerControllerComponent } from "@/shared/ecs/components/playerControllerComponent";
-import { PhysicsBodyComponent } from "@/shared/ecs/components/physicsComponents";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
+import { PlayerControllerComponent } from "@/shared/ecs/components/gameplay/playerControllerComponent";
+import { PhysicsBodyComponent } from "@/shared/ecs/components/physics/physicsComponents";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
 import { World } from "@/shared/ecs/world";
 import { quat, vec3 } from "wgpu-matrix";
 import { PhysicsContext, tryEnqueueCommand } from "@/shared/state/physicsState";

@@ -1,9 +1,9 @@
 // src/client/runtime/loop.ts
 import { state } from "@/client/runtime/state";
 import { World } from "@/shared/ecs/world";
-import { PhysicsBodyComponent } from "@/shared/ecs/components/physicsComponents";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
-import { PlayerControllerComponent } from "@/shared/ecs/components/playerControllerComponent";
+import { PhysicsBodyComponent } from "@/shared/ecs/components/physics/physicsComponents";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
+import { PlayerControllerComponent } from "@/shared/ecs/components/gameplay/playerControllerComponent";
 import {
   STATES_GEN_OFFSET,
   STATES_WRITE_INDEX_OFFSET,

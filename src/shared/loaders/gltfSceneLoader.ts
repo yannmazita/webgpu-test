@@ -13,9 +13,9 @@ import {
   getAccessorData,
 } from "@/shared/loaders/gltfLoader";
 import { PBRMaterialOptions } from "@/client/types/gpu";
-import { MeshRendererComponent } from "@/shared/ecs/components/render/meshRendererComponent";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
-import { AnimationComponent } from "@/shared/ecs/components/animationComponent";
+import { MeshRendererComponent } from "@/shared/ecs/components/clientOnly/meshRendererComponent";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
+import { AnimationComponent } from "@/shared/ecs/components/gameplay/animationComponent";
 import { setParent } from "@/shared/ecs/utils/hierarchy";
 import { mat3, mat4, quat, vec3 } from "wgpu-matrix";
 import { createMaterialSpecKey } from "@/shared/utils/material";

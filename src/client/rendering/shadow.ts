@@ -2,7 +2,7 @@
 import shadowVsUrl from "@/client/shaders/shadow.wgsl?url";
 import { ShaderPreprocessor } from "@/client/shaders/preprocessor";
 import { Mesh, Renderable } from "@/client/types/gpu";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 import {
   SceneSunComponent,
   ShadowSettingsComponent,

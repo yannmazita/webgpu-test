@@ -1,9 +1,9 @@
 // src/shared/game/prefabs.ts
 import { World } from "@/shared/ecs/world";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
 import { Entity } from "@/shared/ecs/entity";
 import { createPlayerPrefab } from "@/shared/game/scene";
-import { IEntityFactory } from "@/shared/ecs/systems/respawnSystem";
+import { IEntityFactory } from "@/shared/ecs/systems/serverOnly/respawnSystem";
 
 /**
  * A function that creates a specific type of entity (a "prefab").

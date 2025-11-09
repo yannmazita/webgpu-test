@@ -3,7 +3,7 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/shared/ecs/components/resources/sunComponent";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 import { ClusterBuilder } from "@/client/rendering/clusterBuilder";
 import { InstanceAllocations } from "@/client/rendering/instanceBufferManager";
 import { ShadowSubsystem } from "@/client/rendering/shadow";

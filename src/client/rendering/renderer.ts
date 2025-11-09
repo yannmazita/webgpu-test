@@ -2,7 +2,7 @@
 import { Renderable } from "@/client/types/gpu";
 import { Light } from "@/shared/types/geometry";
 import { SceneRenderData, RenderContext } from "@/client/types/rendering";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 import { UniformManager } from "@/client/rendering/uniformManager";
 import { Profiler } from "@/shared/utils/profiler";
 import { testAABBFrustum, transformAABB } from "@/shared/utils/bounds";

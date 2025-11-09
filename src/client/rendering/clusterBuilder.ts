@@ -1,7 +1,7 @@
 // src/client/rendering/clusterBuilder.ts
 import clusterUrl from "@/client/shaders/cluster.wgsl?url";
 import { ShaderPreprocessor } from "@/client/shaders/preprocessor";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 
 /**
  * Defines the configuration for the 3D cluster grid.

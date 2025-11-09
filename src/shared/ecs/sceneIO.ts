@@ -1,10 +1,10 @@
 // src/shared/ecs/sceneIO.ts
 import { World } from "./world";
 import { ResourceManager } from "@/core/resources/resourceManager";
-import { TransformComponent } from "./components/transformComponent";
-import { MeshRendererComponent } from "./components/meshRendererComponent";
-import { LightComponent } from "./components/lightComponent";
-import { HierarchyComponent } from "./components/hierarchyComponent";
+import { TransformComponent } from "./components/gameplay/transformComponent";
+import { MeshRendererComponent } from "./components/clientOnly/meshRendererComponent";
+import { LightComponent } from "./components/gameplay/lightComponent";
+import { HierarchyComponent } from "./components/gameplay/hierarchyComponent";
 import { setParent } from "./utils/hierarchy";
 import { quat } from "wgpu-matrix";
 import { PBRMaterialOptions } from "@/client/types/gpu";

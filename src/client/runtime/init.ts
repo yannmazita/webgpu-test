@@ -3,23 +3,23 @@ import { state } from "@/client/runtime/state";
 import { Renderer } from "@/client/rendering/renderer";
 import { World } from "@/shared/ecs/world";
 import { SceneRenderData } from "@/client/types/rendering";
-import { CameraControllerSystem } from "@/shared/ecs/systems/cameraControllerSystem";
+import { CameraControllerSystem } from "@/shared/ecs/systems/clientOnly/cameraControllerSystem";
 import { PlayerControllerSystem } from "@/shared/ecs/systems/playerControllerSystem";
-import { WeaponSystem } from "@/shared/ecs/systems/weaponSystem";
-import { DamageSystem } from "@/shared/ecs/systems/damageSystem";
-import { CollisionEventSystem } from "@/shared/ecs/systems/collisionEventSystem";
-import { DeathSystem } from "@/shared/ecs/systems/deathSystem";
-import { InteractionSystem } from "@/shared/ecs/systems/interactionSystem";
-import { PickupSystem } from "@/shared/ecs/systems/pickupSystem";
-import { InventorySystem } from "@/shared/ecs/systems/inventorySystem";
-import { RespawnSystem } from "@/shared/ecs/systems/respawnSystem";
-import { ProjectileSystem } from "@/shared/ecs/systems/projectileSystem";
-import { PhysicsCommandSystem } from "@/shared/ecs/systems/physicsCommandSystem";
-import { ResourceLoadingSystem } from "@/shared/ecs/systems/ressources/resourceLoadingSystem";
+import { WeaponSystem } from "@/shared/ecs/systems/shared/weaponSystem";
+import { DamageSystem } from "@/shared/ecs/systems/shared/damageSystem";
+import { CollisionEventSystem } from "@/shared/ecs/systems/shared/collisionEventSystem";
+import { DeathSystem } from "@/shared/ecs/systems/shared/deathSystem";
+import { InteractionSystem } from "@/shared/ecs/systems/shared/interactionSystem";
+import { PickupSystem } from "@/shared/ecs/systems/shared/pickupSystem";
+import { InventorySystem } from "@/shared/ecs/systems/shared/inventorySystem";
+import { RespawnSystem } from "@/shared/ecs/systems/serverOnly/respawnSystem";
+import { ProjectileSystem } from "@/shared/ecs/systems/shared/projectileSystem";
+import { PhysicsCommandSystem } from "@/shared/ecs/systems/serverOnly/physicsCommandSystem";
+import { ResourceLoadingSystem } from "@/shared/ecs/systems/clientOnly/ressources/resourceLoadingSystem";
 import { ResourceCacheComponent } from "@/shared/ecs/components/resources/resourceCacheComponent";
-import { UIRenderSystem } from "@/shared/ecs/systems/ui/uiRenderSystem";
+import { UIRenderSystem } from "@/shared/ecs/systems/clientOnly/ui/uiRenderSystem";
 import { ShaderPreprocessor } from "@/client/shaders/preprocessor";
-import { IBLIntegrationSystem } from "@/shared/ecs/systems/ressources/iblIntegrationSystem";
+import { IBLIntegrationSystem } from "@/shared/ecs/systems/clientOnly/ressources/iblIntegrationSystem";
 import { createInputContext } from "@/client/input/manager";
 import {
   createEngineStateContext as createEngineStateCtx,
@@ -37,8 +37,8 @@ import { PhysicsInitMsg, PhysicsMessage } from "@/shared/types/physics";
 import { createScene } from "@/shared/game/scene";
 import { PrefabFactory, registerPrefabs } from "@/shared/game/prefabs";
 import { EventManager } from "@/shared/ecs/events/eventManager";
-import { RawInputSystem } from "@/shared/ecs/systems/input/rawInputSystem";
-import { InputToActionSystem } from "@/shared/ecs/systems/input/inputToActionSystem";
+import { RawInputSystem } from "@/shared/ecs/systems/clientOnly/input/rawInputSystem";
+import { InputToActionSystem } from "@/shared/ecs/systems/clientOnly/input/inputToActionSystem";
 import {
   ActionMap,
   ActionMapConfig,

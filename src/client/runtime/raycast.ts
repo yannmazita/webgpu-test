@@ -1,6 +1,6 @@
 // src/client/runtime/raycast.ts
 import { state } from "@/client/runtime/state";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 import { vec3 } from "wgpu-matrix";
 import { getPickRay, raycast } from "@/shared/utils/raycast";
 import { RaycastResponseMsg, MSG_RAYCAST_RESPONSE } from "@/shared/types/worker";

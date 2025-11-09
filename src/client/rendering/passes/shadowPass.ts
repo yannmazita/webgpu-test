@@ -5,7 +5,7 @@ import {
   SceneSunComponent,
   ShadowSettingsComponent,
 } from "@/shared/ecs/components/resources/sunComponent";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 import { RenderContext, RenderPass } from "@/client/types/rendering";
 
 /**

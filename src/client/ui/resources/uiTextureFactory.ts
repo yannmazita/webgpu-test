@@ -1,6 +1,6 @@
 // src/client/ui/resources/uiTextureFactory.ts
 import { UITexture } from "@/shared/types/ui";
-import { UITextComponent } from "@/shared/ecs/components/ui/uiRenderComponent";
+import { UITextComponent } from "@/shared/ecs/components/clientOnly/ui/uiRenderComponent";
 
 /**
  * A stateless factory for creating UI textures.

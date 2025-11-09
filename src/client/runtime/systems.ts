@@ -2,7 +2,7 @@
 import { state } from "@/client/runtime/state";
 import { IBLResourceComponent } from "@/shared/ecs/components/resources/resourceComponents";
 import { ResourceHandle, ResourceType } from "@/shared/resources/resourceHandle";
-import { CameraComponent } from "@/shared/ecs/components/cameraComponent";
+import { CameraComponent } from "@/shared/ecs/components/clientOnly/cameraComponent";
 
 /**
  * Handles canvas resize events.

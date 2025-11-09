@@ -1,16 +1,16 @@
 // src/client/runtime/loop.ts
 import { state } from "@/client/runtime/state";
-import { cameraSystem } from "@/shared/ecs/systems/cameraSystem";
-import { transformSystem } from "@/shared/ecs/systems/transformSystem";
-import { renderSystem } from "@/shared/ecs/systems/render/renderSystem";
-import { animationSystem } from "@/shared/ecs/systems/animationSystem";
-import { lifetimeSystem } from "@/shared/ecs/systems/lifetimeSystem";
-import { cameraFollowSystem } from "@/shared/ecs/systems/cameraFollowSystem";
-import { playerInputSystem } from "@/shared/ecs/systems/playerInputSystem";
+import { cameraSystem } from "@/shared/ecs/systems/clientOnly/cameraSystem";
+import { transformSystem } from "@/shared/ecs/systems/shared/transformSystem";
+import { renderSystem } from "@/shared/ecs/systems/clientOnly/render/renderSystem";
+import { animationSystem } from "@/shared/ecs/systems/clientOnly/animationSystem";
+import { lifetimeSystem } from "@/shared/ecs/systems/shared/lifetimeSystem";
+import { cameraFollowSystem } from "@/shared/ecs/systems/clientOnly/cameraFollowSystem";
+import { playerInputSystem } from "@/shared/ecs/systems/shared/playerInputSystem";
 import { syncEngineState } from "@/shared/state/engineState";
-import { TransformComponent } from "@/shared/ecs/components/transformComponent";
-import { uiLayoutSystem } from "@/shared/ecs/systems/ui/uiLayoutSystem";
-import { uiButtonStyleSystem } from "@/shared/ecs/systems/ui/uiButtonStyleSystem";
+import { TransformComponent } from "@/shared/ecs/components/gameplay/transformComponent";
+import { uiLayoutSystem } from "@/shared/ecs/systems/clientOnly/ui/uiLayoutSystem";
+import { uiButtonStyleSystem } from "@/shared/ecs/systems/clientOnly/ui/uiButtonStyleSystem";
 import { ActionState } from "@/shared/ecs/components/resources/inputResources";
 
 /**
