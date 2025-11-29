@@ -1,6 +1,7 @@
 // src/client/runtime/init.ts
 import { state } from "@/client/runtime/state";
 import { Renderer } from "@/client/rendering/renderer";
+import { ClientInputSystem } from "@/client/input/clientInputSystem";
 import { World } from "@/shared/ecs/world";
 import { SceneRenderData } from "@/client/types/rendering";
 import { CameraControllerSystem } from "@/shared/ecs/systems/clientOnly/cameraControllerSystem";
@@ -180,6 +181,13 @@ export async function initWorker(
   registerPrefabs(state.prefabFactory);
 
   // --- Step 4: Create All Game Systems ---
+  // placeholder for the real network implementation
+  const mockNetworkChannel = {
+    send: (message: any) => {
+      // console.log("Sending to server:", message);
+    },
+  };
+  state.clientInputSystem = new ClientInputSystem(mockNetworkChannel);
   state.rawInputSystem = new RawInputSystem();
   state.inputToActionSystem = new InputToActionSystem();
 

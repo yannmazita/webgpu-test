@@ -2,6 +2,7 @@
 import { Renderer } from "@/client/rendering/renderer";
 import { World } from "@/shared/ecs/world";
 import { SceneRenderData } from "@/client/types/rendering";
+import { ClientInputSystem } from "@/client/input/clientInputSystem";
 import { CameraControllerSystem } from "@/shared/ecs/systems/clientOnly/cameraControllerSystem";
 import { PlayerControllerSystem } from "@/shared/ecs/systems/playerControllerSystem";
 import { WeaponSystem } from "@/shared/ecs/systems/shared/weaponSystem";
@@ -43,7 +44,8 @@ export interface WorkerState {
   // Camera and player
   cameraEntity: number;
   cameraControllerSystem: CameraControllerSystem | null;
-  playerControllerSystem: PlayerControllerSystem | null;
+  playerControllerSystem: PlayerControllerSystem | null; // will be deleted
+  clientInputSystem: ClientInputSystem | null;
   isFreeCameraActive: boolean;
 
   // Input
@@ -97,7 +99,8 @@ export const state: WorkerState = {
   eventManager: null,
   cameraEntity: -1,
   cameraControllerSystem: null,
-  playerControllerSystem: null,
+  playerControllerSystem: null, // will be deleted
+  clientInputSystem: null, 
   isFreeCameraActive: false,
   inputContext: null,
   rawInputSystem: null,

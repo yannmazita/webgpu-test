@@ -107,6 +107,7 @@ export function frame(now: number): void {
   if (state.isFreeCameraActive) {
     state.cameraControllerSystem.update(dt);
   } else {
+    //state.clientInputSystem?.update(state.world, dt);
     state.playerControllerSystem.update(dt);
   }
   playerInputSystem(state.world, state.eventManager);
